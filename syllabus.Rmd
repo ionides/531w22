@@ -1,5 +1,5 @@
 ---
-title: "Syllabus for STATS/DATASCI 531 (Winter 2022) <br><it>Analysis of Time Series</it>"
+title: "Syllabus for STATS/DATASCI 531 (Winter 2022) <br><it>Modeling and Analysis of Time Series Data</it>"
 author: "Instructor: Edward L. Ionides"
 output:
   html_document:
@@ -21,10 +21,12 @@ csl: ecology.csl
     + E-mail: ionides@umich.edu 
     + Web: dept.stat.lsa.umich.edu/~ionides
 
-* GSI: tbd
-    + Computing support: If you have a coding problem you cannot debug, it is often helpful to develop a simple reproducible example that others can run to you help. You can share this, and the error message you obtain, with your group and/or on Piazza, or by email if necessary.
+* GSI: Gang Qiao
+    + email: qiaogang@umich.edu
+    
+* Computing support. If you have a coding problem you cannot debug, it is often helpful to develop a simple reproducible example that others can run to you help. You can share this, and the error message you obtain, with your group and/or on Piazza, or by email if necessary.
 
-* Office hours: Most questions about homework, lectures and other course activities should be addressed during group meetings or on Piazza. Please email the instructor or GSI if an issue arises that requires an individual meeting.
+* Office hours. Most questions about homework, lectures and other course activities should be addressed during group meetings or on Piazza. Please email the instructor or GSI if an issue arises that requires an individual meeting.
 
 * Course notes and lectures are posted at https://ionides.github.io/531w22/ with source files available at https://github.com/ionides/531w22
 
@@ -33,7 +35,7 @@ A pdf is available using the UM Library's Springer subscription.
 An updated pdf is available free from [David Stoffer's website](http://www.stat.pitt.edu/stoffer/tsa4/tsa4.pdf)
 
 * Pre-requisites:
-    + Theoretical statistics. STATS 510 or STATS 426 or equivalent. For review, see "Mathematical Statistics and Data Analysis" by J. A. Rice. 
+    + Theoretical and applied statistics. STATS 500 and concurrent enrollment in STATS 511, or equivalent. STATS 413 and STATS 426 is sufficient in conjunction with a strong math and computing background. For review, see "Mathematical Statistics and Data Analysis" by J. A. Rice. 
     + Linear algebra. A certain amount of basic linear algebra will be required. For review, see 
 [www.sosmath.com/matrix/matrix.html](http://www.sosmath.com/matrix/matrix.html).
     + R programming. There is no formal R prerequisite, but we will be working with R extensively and so you should allow extra time for this course if you are new to R programming. Come to chat and we can make a plan for learning R in the context of your computational background.
@@ -47,7 +49,7 @@ An updated pdf is available free from [David Stoffer's website](http://www.stat.
 
 1. Introduction to time series analysis.
 
-2. Time series models, trend and autocovariance.
+2. Time series models: Estimating trend and autocovariance.
 
 3. Stationarity, white noise, and some basic time series models.
 
@@ -61,17 +63,21 @@ An updated pdf is available free from [David Stoffer's website](http://www.stat.
 
 8. Smoothing in the time and frequency domains.
 
-9. Introduction to partially observed Markov process models.
+9. Case study: An association between unemployment and mortality?
 
-10. Statistical methodology for nonlinear partially observed Markov process (POMP) models.
+10. Introduction to partially observed Markov process (POMP) models.
 
-11. Dynamic models and their simulation by Euler’s method.
+11. Introduction to simulation-based inference for epidemiological dynamics via the pomp R package.
 
-12. Practical likelihood-based inference for POMP models.
+12. Simulation of stochastic dynamic models.
 
-13. POMP models with covariates, and a case study of polio transmission.
+13. Likelihood for POMP models: Theory and practice.
 
-14.  A case study using POMP modeling to study financial volatility.
+14. Likelihood maximization for POMP models.
+
+15. A case study of polio including covariates, seasonality & over-dispersion.
+
+16. A case study of financial volatility and a POMP model with observations driving latent dynamics.
 
 --------------
 

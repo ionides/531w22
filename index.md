@@ -1,5 +1,5 @@
 ---
-title: "STATS/DATASCI 531 (Winter 2022) <br>'Analysis of Time Series'"
+title: "STATS/DATASCI 531 (Winter 2022) <br>'Modeling and Analysis of Time Series Data'"
 author: "Instructor: Edward L. Ionides"
 output:
   html_document:
@@ -27,7 +27,7 @@ A course outline, course information and grading policies are described in the [
 
 1. [Introduction](01/index.html)
 
-2. [Time series models, trend and autocovariance](02/index.html)
+2. [Time series models: Estimating trend and autocovariance](02/index.html)
 
 3. [Stationarity, white noise, and some basic time series models](03/index.html)
 
