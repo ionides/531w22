@@ -12,7 +12,7 @@ csl: ecology.csl
 
 Structure of the lectures and project groups is to be confirmed, depending on the Omicron situation. Course components will include:
 
-* classes, in person according to current UM guidelines
+* classes Tu/Th, 10-11:30 a.m. in 296 Weiser, in person according to current UM guidelines
 * homework
 * [Piazza discussion forum](https://piazza.com/umich/winter2022/statsdatasci531)
 * group midterm project, with individual peer review
