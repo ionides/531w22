@@ -17,7 +17,7 @@ Joonha Park (2018),
 Sunrit Chakraborty and Saptarshi Roy (2020), 
 Baekjin Kim (2021).
 
-* Parts of these materials have been used for [Model-based Inference in Ecology and Epidemiology](https://kingaa.github.io/short-course/), co-instructed by Aaron King and Edward Ionides, [licensed under the Creative Commons Attribution-NonCommercial license](http://creativecommons.org/licenses/by-nc/4.0/).
+* Parts of these materials have been used for [Simulation-Based Inference for Epidemiological Dynamics](https://kingaa.github.io/sbied/), a short course co-instructed by Aaron King and Edward Ionides, [licensed under the Creative Commons Attribution-NonCommercial license](http://creativecommons.org/licenses/by-nc/4.0/).
 Please share and remix non-commercially, mentioning their origin.  
 ![CC-BY_NC](cc-by-nc.png)
 

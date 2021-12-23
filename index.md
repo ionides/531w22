@@ -17,7 +17,7 @@ The second half of the course will focus on state space model techniques for fit
 We will progress from fitting linear, Gaussian dynamic models to fitting nonlinear models for which Monte Carlo methods are required.
 Examples will be drawn from ecology, economics, epidemiology, finance and elsewhere.
 
-A course outline, course information and grading policies are described in the [syllabus](syllabus.html).
+The course outline, course information and grading policies are described in the [syllabus](syllabus.html).
 
 --------------
 
@@ -156,3 +156,9 @@ If building on old source code, note that there are some differences between ver
 
 
 ---------
+
+## Acknowledgements and License
+
+This course and the code involved are made available with an [MIT license](LICENSE).
+Some components follow a Creative Commons Attribution non-commercial license.
+A longer list of acknowledgments is [available](acknowledge.html).
