@@ -10,39 +10,44 @@ csl: ecology.csl
 
 ## Course information
 
-* Structure of the lectures and group meetings is to be confirmed, depending on the Omicron situation and feedback from current and former students.
-    + homework
-    + [Piazza discussion forum](https://piazza.com/umich/winter2022/statsdatasci531)
-    + group midterm project, with individual peer review
-    + group final project, with individual peer review
-    
+Structure of the lectures and project groups is to be confirmed, depending on the Omicron situation. Course components will include:
 
-* Contact information:
-    + E-mail: ionides@umich.edu 
-    + Web: dept.stat.lsa.umich.edu/~ionides
+* classes, in person according to current UM guidelines
+* homework
+* [Piazza discussion forum](https://piazza.com/umich/winter2022/statsdatasci531)
+* group midterm project, with individual peer review
+* group final project, with individual peer review
 
-* GSI: Gang Qiao
-    + email: qiaogang@umich.edu
-    
-* Computing support. If you have a coding problem you cannot debug, it is often helpful to develop a simple reproducible example that others can run to you help. You can share this, and the error message you obtain, with your group and/or on Piazza, or by email if necessary.
 
-* Office hours. Most questions about homework, lectures and other course activities should be addressed during group meetings or on Piazza. Please email the instructor or GSI if an issue arises that requires an individual meeting.
+Instructor contact information:
 
-* Course notes and lectures are posted at https://ionides.github.io/531w22/ with source files available at https://github.com/ionides/531w22
+* email: ionides@umich.edu 
+* web: dept.stat.lsa.umich.edu/~ionides
+* office hours: Tuesday/Thursday 11:30-12:30
 
-* Supplementary textbook: R. Shumway and D. Stoffer "Time Series Analysis and its Applications" 4th edition. 
+GSI: Gang Qiao
+
+* email: qiaogang@umich.edu
+*  office hours: TBD
+
+Computing support. If you have a coding problem you cannot debug, it is often helpful to develop a [minimal reproducible example](https://stackoverflow.com/help/minimal-reproducible-example) that others can run to help you. You can share this, and the error message you obtain, with your group and/or on Piazza, or by email if necessary.
+
+Course notes and lectures are posted at https://ionides.github.io/531w22/ with source files available at https://github.com/ionides/531w22
+
+Supplementary textbook: R. Shumway and D. Stoffer "Time Series Analysis and its Applications" 4th edition. 
 A pdf is available using the UM Library's Springer subscription.
 An updated pdf is available free from [David Stoffer's website](http://www.stat.pitt.edu/stoffer/tsa4/tsa4.pdf)
 
-* Pre-requisites:
-    + Theoretical and applied statistics. STATS 500 and concurrent enrollment in STATS 511, or equivalent. STATS 413 and STATS 426 is sufficient in conjunction with a strong math and computing background. For review, see "Mathematical Statistics and Data Analysis" by J. A. Rice. 
-    + Linear algebra. A certain amount of basic linear algebra will be required. For review, see 
+Pre-requisites:
+
+* Theoretical and applied statistics. STATS 500 and concurrent enrollment in STATS 511, or equivalent. STATS 413 and STATS 426 is sufficient in conjunction with a strong math and computing background. For review, see "Mathematical Statistics and Data Analysis" by J. A. Rice.
+
+* Linear algebra. A certain amount of basic linear algebra will be required. For review, see 
 [www.sosmath.com/matrix/matrix.html](http://www.sosmath.com/matrix/matrix.html).
-    + R programming. There is no formal R prerequisite, but we will be working with R extensively and so you should allow extra time for this course if you are new to R programming. Come to chat and we can make a plan for learning R in the context of your computational background.
+
+* R programming. There is no formal R prerequisite, but we will be working with R extensively and so you should allow extra time for this course if you are new to R programming. Come to chat and we can make a plan for learning R in the context of your computational background.
 
 -----------
-
-
 
 ## Course outline
 
@@ -83,24 +88,26 @@ An updated pdf is available free from [David Stoffer's website](http://www.stat.
 
 ## Groups
 
-* The [2021](https://ionides.github.io/531w22/) online version of this course built in a new group structure. Watch this space for how it will be adapted for 2022. Expect something like the following.
+* The [2021](https://ionides.github.io/531w22/) online version of this course built in a new group structure. Watch the course website and Canvas notifications for how it will be adapted for 2022. Expect something like the following.
 
-* Groups for the first half-semester will be randomly assigned, and will work together up to and including the midterm project.
+* Groups for the midterm project will be randomly assigned, around the third weak of classes.
 
-* Groups will be re-randomized after the midterm project. The new groups will work together up to and including the final project.
+* Groups for the final project will be re-randomized after the midterm project. 
 
+<!--
 * Groups are expected to meet up for at least 25 minutes a week, to discuss class notes or homework or projects, and for another 25 minutes a week together with an instructor. Active participation in your group will carry course credit.
+-->
 
 -------------
 
 ##  Grading
 
 * Weekly homeworks (25\%).
-* A group midterm project (20\%, due 11:59pm on TBD). In special situations, you can request to write an individual project for the midterm and/or the final project. This may be appropriate if you have a particular dataset or scientific question that has motivated your interest in learning time series analysis. You can also ask your group if it is willing to join collaboratively on your project to make it a group project.
-* Two individual anonymous peer review evaluations of other group midterm projects (5\%, due 11:59pm on TBD). Each should be about 500 words, and should identify the main strengths and weaknesses of the project (from both technical and conceptual perspectives) as well as identifying points with room for improvement.
-* A group final project (30%, due 11:59pm on TBD).
-* Two individual anonymous peer review evaluations of other group final projects (10\%, due 11:59pm on TBD). Each should be about 1000 words, and should identify the main strengths and weaknesses of the project (from both technical and conceptual perspectives) as well as identifying points with room for improvement.
-* Participation (10%). To build community for an online course, attendance and contributions in group meetings are valuable. Similarly, both raising and answering questions on a discussion forum is helpful.
+* A group midterm project (20\%, due 11:59pm on Monday 2/21). In special situations, you can request to write an individual project for the midterm and/or the final project. This may be appropriate if you have a particular dataset or scientific question that has motivated your interest in learning time series analysis. You can also ask your group if it is willing to join collaboratively on your project to make it a group project.
+* Two individual anonymous peer review evaluations of other group midterm projects (5\%, due 11:59pm on Monday 3/7). Each should be about 500 words, and should identify the main strengths and weaknesses of the project (from both technical and conceptual perspectives) as well as identifying points with room for improvement. The reviews should include discussion relating to reproducibility of the report's numerical results.
+* A group final project (30%, due 11:59pm on Tuesday 4/19).
+* Two individual anonymous peer review evaluations of other group final projects (10\%, due 11:59pm on Wednesday 4/27). Each should be about 1000 words, and should identify the main strengths and weaknesses of the project (from both technical and conceptual perspectives) as well as identifying points with room for improvement. The reviews should include discussion relating to reproducibility of the report's numerical results.
+* Participation (10%). To build a learning community, attendance and contributions are valuable. Similarly, both raising and answering questions on a discussion forum is helpful. The instructor and GSI will keep track of student participation.
 * Course letter grades are anticipated to be mostly in the A, A-, B+ range customary for courses at this level. In the past, this has corresponded to overall scores of approximately 95% for A+, 90% for A, 85% for A-, 80% for B+. However, the exact cutoff used will be determined in the context of the course for this specific semester.
 
 ### Credit for attribution of sources
@@ -134,3 +141,8 @@ University of Michigan is committed to advancing the mental health and wellbeing
 
 ----------
 
+## Acknowledgements
+
+Many people have contributed to the development of this course, including all former students and instructors. See the [acknowlegements page](acknowledge.html) for further details.
+
+-----------
