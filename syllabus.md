@@ -34,9 +34,8 @@ Computing support. If you have a coding problem you cannot debug, it is often he
 
 Course notes and lectures are posted at https://ionides.github.io/531w22/ with source files available at https://github.com/ionides/531w22
 
-Supplementary textbook: R. Shumway and D. Stoffer "Time Series Analysis and its Applications" 4th edition. 
-A pdf is available using the UM Library's Springer subscription.
-An updated pdf is available free from [David Stoffer's website](http://www.stat.pitt.edu/stoffer/tsa4/tsa4.pdf)
+Supplementary textbook: R. Shumway and D. Stoffer _Time Series Analysis and its Applications_, 4th edition (2017). 
+A [pdf](https://link.springer.com/book/10.1007%2F978-3-319-52452-8) is available using the UM Library's Springer subscription.
 
 Recommended pre-requisites:
 
@@ -114,7 +113,7 @@ Statistical computing background:
 
 ### Grading credit for attribution of sources
 
-Careful attribution of sources is fundamental to good scholarship. Also, **complete attribution facilitates meaningful grading given the reality of abundant online materials and online collaboration**. The grader will look for an honest effort applied to the homework, with contributions that go beyond the sources, following the <a href="rubric_homework.html">posted rubric</a>.
+Careful attribution of sources is fundamental to good scholarship. Also, **complete attribution facilitates meaningful grading given the reality of abundant online materials and online collaboration**. The grader will look for demonstrated effort in submitted homework, with contributions that go beyond the sources, following the <a href="rubric_homework.html">posted rubric</a>.
 
 + Each homework will have a question asking about sources. You will be asked to explain which parts of your responses above made use of a source, meaning anything or anyone you consulted (including classmates or office hours or any website you visited) to help you write or check your answers. **All sources are permitted. Every source must be documented. Full credit requires being explicit about which parts you did without any collaboration or other source, as well as being explicit about which parts used or did not use each listed source.**
 
