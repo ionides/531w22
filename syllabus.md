@@ -38,14 +38,16 @@ Supplementary textbook: R. Shumway and D. Stoffer "Time Series Analysis and its 
 A pdf is available using the UM Library's Springer subscription.
 An updated pdf is available free from [David Stoffer's website](http://www.stat.pitt.edu/stoffer/tsa4/tsa4.pdf)
 
-Pre-requisites:
+Recommended pre-requisites:
 
-* Theoretical and applied statistics. STATS 500 and concurrent enrollment in STATS 511, or equivalent. STATS 413 and STATS 426 is sufficient in conjunction with a strong math and computing background. For review, see "Mathematical Statistics and Data Analysis" by J. A. Rice.
+* Theoretical and applied statistics. STATS 500 and prior or concurrent enrollment in STATS 511, or equivalent. STATS 413 and STATS 426 is sufficient in conjunction with a strong math and computing background. For review, see "Mathematical Statistics and Data Analysis" by J. A. Rice.
 
 * Linear algebra. A certain amount of basic linear algebra will be required. For review, see 
 [www.sosmath.com/matrix/matrix.html](http://www.sosmath.com/matrix/matrix.html).
 
-* R programming. There is no formal R prerequisite, but we will be working with R extensively and so you should allow extra time for this course if you are new to R programming. Come to chat and we can make a plan for learning R in the context of your computational background.
+Statistical computing background:
+
+* We carry out data analysis using R. There is no formal R prerequisite, but we will be working with R extensively and so you should allow extra time for this course if you are new to R programming. Come to chat and we can make a plan for learning R in the context of your computational background.
 
 -----------
 
@@ -104,17 +106,17 @@ Pre-requisites:
 
 * Weekly homeworks (25\%).
 * A group midterm project (20\%, due 11:59pm on Monday 2/21). In special situations, you can request to write an individual project for the midterm and/or the final project. This may be appropriate if you have a particular dataset or scientific question that has motivated your interest in learning time series analysis. You can also ask your group if it is willing to join collaboratively on your project to make it a group project.
-* Two individual anonymous peer review evaluations of other group midterm projects (5\%, due 11:59pm on Monday 3/7). Each should be about 500 words, and should identify the main strengths and weaknesses of the project (from both technical and conceptual perspectives) as well as identifying points with room for improvement. The reviews should include discussion relating to reproducibility of the report's numerical results.
+* Two individual anonymous peer review evaluations of other group midterm projects (5\%, due 11:59pm on Monday 3/7). Each should be about 500 words, and should identify the main strengths and weaknesses of the project (from both technical and conceptual perspectives) as well as identifying points with room for improvement. The reviews should include discussion relating to reproducibility of the project's numerical results.
 * A group final project (30%, due 11:59pm on Tuesday 4/19).
-* Two individual anonymous peer review evaluations of other group final projects (10\%, due 11:59pm on Wednesday 4/27). Each should be about 1000 words, and should identify the main strengths and weaknesses of the project (from both technical and conceptual perspectives) as well as identifying points with room for improvement. The reviews should include discussion relating to reproducibility of the report's numerical results.
+* Two individual anonymous peer review evaluations of other group final projects (10\%, due 11:59pm on Wednesday 4/27). Each should be about 1000 words, and should identify the main strengths and weaknesses of the project (from both technical and conceptual perspectives) as well as identifying points with room for improvement. The reviews should include discussion relating to reproducibility of the project's numerical results.
 * Participation (10%). To build a learning community, attendance and contributions are valuable. Similarly, both raising and answering questions on a discussion forum is helpful. The instructor and GSI will keep track of student participation.
 * Course letter grades are anticipated to be mostly in the A, A-, B+ range customary for courses at this level. In the past, this has corresponded to overall scores of approximately 95% for A+, 90% for A, 85% for A-, 80% for B+. However, the exact cutoff used will be determined in the context of the course for this specific semester.
 
-### Credit for attribution of sources
+### Grading credit for attribution of sources
 
 Careful attribution of sources is fundamental to good scholarship. Also, **complete attribution facilitates meaningful grading given the reality of abundant online materials and online collaboration**. The grader will look for an honest effort applied to the homework, with contributions that go beyond the sources, following the <a href="rubric_homework.html">posted rubric</a>.
 
-+ Each homework will have a question asking about sources. You will be asked to explain which parts of your responses above made use of a source, meaning anything or anyone you consulted (including classmates or office hours or any website you visited) to help you write or check your answers. **All sources are permitted. Every source must be documented**.
++ Each homework will have a question asking about sources. You will be asked to explain which parts of your responses above made use of a source, meaning anything or anyone you consulted (including classmates or office hours or any website you visited) to help you write or check your answers. **All sources are permitted. Every source must be documented. Full credit requires being explicit about which parts you did without any collaboration or other source, as well as being explicit about which parts used or did not use each listed source.**
 
 + Reference any web page you look at in connection with a homework or project, and to acknowledge any person you talk to in connection with a homework or project, including people in your own group or discussions in office hours.
 
@@ -124,9 +126,9 @@ Careful attribution of sources is fundamental to good scholarship. Also, **compl
 
 + Directly copied text must be in quotation marks. Directly copied equations must be explicitly referenced to the source. Adapted or paraphrased material take from a source should be referenced.
 
-+ It is expected that you will consult the notes. However, putting explicit references (e.g., 531 class notes, slide 10 of chapter 3) may still be useful to document your sources.
++ It is expected that you will consult the notes and the course Piazza site. However, putting explicit references (e.g., 531 class notes, slide 10 of chapter 3) is still appropriate as documentation of your sources.
 
-+ The reader should not have to carry out detective work to figure out correctly which parts of the homework are attributable to a source. **Full credit requires being explicit about which parts you did without any collaboration or other source, as well as being explicit about which parts did use each source.** Specific references to a page of the notes, or material on a previous course web page, or a page of the textbook, or a Stack Overflow page.
++ The reader should not have to carry out detective work to figure out correctly which parts of the homework are attributable to a source.  Specific references to a page of the notes, or material on a previous course web page, or a page of the textbook, or a Stack Overflow page, can help with this. If the reader cannot readily tell what part of the homework is attributable to each source, that is a defect in the scholarship.
 
 + The midterm and final project will also have a substantial grading component allocated to clear and scholarly assignment of credit to sources.
 
