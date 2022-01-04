@@ -23,7 +23,7 @@ Instructor contact information:
 
 * email: ionides@umich.edu 
 * web: dept.stat.lsa.umich.edu/~ionides
-* office hours: Tuesday/Thursday 11:30-12:30
+* office hours: Tuesday/Thursday 11:30-12:30 in 453 West Hall. 
 
 GSI: Gang Qiao
 
