@@ -23,9 +23,9 @@ The course outline, course information and grading policies are described in the
 
 ## Class notes and lectures
 
-<!--
-
 1. [Introduction](01/index.html)
+
+<!--
 
 2. [Time series models: Estimating trend and autocovariance](02/index.html)
 
@@ -67,8 +67,9 @@ There are further POMP case studies, in a similar style, on [Ebola modeling](htt
 
 Please read the [grading policy in the syllabus](syllabus.html) before submitting homework.
 
-<!--
 * [Homework 0](hw00/hw00.html). Setting up your computational environment. Nothing to submit.
+
+<!--
 
 * [Homework 1](hw01/hw01.html), due Mon Feb 1, 11:59pm.
 [Solution](hw01/sol01.html).
@@ -143,6 +144,8 @@ If building on old source code, note that there are some differences between ver
 
 
 ## Using the Great Lakes cluster
+
+* Great Lakes access will be set up after the midterm project and used for the second half of the course.
 
 * [Introductory notes](greatlakes/index.html) for using our class account on the greatlakes cluster. This is optional but may be helpful for your final project.
 
