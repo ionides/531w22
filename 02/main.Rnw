@@ -390,10 +390,9 @@ $$ \mu = Z\beta.$$
 \end{frame}
 
 \begin{frame}[fragile]
-We write $\data{y_{1:N}}$ as a column vector,
+We write ${y_{1:N}}$ as a column vector,
 \begin{eqnarray}
 y &=& (y_1,y_2,\dots,y_N)^\transpose.
-%\data{y} & =& (\data{y_1},\data{y_2},\dots,\data{y_N})^\transpose.
 \end{eqnarray}
 The ordinary least squares (OLS) estimator of $\beta$ is
 \begin{equation}
@@ -495,7 +494,7 @@ Standard linear model software, such as \code{lm} in \code{R}, provides confiden
 \frametitle{Variance/covariance for the white noise error model}
 \begin{itemize}
 \item The variance/covariance matrix of $\hat\beta_{OLS}(Y_{1:N})$ under this model \citep{faraway02} is
-$$\cov[\hat\beta_{OLS}(Y_{1:N})] = \sigma^2 \big( Z^\transpose Z\big)^{-1},$$
+$$\var{\hat\beta_{OLS}(Y_{1:N})} = \sigma^2 \big( Z^\transpose Z\big)^{-1},$$
 which is estimated using an estimate for $\sigma$ of
 $$\hat\sigma_{OLS}= \sqrt{\frac{1}{N-d} \big(\data{y}-Z\hat\beta_{OLS}\big)^\transpose \big(\data{y}-Z\hat\beta_{OLS}\big)},$$
 where $d$ is the number of covariates, i.e., the number of columns of $Z$.

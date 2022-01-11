@@ -488,7 +488,7 @@ This is an example of a \myemph{mechanistic model}, where scientific or engineer
 Likelihood-based inference for this partially observed stochastic dynamic system is possible, and enables addressing these questions \citep{breto14}.
 
 \begin{itemize}
-\item By the end of this course, you will be able to carry out data analysis developing complex models and fitting them to time series. See past final projects for \link{https://ionides.github.io/531w16/final_project/}{2016}, \link{https://ionides.github.io/531w18/final_project/}{2018} and \link{https://ionides.github.io/531w20/final_project/}{2020}.
+\item By the end of this course, you will be able to carry out data analysis developing complex models and fitting them to time series. See past final projects for \link{https://ionides.github.io/531w16/final_project/}{2016}, \link{https://ionides.github.io/531w18/final_project/}{2018}, \link{https://ionides.github.io/531w20/final_project/}{2020}, \link{https://ionides.github.io/531w21/final_project/}{2021}.
 \end{itemize}
 \end{frame}
 
