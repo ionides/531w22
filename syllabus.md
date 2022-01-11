@@ -46,7 +46,7 @@ Recommended pre-requisites:
 
 Statistical computing background:
 
-* We carry out data analysis using R. There is no formal R prerequisite, but we will be working with R extensively and so you should allow extra time for this course if you are new to R programming. Come to chat and we can make a plan for learning R in the context of your computational background.
+* We carry out data analysis using R. There is no formal R prerequisite, but we will be working with R extensively and so you should allow extra time for this course if you are new to R programming. If you are not familiar with [Introductory R](https://cran.r-project.org/doc/manuals/r-release/R-intro.pdf) then it is helpful to have some background in Python or a similar language to learn R fairly easily.
 
 -----------
 
@@ -88,8 +88,6 @@ Statistical computing background:
 --------------
 
 ## Groups
-
-* The [2021](https://ionides.github.io/531w22/) online version of this course built in a new group structure. Watch the course website and Canvas notifications for how it will be adapted for 2022. Expect something like the following.
 
 * Groups for the midterm project will be randomly assigned, around the third weak of classes.
 
