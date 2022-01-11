@@ -14,6 +14,7 @@ output: html_document
 | Recording: Chapter 2, Part 1  | [(17 mins)](https://youtu.be/lKQHUlBJafo) |
 | Recording: Chapter 2, Part 2  | [(14 mins)](https://youtu.be/RiBDMz17ldM) |
 | Recording: Chapter 2, Part 3  | [(10 mins)](https://youtu.be/WX-nJEEyeNA) |
+| Discussion question | [html](discussion.html) 
 ---------------------
 
 
