@@ -16,7 +16,7 @@ A goal of the participation credit is to reward and incentivize contributions th
 3. Questions in office hours, or by email, or after class, are appreciated but usually do less to help build community compared to questions asked publicly. You are encouraged to follow up on your question with a post to piazza saying what you learned. 
 
 
-Participation will be assessed every 2 weeks. At least one contribution is expected over each 2 week interval. Students making multiple contributions are assessed on their best one. 
+Participation will be reported as part of homework. There will be no homework during the midterm and final projects, so a separate participation report will be requested. At least one contribution is expected over each reporting interval (approximately every two weeks). Students making multiple contributions are assessed on their best one. 
 
 [5 points] Participation that makes an on-target substantive contribution to a course discussion (in class or on Piazza). Anonymous contributions will only count for full points if there is some evident reason why the topic demands anonymity.
 

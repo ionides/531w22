@@ -620,11 +620,10 @@ We test this on daily S\&P 500 data, downloaded from \link{https://finance.yahoo
 \vspace{-1mm}
 
 << sp500_code,echo=T,fig.align="left",eval=F>>=
-dat <- read.table("sp500.csv",sep=",",header=TRUE)
-N <- nrow(dat)
-sp500 <- dat$Close[N:1] # data are in reverse order in sp500.csv
-par(mfrow=c(1,2))
-plot(sp500,type="l") ; plot(log(sp500),type="l")
+sp <- read.table("sp500.csv",sep="\t",header=TRUE)
+sp$Date <- as.Date(sp$Date, format = "%B %d, %Y")
+sp500 <- as.numeric(gsub(",", "", sp$Close))
+plot(sp$Date,sp500,log="y",type="l",xlab="date",ylab="S&P 500")
 @
 
 \mode<presentation>{
