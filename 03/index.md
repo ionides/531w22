@@ -10,6 +10,7 @@ output: html_document
 |:----------------|:---------------------------------------------------------------------------------:|
 | Lecture slides  | [PDF](slides.pdf) |
 | Lecture notes   | [PDF](notes.pdf) |
+| Annotated slides | [pdf](slides-annotated.pdf) |
 | Recording: Chapter 3, Part 1  | [(27 mins)](https://youtu.be/tLCAJ74cvnA) |
 | Recording: Chapter 3, Part 2  | [(24 mins)](https://youtu.be/HSWLJnLbCC0) |
 | Recording: Chapter 3, Part 3  | [(19 mins)](https://youtu.be/rU8MnB6zAvM) |
