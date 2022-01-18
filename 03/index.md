@@ -8,12 +8,13 @@ output: html_document
 
 | &nbsp;          | &nbsp;                                                                            |
 |:----------------|:---------------------------------------------------------------------------------:|
-| Lecture slides  | [PDF](slides.pdf) |
-| Lecture notes   | [PDF](notes.pdf) |
+| Lecture slides  | [pdf](slides.pdf) |
+| Lecture notes   | [pdf](notes.pdf) |
 | Annotated slides | [pdf](slides-annotated.pdf) |
 | Recording: Chapter 3, Part 1  | [(27 mins)](https://youtu.be/tLCAJ74cvnA) |
 | Recording: Chapter 3, Part 2  | [(24 mins)](https://youtu.be/HSWLJnLbCC0) |
 | Recording: Chapter 3, Part 3  | [(19 mins)](https://youtu.be/rU8MnB6zAvM) |
+| Discussion question | [html](discussion.html) 
 ----------------------
 
 <iframe width="560" height="315" src="https://www.youtube.com/embed/tLCAJ74cvnA" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
