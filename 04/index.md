@@ -10,10 +10,12 @@ output: html_document
 |:----------------|:---------------------------------------------------------------------------------:|
 | Lecture slides  | [PDF](slides.pdf) |
 | Lecture notes   | [PDF](notes.pdf) |
+| Annotated slides | [pdf](slides-annotated.pdf) |
 | Recording: Chapter 4, Part 1  | [Video (27 mins)](https://youtu.be/dtef_fgyrIc) |
 | Recording: Chapter 4, Part 2  | [Video (19 mins)](https://youtu.be/hPeCV-MSnag) |
-| Recording: Chapter 4, Part 3  | [Video (21 mins)](https://youtu.be/qcx_-C3WKA0) |
-----------------------
+| Recording: Chapter 4, Part 3  | [Video (21 mins)](https://youtu.be/qcx_-C3WKA0) 
+|
+
 
 <iframe width="560" height="315" src="https://www.youtube.com/embed/dtef_fgyrIc" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
 

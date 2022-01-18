@@ -13,12 +13,11 @@ output:
 
 -----------
 
-Submit your solution as a pdf via Canvas. You may scan a handwritten solution. Later in the course, we will be using Rmarkdown for projects, so you might like to use that also for this homework. In that case, the source code for this assignment is available on github to help get you started. Rmarkdown combines R with Latex, so extra work will be required initially if you are unfamiliar with either of these. 
+Submit your homework report as a pdf via Canvas. You may scan a handwritten report. Later in the course, we will be using Rmarkdown for projects, so you might like to use that also for this homework. In that case, the source code for this assignment is available on github to help get you started. Rmarkdown combines R with Latex, so extra work will be required initially if you are unfamiliar with either of these. 
 
-You are reminded that the grading scheme for the homework puts an emphasis on careful explanation of sources, as explained in the [syllabus](../syllabus.html). A source is any person, website or other information resource that is consulted while carrying out your homework. All sources should be listed. Be explicit about where you do NOT use sources as well as where you DO. Your homework can discuss your sources, what you learned from them, and how your solution makes use of them and goes beyond them. A fully correct solution will not get full points without explicit discussion of sources.
+You are reminded that the grading scheme for the homework report puts an emphasis on careful explanation of sources, as explained in the [syllabus](../syllabus.html). A source is any person, website or other information resource that is consulted while carrying out your homework. All sources should be listed. It may be convenient to number your sources so you can refer to them in your report. Be explicit about where you do NOT use sources as well as where you DO. Your report can discuss your sources, what you learned from them, and how your solution makes use of them and goes beyond them. A fully correct solution will not get full points without explicit discussion of sources.
 
 Question 2.3 for this homework counts toward participation credit.
-Some of you are already contributing on the [course Piazza site](https://piazza.com/umich/winter2022/statsdatasci531). You can also consider participation in online discussion as part of your homework. If there is no discussion on the Piazza site that you want to join, start a new one!
 
 --------
 
