@@ -475,7 +475,7 @@ Hint: One answer to this question involves diagnosing model misspecification.
 \item We have seen the ARMA model written as a ratio of two polynomials,
 
 \begin{equation}
-Y_n = \frac{\ar(B)}{\ma(B)} \epsilon_n.
+Y_n = \frac{\ma(B)}{\ar(B)} \epsilon_n.
 \end{equation}
 
 \item If the two polynomials $\ar(x)$ and $\ma(x)$ share a common factor, it can be canceled out without changing the model. 

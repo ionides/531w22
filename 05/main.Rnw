@@ -479,7 +479,7 @@ Consider the strategy of selecting the model with the lowest AIC value, and view
 
 \item The physical mechanisms are not always obvious: for example, evaporation tends to be highest when the weather is cold but the lake is not ice-covered. 
 
-\item We look at monthly time series data on the level of Lake Michigan, which is the same as Lake Huron.
+\item We look at monthly time series data on the level of Lake Huron, which is essentially the same as Lake Michigan.
 \ei
 
 \end{frame}   
@@ -488,22 +488,24 @@ Consider the strategy of selecting the model with the lowest AIC value, and view
 
 \begin{frame}[fragile]{Reading in the data}
 
-Here is the head of the file \url{gt_lakes_level.csv}
-
+Here is the head of the file \url{huron_level.csv}
+{\scriptsize
 \begin{verbatim}
-# Great Lakes level in meters. Downloaded on Jan 19, 2022 from
-# https://www.lre.usace.army.mil/Missions/Great-Lakes-Information/Great-Lakes-Information-2/Water-Level-Data/GLHYD_data_metric.csv
-month,year,Superior,Michigan-Huron,St. Clair,Erie,Ontario
-jan,1918,183.25,176.71,174.59,173.9,74.74
-feb,1918,183.2,176.73,174.74,173.82,74.72
+# Lake Michigan-Huron:, Monthly Average Water Levels (meters)
+# 1860-1917 : Harbor Beach, MI
+# https://www.glerl.noaa.gov/data/dashboard/data/levels/1860_1917/miHuron1860.csv
+# 1918+ : Monthly Lake-Wide Average Water Level
+# https://www.glerl.noaa.gov/data/dashboard/data/levels/1918_PRES/miHuron1918.csv
+# Source:, NOAA/NOS; CHS. Downloaded: Jan 20, 2022
+year,jan,feb,mar,apr,may,jun,jul,aug,sep,oct,nov,dec
+1860,177.285,177.339,177.349,177.388,177.425,177.461,177.473,177.416,177.355,177.26,177.16,177.111
+1861,177.077,177.105,177.224,177.254,177.382,177.431,177.47,177.544,177.449,177.413,177.342,177.291
 \end{verbatim}
-
+}
 <<read_data>>=
-dat <- read.table(file="gt_lakes_level.csv",sep=",",header=TRUE)
-dat$Date <- 1918 + rep(0:11,nrow(dat)/12)/12
-head(dat,2)
+dat <- read.table(file="huron_level.csv",sep=",",header=TRUE)
+head(dat[,1:7],2)
 @
-
 
 \end{frame}
 
@@ -513,10 +515,9 @@ head(dat,2)
  For now, we avoid monthly seasonal variation by considering an annual series of January depths. We will investigate seasonal variation later in the course, but sometimes it is best avoided.
 
 <<select_annual_code,echo=T,eval=F>>=
-dat <- subset(dat,month=="jan")
-michigan_level <- dat$Michigan.Huron
+huron_level <- dat$jan
 year <- dat$year
-plot(michigan_level~year,type="l")
+plot(huron_level~year,type="l")
 @
 
 \vspace{-10mm}
@@ -527,13 +528,27 @@ plot(michigan_level~year,type="l")
 
 \end{frame}  
 
+\begin{frame}[fragile]
+\bi
+\item Until the recent surge in water level, there was concern about a long-run decline in lake level due to dredging or water diversion or climate change.
+\item We put ourselves back in 2014 and temporarily ignore subsequent data
+\ei
+
+<<repeat_plot,echo=F,eval=T>>=
+<<select_annual_code>>
+abline(v=2014,lty="dashed",col="red",lwd=1.5)
+
+huron_level <- huron_level[year<=2014]
+year <- year[year<=2014]
+@
+\end{frame}
 
  \begin{frame}[fragile]
 
 \frametitle{Fitting an ARMA model}
 
 \bi
-\item Later, we will consider hypotheses of trend. For now, let's start by fitting a stationary ARMA$(p,q)$ model under the null hypothesis that there is no trend. This hypothesis, which asserts that nothing has substantially changed in this system over the last 150 years, is not entirely unreasonable from looking at the data.
+\item Later, we will consider hypotheses of trend. For now, let's start by fitting a stationary ARMA$(p,q)$ model under the null hypothesis that there is no trend. This hypothesis, which asserts that nothing has substantially changed in this system over the last 160 years, is not entirely unreasonable from looking at the data.
 
 \item We seek to fit a stationary Gaussian ARMA(p,q) model with parameter vector $\theta=(\ar_{1:p},\ma_{1:q},\mu,\sigma^2)$ given by
 $$ \ar(B)(Y_n-\mu) = \ma(B) \epsilon_n,$$
@@ -573,9 +588,9 @@ aic_table <- function(data,P,Q){
     paste("MA",0:Q,sep=""))
   table
 }
-michigan_aic_table <- aic_table(michigan_level,4,5)
+huron_aic_table <- aic_table(huron_level,4,5)
 require(knitr)
-kable(michigan_aic_table,digits=2)
+kable(huron_aic_table,digits=2)
 @
 
 \end{frame}   
@@ -614,8 +629,8 @@ kable(michigan_aic_table,digits=2)
 
 
 <<arma21fit,size="footnotesize">>=
-michigan_arma21 <- arima(michigan_level,order=c(2,0,1))
-michigan_arma21
+huron_arma21 <- arima(huron_level,order=c(2,0,1))
+huron_arma21
 @
 
 \end{frame}
@@ -628,8 +643,8 @@ michigan_arma21
 \item We can examine the roots of the AR polynomial,
 \ei
 
-<<michigan_roots>>=
-AR_roots <- polyroot(c(1,-coef(michigan_arma21)[c("ar1","ar2")]))
+<<huron_roots>>=
+AR_roots <- polyroot(c(1,-coef(huron_arma21)[c("ar1","ar2")]))
 AR_roots
 @
 
@@ -637,7 +652,7 @@ AR_roots
 \bi
 \item The roots are just outside the unit circle, suggesting we have a stationary causal fitted ARMA.
 
-\item However, the MA root is $\Sexpr{round(-1/coef(michigan_arma21)["ma1"],2)}$, showing that the fitted model is at the threshold of non-invertibility.
+\item However, the MA root is $\Sexpr{round(-1/coef(huron_arma21)["ma1"],2)}$, showing that the fitted model is at the threshold of non-invertibility.
 
 \item Do we have a non-invertibility problem? We investigate this using profile and bootstrap methods. The claimed standard error on the MA1 coefficient, from the Fisher information approach used by \code{arima}, is small. 
 
@@ -658,12 +673,12 @@ AR_roots
 \ei
 
 
-<<michigan_profile_code,echo=T,eval=F>>=
+<<huron_profile_code,echo=T,eval=F>>=
 K <- 500
 ma1 <- seq(from=0.2,to=1.1,length=K)
 profile_loglik <- rep(NA,K)
 for(k in 1:K){
-   profile_loglik[k] <- logLik(arima(michigan_level,order=c(2,0,1),
+   profile_loglik[k] <- logLik(arima(huron_level,order=c(2,0,1),
       fixed=c(NA,NA,ma1[k],NA)))
 }
 plot(profile_loglik~ma1,ty="l")
@@ -674,9 +689,9 @@ plot(profile_loglik~ma1,ty="l")
 
 \begin{frame}[fragile]
 
-<<michigan_profile,echo=F,fig.width=5,fig.height=2.5,out.width="9cm">>=
+<<huron_profile,echo=F,fig.width=5,fig.height=2.5,out.width="9cm">>=
 par(mai=c(0.8,0.8,0.1,0.1))
-<<michigan_profile_code>>
+<<huron_profile_code>>
 @
 
 \myquestion. Interpret the profile likelihood plot for $\ma_1$. 
@@ -713,18 +728,18 @@ par(mai=c(0.8,0.8,0.1,0.1))
 <<simA_code,echo=T,eval=F>>=
 set.seed(578922)
 J <- 1000
-params <- coef(michigan_arma21)
+params <- coef(huron_arma21)
 ar <- params[grep("^ar",names(params))]
 ma <- params[grep("^ma",names(params))]
 intercept <- params["intercept"]
-sigma <- sqrt(michigan_arma21$sigma2)
+sigma <- sqrt(huron_arma21$sigma2)
 theta <- matrix(NA,nrow=J,ncol=length(params),
    dimnames=list(NULL,names(params)))
 for(j in 1:J){
  try({
    Y_j <- arima.sim(
       list(ar=ar,ma=ma),
-      n=length(michigan_level),
+      n=length(huron_level),
       sd=sigma
    )+intercept
    theta[j,] <- coef(arima(Y_j,order=c(2,0,1)))
@@ -826,14 +841,14 @@ registerDoParallel()
 
 <<simB>>=
 J <- 1000
-michigan_ar1 <- arima(michigan_level,order=c(1,0,0))
-params <- coef(michigan_ar1)
+huron_ar1 <- arima(huron_level,order=c(1,0,0))
+params <- coef(huron_ar1)
 ar <- params[grep("^ar",names(params))]
 intercept <- params["intercept"]
-sigma <- sqrt(michigan_ar1$sigma2)
+sigma <- sqrt(huron_ar1$sigma2)
 t1 <- system.time(
-  michigan_sim <- foreach(j=1:J) %dopar% {
-    Y_j <- arima.sim(list(ar=ar),n=length(michigan_level),
+  huron_sim <- foreach(j=1:J) %dopar% {
+    Y_j <- arima.sim(list(ar=ar),n=length(huron_level),
       sd=sigma)+intercept
     try(coef(arima(Y_j,order=c(2,0,1))))
   }
@@ -849,7 +864,7 @@ t1 <- system.time(
 \ei
 
 <<out, cache=FALSE>>=
-sum(sapply(michigan_sim, function(x) inherits(x,"try-error"))) 
+sum(sapply(huron_sim, function(x) inherits(x,"try-error"))) 
 @
 
 
@@ -864,7 +879,7 @@ sum(sapply(michigan_sim, function(x) inherits(x,"try-error")))
 \ei
 
 <<histB, cache=FALSE, eval=FALSE, echo=T>>=  
-ma1 <- unlist(lapply(michigan_sim,function(x)
+ma1 <- unlist(lapply(huron_sim,function(x)
    if(!inherits(x,"try-error"))x["ma1"] else NULL ))
 hist(ma1,breaks=50)  
 @
@@ -882,7 +897,7 @@ hist(ma1,breaks=50)
 \bi
 \item When the true model is AR1 and we fit ARMA(2,1), it seems that we often obtain a model with estimated MA1 coefficient on the boundary of invertibility.
 
-\item Thus, we cannot reject an AR1 hypothesis for the Michigan data, even though the Fisher information based analysis appears to give strong evidence that the data should be modeled with a nonzero MA1 coefficient. 
+\item Thus, we cannot reject an AR1 hypothesis for the Huron data, even though the Fisher information based analysis appears to give strong evidence that the data should be modeled with a nonzero MA1 coefficient. 
 
 \item It may be sensible to avoid fitted models too close to the boundary of invertibility. This is a reason not to blindly accept whatever model AIC might suggest. 
 \ei
@@ -930,7 +945,7 @@ hist(ma1,breaks=50)
 \begin{center}
 <<repeated_aic,echo=FALSE>>=
 require(knitr)
-kable(michigan_aic_table,digits=1)
+kable(huron_aic_table,digits=1)
 @
 \end{center}
 

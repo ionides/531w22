@@ -31,9 +31,9 @@ The course outline, course information and grading policies are described in the
 
 4. [Linear time series models and the algebra of ARMA models](04/index.html)
 
-<!--
-
 5. [Parameter estimation and model identification for ARMA models](05/index.html)
+
+<!--
 
 6. [Extending the ARMA model: Seasonality, integration and trend](06/index.html)
 
