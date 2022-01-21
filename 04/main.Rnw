@@ -603,17 +603,17 @@ Here, $a$ and $b$ could be complex numbers.
 \cos(\omega t) = \frac{1}{2}\big(e^{i\omega t} + e^{-i\omega t}\big).
 \end{equation}
 
-5.  Typically for physical systems we want $x(t)$ to be real, so we know that the complex part of (\ref{ar2:v1}) is zero. This requires $a = (A/2) e^{i\phi}$ and $b=-(A/2) e^{-i\phi}$ for real $A$ and $\phi$. The algebra to show this is not critical for this course, but is a good exercise if you enjoy it. The factor of $1/2$ is arbitrary. This gives
+5.  For physical systems, $x(t)$ is real so we know that the complex part of (\ref{ar2:v1}) is zero. Thus, the two terms on the right in (\ref{ar2:v1}) are complex conjugates. Writing $a = (A/2) e^{i\phi}$, this implies $b=(A/2) e^{-i\phi}$ for real $A$ and $\phi$. The algebra to show this is not critical for this course, but is a good exercise if you enjoy it. The factor of $1/2$ is arbitrary. This gives
 \begin{equation}
 \label{ar2:v2}
-x(t) = \frac{A}{2} \left( e^{i(\omega t+\phi)} - e^{-i(\omega t + \phi)} \right).
+x(t) = \frac{A}{2} \left( e^{i(\omega t+\phi)} + e^{-i(\omega t + \phi)} \right).
 \end{equation}
 
 \vspace{3mm}
 
 6. Putting together  (\ref{ar2:v2}) and (\ref{eq:sin-cos-identity}) we get
 \begin{equation}
-x(t) = A \sin(\omega t + \phi),
+x(t) = A \cos(\omega t + \phi),
 \end{equation}
 which explains why the factor of $1/2$ in (\ref{ar2:v2}) is convenient.
 
@@ -629,7 +629,7 @@ $\omega$ is called the \myemph{frequency}, and $\phi$ is called the \myemph{phas
 \item The frequency of the oscillation is determined by $\omega$ in M10, but the amplitude and phase are unspecified constants which may be determined by initial conditions.
 \item It may be convenient to rescale to \myemph{cycles per unit time},
 \begin{equation}
- x(t) = A \sin\big( 2\pi(\omega^\prime t + \phi^\prime) \big)
+ x(t) = A \cos\big( 2\pi(\omega^\prime t + \phi^\prime) \big)
  \end{equation}
  where $\omega^\prime = \omega/2\pi$, $\phi^\prime = \phi/2\pi$.
 \ei
