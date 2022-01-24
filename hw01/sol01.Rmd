@@ -44,7 +44,7 @@ This solution is based on [ionides.github.io/531w21/hw01/sol01.html](https://ion
 
 On a fairly complex question like this, if your answer looks very much like the solution but you do not acknowledge looking at the solution or discussing the homework with someone who did, then that may raise concerns. These concerns could become serious, even potentially amounting to [plagiarism](https://rackham.umich.edu/academic-policies/section8/).
 
-If you work things out without consulting any sources, and say so, then this may make writing up your report easier since your solution automatically counts as an original contribution.
+If you work things out without consulting any sources, and say so, then this may make writing up your report easier since your solution automatically counts as an original contribution. As pointed out in the syllabus and homework assignment, you must say explicitly that you used no sources, if that is the case. Otherwise your homework will be graded as having failed to list sources.
 
 It is possible to get full points while making heavy use of sources, but this cannot be taken for granted. The burden is on you to demonstrate original contributions of your own that go beyond the sources. Discussing where you got stuck, and what you learned, are legitimate contributions.
 
