@@ -9,10 +9,10 @@
 <meta http-equiv="X-UA-Compatible" content="IE=EDGE" />
 
 
-<meta name="author" content="Instructor: Edward L. Ionides" />
+<meta name="author" content="STATS/DATASCI 531, Winter 2022" />
 
 
-<title>STATS/DATASCI 531 (Winter 2022)  ‘Modeling and Analysis of Time Series Data’</title>
+<title>Solution to Homework 1</title>
 
 <script>// Pandoc 2.9 adds attributes on both header and div. We remove the former (to
 // be compatible with the behavior of Pandoc < 2.8).
@@ -358,154 +358,90 @@ pre code {
 
 
 
-<h1 class="title toc-ignore">STATS/DATASCI 531 (Winter 2022) <br>‘Modeling and Analysis of Time Series Data’</h1>
-<h4 class="author">Instructor: Edward L. Ionides</h4>
+<h1 class="title toc-ignore">Solution to <a href="hw01.html">Homework 1</a></h1>
+<h4 class="author">STATS/DATASCI 531, Winter 2022</h4>
 
 </div>
 
-<div id="TOC">
+
+<hr />
+<p><strong><big>Question 1.1</big></strong>.</p>
+<p>This question uses basic properties of covariance P1–P4 which are given in the homework. Many students will complete it without requiring collaboration or online sources. Simply saying “No sources used” is acceptable if that is the case.</p>
+<p><span class="math display">\[\begin{eqnarray}
+\mathrm{Var}\left(\hat{\mu}\left(Y_{1:N}\right)\right)&amp;=&amp;\mathrm{Var}\left(\frac{1}{N}\sum_{n=1}^{N}Y_{n}\right)
+\\
+&amp;=&amp;\frac{1}{N^{2}}\mathrm{Cov}\left(\sum_{m=1}^{N}Y_{m},\sum_{n=1}^{N}Y_{n}\right)
+\mbox{ using P1 and P3}
+\\
+&amp;=&amp;\frac{1}{N^{2}}\sum_{m=1}^{N}\sum_{n=1}^{N}\mathrm{Cov}\left(Y_{m},Y_{n}\right)
+\mbox{ using P4}
+\\
+&amp;=&amp;\frac{1}{N^{2}}\left(N\gamma_{0}+2\left(N-1\right)\gamma_{1}+\ldots+2\gamma_{N-1}\right) \mbox{ using P2 to give $\gamma_h=\gamma_{-h}$}
+\\
+&amp;=&amp;\frac{1}{N}\gamma_{0}+\frac{2}{N^{2}}\sum_{h=1}^{N-1}\left(N-h\right)\gamma_{h}
+\end{eqnarray}\]</span></p>
+<hr />
+<p><strong><big>Question 1.2</big></strong>.</p>
+<p>This question is not straightforward, and most students are expected to make use of collaboration and/or online sources.</p>
+<p>This solution is based on <a href="https://ionides.github.io/531w21/hw01/sol01.html">ionides.github.io/531w21/hw01/sol01.html</a>. It is okay to look at the previous solution, if you acknowledge it. In that case, it is okay for your report to discuss the relationship between your work and the previous solution.</p>
+<p>On a fairly complex question like this, if your answer looks very much like the solution but you do not acknowledge looking at the solution or discussing the homework with someone who did, then that may raise concerns. These concerns could become serious, even potentially amounting to <a href="https://rackham.umich.edu/academic-policies/section8/">plagiarism</a>.</p>
+<p>If you work things out without consulting any sources, and say so, then this may make writing up your report easier since your solution automatically counts as an original contribution.</p>
+<p>It is possible to get full points while making heavy use of sources, but this cannot be taken for granted. The burden is on you to demonstrate original contributions of your own that go beyond the sources. Discussing where you got stuck, and what you learned, are legitimate contributions.</p>
+<p>You can reference the notes [1] or Shumway and Stoffer (2017) [2] where appropriate. Think of your homework report as a small piece of academic writing. Strong academic writing connects your own work to the wider academic community.</p>
+<p>Referencing Wikipedia is acceptable. Indeed, Wikipedia is often a good source. It is so widely used that if you find a problem with the Wikipedia article, or an inconsistency between the Wikipedia version and other sources, that is well worth comment.</p>
+<p>References do not need to be internet accessible. For example, it could be a paper book. However, most references nowadays are online.</p>
+<p>Now moving on to the solution. By definition, <span class="math display">\[
+\hat{\gamma}_{h}\left(y_{1:N}\right)=\frac{1}{N}\sum_{n=1}^{N-h}\left(y_{n}-\hat{\mu}_{n}\right)\left(y_{n+h}-\hat{\mu}_{n+h}\right).
+\]</span> Here, we consider the null hypothesis where <span class="math inline">\(Y_{1:N}\)</span> is independent and identically distributed with mean <span class="math inline">\(0\)</span> and standard deviation <span class="math inline">\(\sigma\)</span>. We therefore use the estimator <span class="math inline">\(\hat\mu_n=0\)</span> and the autocovariance function estimator becomes <span class="math display">\[\begin{eqnarray}
+\hat{\gamma}_{h}\left(y_{1:N}\right)
+&amp;=&amp;
+\frac{1}{N}\sum_{n=1}^{N-h}y_{n}y_{n+h},
+\end{eqnarray}\]</span> We let <span class="math inline">\(\sum_{n=1}^{N-h}Y_{n}Y_{n+h}=U\)</span> and <span class="math inline">\(\sum_{n=1}^{N}Y_{n}^{2}=V\)</span>, and carry out a first order Taylor expansion [3] of <span class="math display">\[\hat\rho_h(Y_{1:N})
+= \frac{\hat\gamma_h(y_{1:N})}{\hat\gamma_0(y_{1:N})}
+= \frac{U}{V}\]</span> about <span class="math inline">\((\mathbb{E}[U],\mathbb{E}[V])\)</span>. This gives <span class="math display">\[
+\hat{\rho}_{h}(Y_{1:N})
+\approx\frac{\mathbb{E}\left(U\right)}{\mathbb{E}\left(V\right)}+\left(U-\mathbb{E}\left(U\right)\right)\left.\frac{\partial}{\partial U}\left(\frac{U}{V}\right)\right|_{\left(\mathbb{E}\left(U\right),\mathbb{E}\left(V\right)\right)}+\left(V-\mathbb{E}\left(V\right)\right)\left.\frac{\partial}{\partial V}\left(\frac{U}{V}\right)\right|_{\left(\mathbb{E}\left(U\right),\mathbb{E}\left(V\right)\right)}.
+\]</span> We have <span class="math display">\[
+\mathbb{E}\left(U\right)=\sum_{n=1}^{N-h}\mathbb{E}\left(Y_{n}\, Y_{n+h}\right)=0,
+\]</span> <span class="math display">\[
+\mathbb{E}\left(V\right)=\sum_{n=1}^{N}\mathbb{E}\left(Y_{n}^{2}\right)=N\sigma^{2},
+\]</span> <span class="math display">\[
+\frac{\partial}{\partial U}\left(\frac{U}{V}\right)=\frac{1}{V},
+\]</span> <span class="math display">\[
+\frac{\partial}{\partial V}\left(\frac{U}{V}\right)=\frac{-U}{V^{2}}.
+\]</span> Putting this together, we have <span class="math display">\[\begin{eqnarray}
+\hat{\rho}_{h}(Y_{1:N})&amp;\approx&amp;\frac{\mathbb{E}\left(U\right)}{\mathbb{E}\left(V\right)}+\frac{U}{\mathbb{E}\left(V\right)}-\frac{\left(V-\mathbb{E}\left(V\right)\right)\mathbb{E}(U)}{\mathbb{E}(V)^{2}}
+\\
+&amp;=&amp;\frac{U}{N\sigma^{2}}.
+\end{eqnarray}\]</span> This gives us an approximation, <span class="math display">\[
+\mathrm{Var}\left(\hat{\rho}_{h}(Y_{1:N})\right)\approx\frac{\mathrm{Var}\left(U\right)}{N^{2}\sigma^{4}}.
+\]</span> We now look to compute <span class="math display">\[
+\mathrm{Var}\left(U\right)= \mathrm{Var}\left(\sum_{n=1}^{N-h}Y_{n}Y_{n+h}\right).
+\]</span> Since <span class="math inline">\(Y_{1:N}\)</span> are independent and mean zero, we have <span class="math inline">\(\mathbb{E}[Y_{n}Y_{n+h}] = 0\)</span> for <span class="math inline">\(h\neq 0\)</span>. Therefore, for <span class="math inline">\(m\neq n\)</span>, <span class="math display">\[
+\mathrm{Cov}\left(Y_{m}Y_{m+h},Y_nY_{n+h}\right) = \mathbb{E}\left[ Y_{m}Y_{m+h}\, Y_nY_{n+h}\right] = 0.
+\]</span> Thus, the terms in the sum for <span class="math inline">\(\mathrm{Var}\left(U\right)\)</span> are uncorrelated for <span class="math inline">\(m\neq n\)</span> and we have <span class="math display">\[\begin{eqnarray}
+\mathrm{Var}\left(U\right) &amp;=&amp; \sum_{n=1}^{N-h} \mathrm{Var}\left(Y_nY_{n+h}\right) \\
+&amp;=&amp; (N-h) \, \mathbb{E}\left[Y_n^2Y_{n+h}^2\right] \\
+&amp;=&amp; (N-h) \, \sigma^4
+\end{eqnarray}\]</span> Therefore, <span class="math display">\[
+\mathrm{Var}\left(\hat{\rho}_{h}(Y_{1:N})\right)\approx\frac{\left(N-h\right)}{N^{2}}
+\]</span> When <span class="math inline">\(n\rightarrow\infty\)</span>, <span class="math inline">\(\mathrm{Var}\left(\hat{\rho}_h(Y_{1:N})\right)\rightarrow\frac{1}{N}\)</span>, justifying a standard deviation under the null hypothesis of <span class="math inline">\(1/\sqrt{N}\)</span>.</p>
+<p>B. A 95% confidence interval is a function of the data that constructs a set which (under a specified model) covers the true parameter with probability 0.95. [4]</p>
 <ul>
-<li><a href="#course-description">Course description</a></li>
-<li><a href="#class-notes-and-lectures">Class notes and lectures</a></li>
-<li><a href="#homework-and-participation-assignments">Homework and participation assignments</a></li>
-<li><a href="#midterm-project">Midterm project</a></li>
-<li><a href="#final-project">Final project</a></li>
-<li><a href="#using-the-great-lakes-cluster">Using the Great Lakes cluster</a></li>
-<li><a href="#acknowledgements-and-license">Acknowledgements and License</a></li>
+<li><p>Here, the interval <span class="math inline">\(\big[-1.96/\sqrt{N},1.96/\sqrt{N}\big]\)</span> does not depend on the data. For any given model, it therefore covers <span class="math inline">\(\rho_h\)</span> either with probability 1 or 0.</p></li>
+<li><p>The interval <span class="math inline">\(\big[\hat\rho_h(y_{1:N})-1.96/\sqrt{N},\hat\rho_h(y_{1:N})+1.96/\sqrt{N}\big]\)</span> covers zero if and only if <span class="math inline">\(\hat\rho^{}_h\)</span> falls between the dashed lines. In this sense, the dashed lines have some meaning relevant to construction of a confidence interval with local coverage of 95% at <span class="math inline">\(\rho_h=0\)</span> for <span class="math inline">\(N\)</span> large. However, the lines really represent an acceptance region of a test under a null hypothesis of independence. This is a different thing from a confidence interval.</p></li>
 </ul>
-</div>
-
 <hr />
-<div id="course-description" class="section level2">
-<h2>Course description</h2>
-<p>This course gives an introduction to time series analysis using time domain methods and frequency domain methods. The goal is to acquire the theoretical and computational skills required to investigate data collected as a time series. The first half of the course will develop classical time series methodology, including auto-regressive moving average (ARMA) models, regression with ARMA errors, and estimation of the spectral density. The second half of the course will focus on state space model techniques for fitting structured dynamic models to time series data. We will progress from fitting linear, Gaussian dynamic models to fitting nonlinear models for which Monte Carlo methods are required. Examples will be drawn from ecology, economics, epidemiology, finance and elsewhere.</p>
-<p>The course outline, course information and grading policies are described in the <a href="syllabus.html">syllabus</a>.</p>
+<p><strong><big>Question 1.3</big></strong>.</p>
+<p>The participation report was graded as part of the participation score, following the <a href="../rubric_participation.html">participation rubric</a>.</p>
 <hr />
-</div>
-<div id="class-notes-and-lectures" class="section level2">
-<h2>Class notes and lectures</h2>
+<p><strong><big>References</big></strong>.</p>
 <ol style="list-style-type: decimal">
-<li><p><a href="01/index.html">Introduction</a></p></li>
-<li><p><a href="02/index.html">Estimating trend and autocovariance</a></p></li>
-<li><p><a href="03/index.html">Stationarity, white noise, and some basic time series models</a></p></li>
-<li><p><a href="04/index.html">Linear time series models and the algebra of ARMA models</a></p></li>
-<li><p><a href="05/index.html">Parameter estimation and model identification for ARMA models</a></p></li>
+<li><p><a href="https://ionides.github.io/531w22/">Notes for STATS/DATASCI 531, Modeling and Analysis of Time Series Data</a></p></li>
+<li><p>Shumway, R.H., and Stoffer, D.S., 2017. Time series analysis and its applications (4th edition). New York: Springer.</p></li>
+<li><p><a href="https://math.libretexts.org/Bookshelves/Calculus/Supplemental_Modules_(Calculus)/Multivariable_Calculus/3%3A_Topics_in_Partial_Derivatives/Taylor__Polynomials_of_Functions_of_Two_Variables">LibreTexts, Taylor Polynomials of Functions of Two Variables, Equation (4)</a></p></li>
+<li><p><a href="https://en.wikipedia.org/wiki/Confidence_interval#Definition" class="uri">https://en.wikipedia.org/wiki/Confidence_interval#Definition</a></p></li>
 </ol>
-<!--
-
-6. [Extending the ARMA model: Seasonality, integration and trend](06/index.html)
-
-7. [Introduction to time series analysis in the frequency domain](07/index.html)
-
-8. [Smoothing in the time and frequency domains](08/index.html)
-
-9. [Case study: An association between unemployment and mortality?](09/index.html)
-
-10. [Introduction to partially observed Markov process models](10/index.html)
-
-11. [Introduction to simulation-based inference for epidemiological dynamics via the pomp R package](11/index.html)
-
-12. [Simulation of stochastic dynamic models](12/index.html)
-
-13. [Likelihood for POMP models: Theory and practice](13/index.html)
-
-14. [Likelihood maximization for POMP models](14/index.html)
-
-15. [A case study of polio including covariates, seasonality & over-dispersion](15/index.html)
-
-16. [A case study of financial volatility and a POMP model with observations driving latent dynamics](16/index.html)
-
-There are further POMP case studies, in a similar style, on [Ebola modeling](https://kingaa.github.io/sbied/ebola/index.html), [measles transmission](https://kingaa.github.io/sbied/measles/index.html), and [dynamic variation in the rate of human sexual contacts](https://kingaa.github.io/sbied/contacts/index.html).
-
--->
-<hr />
-</div>
-<div id="homework-and-participation-assignments" class="section level2">
-<h2>Homework and participation assignments</h2>
-<p>Please read the <a href="syllabus.html">grading policy in the syllabus</a> before submitting homework.</p>
-<ul>
-<li><p><a href="hw00/hw00.html">Homework 0</a>. Setting up your computational environment. Nothing to submit.</p></li>
-<li><p><a href="hw01/hw01.html">Homework 1</a>, due Mon Jan 17, 11:59pm. This included Participation 1. <a href="hw01/sol01.html">Solution</a>.</p></li>
-<li><p><a href="hw02/hw02.html">Homework 2</a>, due Mon Jan 24, 11:59pm.</p></li>
-<li><p><a href="participation/participation2.html">Participation 2</a>, due Mon Jan 31, 11:59pm.</p></li>
-</ul>
-<!--
-[Solution](hw02/sol02.html).
-
-* [Homework 3](hw03/hw03.html), due Mon Feb 22, 11:59pm.
-[Solution](hw03/sol03.html).
-
-* [Homework 4](hw04/hw04.html), due Mon Mar 1, 11:59pm.
-[Solution](hw04/sol04.html).
-
-* [Homework 5](hw05/hw05.html), due Mon Mar 22, 11:59pm.
-[Solution](hw05/sol05.html).
-
-* [Homework 6](hw06/hw06.html), due Mon Mar 29, 11:59pm. 
-[Solution](hw06/sol06.html).
-
-* [Homework 7](hw07/hw07.html), due Mon Apr 5, 11:50pm.
-[Solution](hw07/sol07.html).
-
-* There is no assigned homework for the last two weeks of the semester. You should work on your final project. The lectures for these weeks contain material that will be useful for your final projects. Also, you can optionally look at the exercises in the [notes for Chapter 15](https://kingaa.github.io/sbied/polio/notes.pdf) which have [worked solutions online](15/index.html).
-
--->
-<!--
-
-* [Homework 8](hw08/hw08.html), due 5pm on Mon Apr 13.
-[Solution](hw08/sol08.html).
-[slurm script](hw08/sol-3.bat).
-
--->
-<hr />
-</div>
-<div id="midterm-project" class="section level2">
-<h2>Midterm project</h2>
-<!--
-
-* [Information](midterm_project/midterm_project_info.html).
-
-* [2021 midterm projects](midterm_project/index.html)
-
-* [2020 midterm projects](midterm_project/index.html)
-
--->
-<ul>
-<li>You are welcome to browse previous midterm projects from <a href="http://ionides.github.io/531w16/midterm_project/">2016</a>, <a href="http://ionides.github.io/531w18/midterm_project/">2018</a>, <a href="http://ionides.github.io/531w20/midterm_project/">2020</a> and <a href="http://ionides.github.io/531w21/midterm_project/">2021</a></li>
-</ul>
-<hr />
-</div>
-<div id="final-project" class="section level2">
-<h2>Final project</h2>
-<!--
-
-* [Information](final_project/final_project_info.html)
-
-* [2021 final projects](final_project/index.html)
-
--->
-<ul>
-<li>You’re welcome to browse previous final projects from <a href="http://ionides.github.io/531w16/final_project/">2016</a>, <a href="http://ionides.github.io/531w18/final_project/">2018</a>, <a href="http://ionides.github.io/531w20/final_project/">2020</a> and <a href="http://ionides.github.io/531w21/final_project/">2021</a>.</li>
-</ul>
-<p>If building on old source code, note that there are some differences between versions of the software package <strong>pomp</strong>. The <a href="https://kingaa.github.io/pomp/vignettes/upgrade_guide.html"><strong>pomp</strong> version 2 upgrade guide</a> can be helpful. The changes from <strong>pomp 2.0</strong> to the current <strong>pomp 4.x</strong> are smaller.</p>
-<hr />
-</div>
-<div id="using-the-great-lakes-cluster" class="section level2">
-<h2>Using the Great Lakes cluster</h2>
-<ul>
-<li><p>Great Lakes access will be set up after the midterm project and used for the second half of the course.</p></li>
-<li><p><a href="greatlakes/index.html">Introductory notes</a> for using our class account on the greatlakes cluster. This is optional but may be helpful for your final project.</p></li>
-<li><p>If you are already familiar with using R on Great Lakes, all you need to know is the class account: <code>stats531w22_class</code>.</p></li>
-<li><p>You are expected to use our class account only for computations related to STATS/DATASCI 531.</p></li>
-<li><p>Please share knowledge about cluster computing between group members, and/or on piazza, to help everyone who wants to learn these skills.</p></li>
-<li><p>Cluster-related questions can also be emailed to <a href="mailto:hpc-support@umich.edu" class="email">hpc-support@umich.edu</a>.</p></li>
-</ul>
-<hr />
-</div>
-<div id="acknowledgements-and-license" class="section level2">
-<h2>Acknowledgements and License</h2>
-<p>This course and the code involved are made available with an <a href="LICENSE">MIT license</a>. Some components follow a Creative Commons Attribution non-commercial license. A longer list of acknowledgments is <a href="acknowledge.html">available</a>.</p>
-</div>
 
 
 
