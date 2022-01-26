@@ -3,7 +3,6 @@ title: "Chapter 1 discussion question"
 author: "STATS/DATASCI 531, Winter 2022"
 output:
   html_document:
-    theme: flatly
     toc: yes
 ---
 
