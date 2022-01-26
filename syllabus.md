@@ -46,7 +46,7 @@ Recommended pre-requisites:
 
 Statistical computing background:
 
-* We carry out data analysis using R. There is no formal R prerequisite, but we will be working with R extensively and so you should allow extra time for this course if you are new to R programming. If you are not familiar with [Introductory R](https://cran.r-project.org/doc/manuals/r-release/R-intro.pdf) then it is helpful to have some background in Python or a similar language to learn R fairly easily.
+* We carry out data analysis using R. There is no formal R prerequisite, but we will be working with R extensively and so you should allow extra time for this course if you are new to R programming. If you are not familiar with R then it is helpful to have some background in Python or a similar language to learn R fairly easily. The R Core Team's  [Introduction to R](https://cran.r-project.org/doc/manuals/r-release/R-intro.pdf) may be useful for review or study. Another resource is the [Tutorial Introduction to R by King, Field, Bolker and Ellner](https://kingaa.github.io/R_Tutorial/).
 
 -----------
 
