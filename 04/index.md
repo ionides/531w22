@@ -8,12 +8,13 @@ output: html_document
 
 | &nbsp;          | &nbsp;                                                                            |
 |:----------------|:---------------------------------------------------------------------------------:|
-| Lecture slides  | [PDF](slides.pdf) |
-| Lecture notes   | [PDF](notes.pdf) |
+| Lecture slides  | [pdf](slides.pdf) |
+| Lecture notes   | [pdf](notes.pdf) |
 | Annotated slides | [pdf](slides-annotated.pdf) |
-| Recording: Chapter 4, Part 1  | [Video (27 mins)](https://youtu.be/dtef_fgyrIc) |
-| Recording: Chapter 4, Part 2  | [Video (19 mins)](https://youtu.be/hPeCV-MSnag) |
-| Recording: Chapter 4, Part 3  | [Video (21 mins)](https://youtu.be/qcx_-C3WKA0) 
+| Recording, Winter 2021: Chapter 4, Part 1  | [Video (27 mins)](https://youtu.be/dtef_fgyrIc) |
+| Recording, Winter 2021: Chapter 4, Part 2  | [Video (19 mins)](https://youtu.be/hPeCV-MSnag) |
+| Recording, Winter 2021: Chapter 4, Part 3  | [Video (21 mins)](https://youtu.be/qcx_-C3WKA0)
+| Discussion questions | [html](discussion.html) 
 |
 
 
