@@ -116,13 +116,13 @@ Please read the [grading policy in the syllabus](syllabus.html) before submittin
 ## Midterm project
 
 
-<!--
+
 
 * [Information](midterm_project/midterm_project_info.html).
 
-* [2021 midterm projects](midterm_project/index.html)
+<!--
 
-* [2020 midterm projects](midterm_project/index.html)
+* [2021 midterm projects](midterm_project/index.html)
 
 -->
 

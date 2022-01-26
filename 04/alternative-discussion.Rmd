@@ -1,0 +1,25 @@
+---
+title: "Chapter 4 discussion question"
+author: "STATS/DATASCI 531, Winter 2022"
+output:
+  html_document:
+    theme: flatly
+    toc: yes
+---
+
+\newcommand\prob{\mathbb{P}}
+\newcommand\E{\mathbb{E}}
+\newcommand\var{\mathrm{Var}}
+\newcommand\cov{\mathrm{Cov}}
+
+-----------
+
+In Chapter 4, we saw that AR(2) models can describe quasi-periodic oscillatory behavior, with an autocorrelation function (ACF) that is an exponentially decaying sinusoid.
+
+You could experiment with `ARMAacf()` to find parameter values $\phi_1$ and $\phi_2$ for a causal AR(2) model that does not have a sinusoidal oscillation in its ACF. Instead, the ACF should decay to zero similar to an AR(1) model.
+
+Can you say anything about the class of all AR(2) models that do not have any oscillatory behavior? One way to address this in the context of Chapter 4 is to work out when a deterministic skeleton decays with no oscillations. In physics and engineering, this is called an over-damped system.
+
+
+---------------
+
