@@ -10,10 +10,11 @@ output: html_document
 |:----------------|:---------------------------------------------------------------------------------:|
 | Lecture slides  | [pdf](slides.pdf) |
 | Lecture notes   | [pdf](notes.pdf) |
-| Annotated slides | [pdf](slides-annotated.pdf) |
-| Recording: Chapter 5, Part 1  | [(23 mins)](https://youtu.be/sH99lmHiHd4) |
-| Recording: Chapter 5, Part 2  | [(25 mins)](https://youtu.be/PUN-LY9bygo) |
-| Recording: Chapter 5, Part 3  | [(33 mins)](https://youtu.be/jtu96XUX3Vg) |
+| Annotated slides 1-30 | [pdf](slides-annotated-part1.pdf) |
+| Annotated slides 31-49 | [pdf](slides-annotated-part2.pdf) |
+| Recording, Winter 2021: Chapter 5, Part 1  | [(23 mins)](https://youtu.be/sH99lmHiHd4) |
+| Recording, Winter 2021: Chapter 5, Part 2  | [(25 mins)](https://youtu.be/PUN-LY9bygo) |
+| Recording, Winter 2021: Chapter 5, Part 3  | [(33 mins)](https://youtu.be/jtu96XUX3Vg) |
 ----------------------
 
 
