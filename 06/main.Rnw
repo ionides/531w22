@@ -130,6 +130,9 @@ We fit a monthly version of the Lake Huron depth data described earlier.
 <<read_data,echo=T>>=
 dat <- read.table(file="huron_level.csv",sep=",",header=TRUE)
 dat[1:3,1:7]
+@
+
+<<plot_data_code,echo=T,eval=F>>=
 huron_level <- as.vector(t(dat[,2:13]))
 time <- rep(dat$year,each=12)+ rep(0:11,nrow(dat))/12
 plot(huron_level~time,type="l")
@@ -139,34 +142,33 @@ plot(huron_level~time,type="l")
 
 \begin{frame}[fragile]
 
-<<plot_data,echo=F,eval=T,out.width="8cm",fig.width=5,fig.height=2.5>>=
+<<plot_data,echo=F,eval=T,out.width="9cm",fig.width=5.5,fig.height=3>>=
 par(mai=c(0.8,0.8,0.1,0.1))
 <<plot_data_code>>
+abline(v=2014.99,col="red")
 @
-
-
 
 Based on our previous analysis, we try fitting AR(1) for the annual polynomial. We try ARMA(1,1) for the monthly part, giving
 \begin{equation}
 (1-\AR_1 B^{12})(1-\ar_1 B) Y_n = (1+\ma_1 B)\epsilon_n.
 \end{equation}
 
-\mode<presentation>{
-\vspace{-2mm}
-}
+\bi
+\item As discussed earlier, we analyze data only up to 2014, shown by a red line on the plot.
+\ei
+
+\end{frame}
+
+\begin{frame}[fragile]
 
 <<sarima>>=
 huron_level <- huron_level[time < 2014.99]
 time <- time[time < 2014.99]
 huron_sarma11x10 <- arima(huron_level,
   order=c(1,0,1),
-  seasonal=list(order=c(1,0,0),period=12))
+  seasonal=list(order=c(1,0,0),period=12)
+)
 @
-\end{frame}  
-
-\begin{frame}[fragile]
-
-
 <<sarima_summary,size="scriptsize">>=
 huron_sarma11x10
 @
@@ -411,7 +413,7 @@ fit0 <- arima(huron,order=c(1,0,0))
   \vspace{-2mm}
 }
 
-<<h0_summary,echo=F,size="small">>=
+<<h0_summary,echo=F,size="footnotesize">>=
 fit0
 @
 
