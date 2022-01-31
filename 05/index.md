@@ -15,6 +15,7 @@ output: html_document
 | Recording, Winter 2021: Chapter 5, Part 1  | [(23 mins)](https://youtu.be/sH99lmHiHd4) |
 | Recording, Winter 2021: Chapter 5, Part 2  | [(25 mins)](https://youtu.be/PUN-LY9bygo) |
 | Recording, Winter 2021: Chapter 5, Part 3  | [(33 mins)](https://youtu.be/jtu96XUX3Vg) |
+| Discussion questions | [html](discussion.html)
 ----------------------
 
 

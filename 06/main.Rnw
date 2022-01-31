@@ -51,7 +51,9 @@ set.seed(2050320976)
 \subsection{The SARMA model}
 \begin{frame}[fragile]{Seasonal autoregressive moving average (SARMA) models}
 
+\mode<presentation>{
 \vspace{-2mm}
+}
 
 \bi
 \item A general SARMA$(p,q)\times(P,Q)_{12}$ model for monthly data is
@@ -123,26 +125,14 @@ Consider the following two models:
 \begin{frame}[fragile]
 \frametitle{Fitting a SARMA model}
 
-We fit the full, monthly, version of the Lake Huron depth data described earlier.
+We fit a monthly version of the Lake Huron depth data described earlier.
 
-<<read_data,echo=F>>=
-dat <- read.table(file="huron_depth.csv",sep=",",header=TRUE)
-dat$Date <- strptime(dat$Date,"%m/%d/%Y")
-dat$year <- as.numeric(format(dat$Date, format="%Y"))
-dat$month <- as.numeric(format(dat$Date, format="%m"))
-@
-
-<<head_huron_data,echo=T,eval=T>>=
-head(dat,3)
-@
-
-\vspace{-2mm}
-
-<<plot_data_code,echo=T,eval=F>>=
-huron_depth <- dat$Average
-time <- dat$year + dat$month/12 
-# Note: this treats December 2011 as time 2012.0
-plot(huron_depth~time,type="l")
+<<read_data,echo=T>>=
+dat <- read.table(file="huron_level.csv",sep=",",header=TRUE)
+dat[1:3,1:7]
+huron_level <- as.vector(t(dat[,2:13]))
+time <- rep(dat$year,each=12)+ rep(0:11,nrow(dat))/12
+plot(huron_level~time,type="l")
 @
 
 \end{frame}  
@@ -156,18 +146,21 @@ par(mai=c(0.8,0.8,0.1,0.1))
 
 
 
-Based on our previous analysis, we try fitting AR(1) for the annual polynomial. Let's try ARMA(1,1) for the monthly part. In other words, we consider the model
+Based on our previous analysis, we try fitting AR(1) for the annual polynomial. We try ARMA(1,1) for the monthly part, giving
 \begin{equation}
 (1-\AR_1 B^{12})(1-\ar_1 B) Y_n = (1+\ma_1 B)\epsilon_n.
 \end{equation}
 
+\mode<presentation>{
 \vspace{-2mm}
+}
 
 <<sarima>>=
-huron_sarma11x10 <- arima(huron_depth,
-   order=c(1,0,1),
-   seasonal=list(order=c(1,0,0),period=12)
-)
+huron_level <- huron_level[time < 2014.99]
+time <- time[time < 2014.99]
+huron_sarma11x10 <- arima(huron_level,
+  order=c(1,0,1),
+  seasonal=list(order=c(1,0,0),period=12))
 @
 \end{frame}  
 
@@ -182,7 +175,9 @@ huron_sarma11x10
 
 \begin{frame}[fragile]{Residual analysis}
 
+\mode<presentation>{
 \vspace{-2mm}
+}
 
 \bi
 \item
@@ -209,7 +204,9 @@ acf(resid(huron_sarma11x10))
 
 \begin{frame}[fragile]{ARMA models for differenced data}
 
+\mode<presentation>{
 \vspace{-1mm}
+}
 
 \bi
 \item Applying a difference operation to the data can make it look more stationary and therefore more appropriate for ARMA modeling.
@@ -385,14 +382,13 @@ Y = Z\beta + \eta.
 
  \begin{frame}[fragile]
 
-\frametitle{Evidence for systematic trend in Lake Huron depth?}
+\frametitle{Evidence for systematic trend in Lake Huron level?}
 
-Let's go back to annual data, say the January depth, to avoid seasonality.
+We return to annual data, say the January level, to avoid seasonality.
 
 <<data_subset,echo=F,out.width="8cm",fig.width=5,fig.height=2.5>>=
-monthly_dat <- subset(dat, month==1)
-huron <- monthly_dat$Average
-year <- monthly_dat$year
+huron <- dat[dat[,1]<2014.99 , 2]
+year <- dat[dat[,1]<2014.99 , 1]
 par(mai=c(0.8,0.8,0.1,0.1))
 plot(x=year,y=huron,type="l")
 @
@@ -411,28 +407,13 @@ plot(x=year,y=huron,type="l")
 fit0 <- arima(huron,order=c(1,0,0))
 @
 
-\vspace{-2mm}
+\mode<presentation>{
+  \vspace{-2mm}
+}
 
 <<h0_summary,echo=F,size="small">>=
 fit0
 @
-
-\bi
-\item R drops trailing zeros which are useful for showing significant figures of accuracy. Here, this affects the likelihood. A solution is as follows:
-\ei
-\begin{columns}[T]
-\begin{column}{0.45\textwidth}
-<<round1>>=
-as.character(22.00)
-@
-\end{column}
-\begin{column}{0.45\textwidth}
-<<round2>>=
-library(broman)
-myround(22.00)
-@
-\end{column}
-\end{columns}
 
 \end{frame}
 
@@ -443,13 +424,17 @@ myround(22.00)
 \item The covariate is included via the \code{xreg} argument.
 \ei
 
+\mode<presentation>{
 \vspace{-1mm}
+}
 
 <<h1_fit>>=
 fit1 <- arima(huron,order=c(1,0,0),xreg=year)
 @
 
+\mode<presentation>{
 \vspace{-2mm}
+}
 
 <<h1_summary,echo=F,size="footnotesize">>=
 fit1

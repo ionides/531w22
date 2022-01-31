@@ -1,0 +1,29 @@
+---
+title: "Chapter 5 discussion questions"
+author: "STATS/DATASCI 531, Winter 2022"
+output:
+  html_document:
+    toc: yes
+---
+
+\newcommand\prob{\mathbb{P}}
+\newcommand\E{\mathbb{E}}
+\newcommand\var{\mathrm{Var}}
+\newcommand\cov{\mathrm{Cov}}
+
+-----------
+
+1. **Interpretation of a simulation experiment (i.e., a bootstrap)**.
+Recall from Chapter 5, slide 17, the following interpretation of a simulation experiment where we repeat the estimation procedure on simulations carried out with parameter value $\hat\theta$.
+<br>
+<br>
+"For large Monte Carlo sample size $J$, the coverage of the proposed confidence interval (CI) is well approximated, for models in a neighborhood of $\hat\theta$, by the proportion of the intervals $\big[\hat\theta^{[j]}_{1,\mathrm lo}, \, \hat\theta^{[j]}_{1,\mathrm hi}\big]$ that include $\hat\theta_1$."
+<br>
+<br>
+How does checking the number of times our estimated parameter value falls within our Monte Carlo simulation CI's tell us anything about the performance of our original CI's?
+
+---------
+
+
+---------------
+

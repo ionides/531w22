@@ -9,10 +9,10 @@
 <meta http-equiv="X-UA-Compatible" content="IE=EDGE" />
 
 
-<meta name="author" content="Edward L. Ionides" />
+<meta name="author" content="STATS/DATASCI 531, Winter 2022" />
 
 
-<title>Modeling and Analysis of Time Series Data STATS/DATASCI 531, Winter 2022 Chapter 5: Parameter estimation and model identification for ARMA models</title>
+<title>Chapter 5 discussion questions</title>
 
 <script>// Pandoc 2.9 adds attributes on both header and div. We remove the former (to
 // be compatible with the behavior of Pandoc < 2.8).
@@ -358,66 +358,17 @@ pre code {
 
 
 
-<h1 class="title toc-ignore">Modeling and Analysis of Time Series Data<br>STATS/DATASCI 531, Winter 2022<br>Chapter 5: Parameter estimation and model identification for ARMA models</h1>
-<h4 class="author">Edward L. Ionides</h4>
+<h1 class="title toc-ignore">Chapter 5 discussion questions</h1>
+<h4 class="author">STATS/DATASCI 531, Winter 2022</h4>
 
 </div>
 
 
 <hr />
-<table>
-<thead>
-<tr class="header">
-<th align="left"> </th>
-<th align="center"> </th>
-</tr>
-</thead>
-<tbody>
-<tr class="odd">
-<td align="left">Lecture slides</td>
-<td align="center"><a href="slides.pdf">pdf</a></td>
-</tr>
-<tr class="even">
-<td align="left">Lecture notes</td>
-<td align="center"><a href="notes.pdf">pdf</a></td>
-</tr>
-<tr class="odd">
-<td align="left">Annotated slides 1-30</td>
-<td align="center"><a href="slides-annotated-part1.pdf">pdf</a></td>
-</tr>
-<tr class="even">
-<td align="left">Annotated slides 31-49</td>
-<td align="center"><a href="slides-annotated-part2.pdf">pdf</a></td>
-</tr>
-<tr class="odd">
-<td align="left">Recording, Winter 2021: Chapter 5, Part 1</td>
-<td align="center"><a href="https://youtu.be/sH99lmHiHd4">(23 mins)</a></td>
-</tr>
-<tr class="even">
-<td align="left">Recording, Winter 2021: Chapter 5, Part 2</td>
-<td align="center"><a href="https://youtu.be/PUN-LY9bygo">(25 mins)</a></td>
-</tr>
-<tr class="odd">
-<td align="left">Recording, Winter 2021: Chapter 5, Part 3</td>
-<td align="center"><a href="https://youtu.be/jtu96XUX3Vg">(33 mins)</a></td>
-</tr>
-<tr class="even">
-<td align="left">Discussion questions</td>
-<td align="center"><a href="discussion.html">html</a></td>
-</tr>
-</tbody>
-</table>
+<ol style="list-style-type: decimal">
+<li><strong>Interpretation of a simulation experiment (i.e., a bootstrap)</strong>. Recall from Chapter 5, slide 17, the following interpretation of a simulation experiment where we repeat the estimation procedure on simulations carried out with parameter value <span class="math inline">\(\hat\theta\)</span>. <br> <br> “For large Monte Carlo sample size <span class="math inline">\(J\)</span>, the coverage of the proposed confidence interval (CI) is well approximated, for models in a neighborhood of <span class="math inline">\(\hat\theta\)</span>, by the proportion of the intervals <span class="math inline">\(\big[\hat\theta^{[j]}_{1,\mathrm lo}, \, \hat\theta^{[j]}_{1,\mathrm hi}\big]\)</span> that include <span class="math inline">\(\hat\theta_1\)</span>.” <br> <br> How does checking the number of times our estimated parameter value falls within our Monte Carlo simulation CI’s tell us anything about the performance of our original CI’s?</li>
+</ol>
 <hr />
-<iframe width="560" height="315" src="https://www.youtube.com/embed/sH99lmHiHd4" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen>
-</iframe>
-<iframe width="560" height="315" src="https://www.youtube.com/embed/PUN-LY9bygo" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen>
-</iframe>
-<iframe width="560" height="315" src="https://www.youtube.com/embed/jtu96XUX3Vg" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen>
-</iframe>
-<hr />
-<p><a href="../index.html">Back to course homepage</a><br />
-<a href="../acknowledge.html">Acknowledgements</a><br />
-<a href="http://github.com/ionides/531w22/tree/master/05/">Source code for these notes</a></p>
 <hr />
 
 
