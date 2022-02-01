@@ -13,7 +13,7 @@ output:
 
 -----------
 
-1. **t-tests versus z-tests**. In Question 6.6 of the notes, we use a normal approximation for the statistic $\hat\beta \big/\mathrm{SE}(\hat\beta)$. When carrying out linear regression analysis, it is good and customary practice to use Student's t distribution intead. Should we do that here? What are the arguments for and against it? Think about the justification for the t-test versus the justification for the z-test. 
+1. **t-tests versus z-tests**. In Question 6.6 of the notes, we use a normal approximation for the statistic $\hat\beta \big/\mathrm{SE}(\hat\beta)$. When carrying out linear regression analysis, it is good and customary practice to use Student's t distribution instead. Should we do that here? What are the arguments for and against it? Think about the justification for the t-test versus the justification for the z-test. 
 
 2. **The multiplicative structure for SARIMA**. Question 6.2 raised the issue of whether there is a scientific reason to think that practical models for seasonal phenomena should have a product structure to their ARMA polynomials, leading to a preference for [S3] over [S2] that goes beyond methodological convenience. Can you suggest a reason, or alternatively suggest a specific case where a non-multiplicative model like [S2] makes more sense?
 

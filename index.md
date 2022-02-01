@@ -82,6 +82,8 @@ Please read the [grading policy in the syllabus](syllabus.html) before submittin
 
 * [Homework 3](hw03/hw03.html), due Mon Feb 7, 11:59pm.
 
+* [Participation 3](participation/participation3.html), due Mon Feb 14, 11:59pm.
+
 <!--
 
 [Solution](hw03/sol03.html).
