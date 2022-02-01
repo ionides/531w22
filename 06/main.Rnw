@@ -20,7 +20,7 @@
 \usepackage{bbm} % for blackboard bold 1
 
 
-\title{\vspace{2mm} \link{https://ionides.github.io/531w22/}{Analysis of Time Series}\\ \vspace{2mm}
+\title{\vspace{2mm} \link{https://ionides.github.io/531w22/}{Modeling and Analysis of Time Series Data}\\ \vspace{2mm}
 Chapter \CHAPTER: Extending the ARMA model: Seasonality, integration and trend}
 \author{Edward L. Ionides}
 \date{}
