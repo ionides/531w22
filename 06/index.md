@@ -10,12 +10,13 @@ output: html_document
 |:----------------|:---------------------------------------------------------------------------------:|
 | Lecture slides  | [pdf](slides.pdf) |
 | Lecture notes   | [pdf](notes.pdf) |
+| Annotated slides | [pdf](slides-annotated.pdf) |
 | Recording, Winter 2021: Chapter 6, Part 1  | [(27 mins)](https://youtu.be/YSriL0C2D-A) |
 | Recording, Winter 2021: Chapter 6, Part 2  | [(19 mins)](https://youtu.be/YtNGC60FJeU) |
+| Discussion questions | [html](discussion.html) 
 ----------------------
 
 <!--
-| Annotated slides | [pdf](slides-annotated.pdf) |
 -->
 
 <iframe width="560" height="315" src="https://www.youtube.com/embed/YSriL0C2D-A" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>

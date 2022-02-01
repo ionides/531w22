@@ -226,7 +226,7 @@ acf(resid(huron_sarma11x10))
 
 \vspace{3mm}
 
-\negListSpace [S4] $\eqspace \ar(B)\big( (1-B)^d Y_n-\mu \big) = \ma(B) \, \epsilon_n$,
+\negListSpace [S4] $\eqspace \ar(B)\big[ (1-B)^d Y_n-\mu \big] = \ma(B) \, \epsilon_n$,
 
 \vspace{3mm}
 
@@ -299,7 +299,7 @@ Combining integrated ARMA models with seasonality, we can write a general SARIMA
 
 \vspace{3mm}
  
-[S5] $\eqspace \hspace{-0mm} \ar(B)\AR(B^{12}) \big( (1-B)^d(1-B^{12})^D Y_n-\mu \big) = \ma(B)\MA(B^{12}) \epsilon_n$,
+[S5] $\eqspace \hspace{-0mm} \ar(B)\AR(B^{12}) \big[ (1-B)^d(1-B^{12})^D Y_n-\mu \big] = \ma(B)\MA(B^{12}) \epsilon_n$,
 
 \vspace{3mm}
  

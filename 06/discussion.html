@@ -9,10 +9,10 @@
 <meta http-equiv="X-UA-Compatible" content="IE=EDGE" />
 
 
-<meta name="author" content="Edward L. Ionides" />
+<meta name="author" content="STATS/DATASCI 531, Winter 2022" />
 
 
-<title>Analysis of Time Series STATS/DATASCI 531, Winter 2022 Chapter 6: Extending the ARMA model: Seasonality, integration and trend</title>
+<title>Chapter 6 discussion questions</title>
 
 <script>// Pandoc 2.9 adds attributes on both header and div. We remove the former (to
 // be compatible with the behavior of Pandoc < 2.8).
@@ -358,58 +358,17 @@ pre code {
 
 
 
-<h1 class="title toc-ignore">Analysis of Time Series<br>STATS/DATASCI 531, Winter 2022<br>Chapter 6: Extending the ARMA model: Seasonality, integration and trend</h1>
-<h4 class="author">Edward L. Ionides</h4>
+<h1 class="title toc-ignore">Chapter 6 discussion questions</h1>
+<h4 class="author">STATS/DATASCI 531, Winter 2022</h4>
 
 </div>
 
 
 <hr />
-<table>
-<thead>
-<tr class="header">
-<th align="left"> </th>
-<th align="center"> </th>
-</tr>
-</thead>
-<tbody>
-<tr class="odd">
-<td align="left">Lecture slides</td>
-<td align="center"><a href="slides.pdf">pdf</a></td>
-</tr>
-<tr class="even">
-<td align="left">Lecture notes</td>
-<td align="center"><a href="notes.pdf">pdf</a></td>
-</tr>
-<tr class="odd">
-<td align="left">Annotated slides</td>
-<td align="center"><a href="slides-annotated.pdf">pdf</a></td>
-</tr>
-<tr class="even">
-<td align="left">Recording, Winter 2021: Chapter 6, Part 1</td>
-<td align="center"><a href="https://youtu.be/YSriL0C2D-A">(27 mins)</a></td>
-</tr>
-<tr class="odd">
-<td align="left">Recording, Winter 2021: Chapter 6, Part 2</td>
-<td align="center"><a href="https://youtu.be/YtNGC60FJeU">(19 mins)</a></td>
-</tr>
-<tr class="even">
-<td align="left">Discussion questions</td>
-<td align="center"><a href="discussion.html">html</a></td>
-</tr>
-</tbody>
-</table>
-<hr />
-<!--
--->
-<iframe width="560" height="315" src="https://www.youtube.com/embed/YSriL0C2D-A" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen>
-</iframe>
-<iframe width="560" height="315" src="https://www.youtube.com/embed/YtNGC60FJeU" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen>
-</iframe>
-<hr />
-<p><a href="../index.html">Back to course homepage</a><br />
-<a href="../acknowledge.html">Acknowledgements</a><br />
-<a href="http://github.com/ionides/531w22/tree/master/06/">Source code for these notes</a></p>
+<ol style="list-style-type: decimal">
+<li><p><strong>t-tests versus z-tests</strong>. In Question 6.6 of the notes, we use a normal approximation for the statistic <span class="math inline">\(\hat\beta \big/\mathrm{SE}(\hat\beta)\)</span>. When carrying out linear regression analysis, it is good and customary practice to use Student’s t distribution intead. Should we do that here? What are the arguments for and against it? Think about the justification for the t-test versus the justification for the z-test.</p></li>
+<li><p><strong>The multiplicative structure for SARIMA</strong>. Question 6.2 raised the issue of whether there is a scientific reason to think that practical models for seasonal phenomena should have a product structure to their ARMA polynomials, leading to a preference for [S3] over [S2] that goes beyond methodological convenience. Can you suggest a reason, or alternatively suggest a specific case where a non-multiplicative model like [S2] makes more sense?</p></li>
+</ol>
 <hr />
 
 
