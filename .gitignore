@@ -26,5 +26,6 @@
 !/tmp/.gitkeep
 **/tmp*
 local
-
+cache
+figure
 

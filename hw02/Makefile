@@ -3,7 +3,7 @@ default: html-docs
 
 r-scripts: hw02.R
 
-html-docs: hw02.html
+html-docs: hw02.html sol02.html
 
 %.html: %.Rmd
 	Rscript --vanilla -e "rmarkdown::render(\"$*.Rmd\",output_format=\"html_document\")"
