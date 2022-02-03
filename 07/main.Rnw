@@ -68,6 +68,10 @@ set.seed(2050320976)
 
 \begin{frame}[fragile]{What is the spectrum of a time series model?}
 
+\mode<presentation>{
+\vspace{-1mm}
+}
+
 \bi
 \item  We begin by reviewing eigenvectors and eigenvalues of covariance matrices. This eigen decomposition also arises elsewhere in statistics, e.g. principle component analysis.
 
@@ -165,16 +169,27 @@ round(V_eigen$values[1:9],2)
 \begin{frame}[fragile]
 \frametitle{The eigenvectors for a long stationary time series model}
 
+\mode<presentation>{
+\vspace{-2.5mm}
+}
+
 \bi
-\item  Suppose $\{Y_n,-\infty<n<\infty\}$ has a stationary autocovariance function $\gamma_h$.
-
-\item  We write $\Gamma$ for the infinite matrix with entries
+\item  Suppose $\{Y_n,-\infty<n<\infty\}$ has a stationary autocovariance function $\gamma_h$. Write $\Gamma$ for the infinite array with entries
 \begin{equation} \Gamma_{m,n} = \gamma_{m-n} \quad \mbox{for all integers $m$ and $n$}.\end{equation}
-
-\item  An infinite eigenvector is a sequence $\ev=\{\ev_n, -\infty<n<\infty\}$ with corresponding eigenvalue $\lambda$ such that
+\item To focus on concepts over technical details, we assume infinite sums converge and order of summation can be exchanged, so infinite arrays behave like finite matrices.
+\item  An eigenvector for $\Gamma$ is a sequence $\ev=\{\ev_n, -\infty<n<\infty\}$ with corresponding eigenvalue $\lambda$ such that
 \begin{equation}\Gamma \ev = \lambda \ev,\end{equation}
 or, writing out the matrix multiplication explicitly,
+
+\mode<presentation>{
+\vspace{-3mm}
+}
+
 \begin{equation}\sum_{n=-\infty}^\infty \Gamma_{m,n} \ev_n = \lambda \ev_m\quad \mbox{for all $m$}.\end{equation}
+
+\mode<presentation>{
+\vspace{-1mm}
+}
 
 \item  We look for a sinusoidal solution, $\ev_n = e^{2\pi i\omega n}$, where $\omega$ is cycles per unit time.
 
