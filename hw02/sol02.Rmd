@@ -5,8 +5,9 @@ output:
   html_document:
     toc: yes
 bibliography: sol02.bib
-csl: ../big-data-and-information-analytics.csl
+csl: https://raw.githubusercontent.com/citation-style-language/styles/master/cell-numeric.csl
 ---
+
 \newcommand\prob{\mathbb{P}}
 \newcommand\E{\mathbb{E}}
 \newcommand\var{\mathrm{Var}}
