@@ -525,7 +525,7 @@ plot(s1,xlim=c(0,0.7),ylim=c(1e-2,max(s1$spec)),main="")
 
 \item We usually only interpret bandwidth up to a constant. For a particular smoothing algorithm and software implementation, you learn by experience to interpret the comparative value. Smaller bandwidth means less smoothing. 
 
-\item Typically, when writing reports, it makes sense to focus on the tuning parameter for the smoother in question, which is not the bandwidth unless you are going kernel smoothing.
+\item Typically, when writing reports, it makes sense to focus on the tuning parameter for the smoother in question, which is not the bandwidth unless you are doing kernel smoothing.
 
 \ei
 \end{frame}
