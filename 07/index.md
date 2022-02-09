@@ -10,6 +10,7 @@ output: html_document
 |:----------------|:---------------------------------------------------------------------------------:|
 | Lecture slides  | [pdf](slides.pdf) |
 | Lecture notes   | [pdf](notes.pdf) |
+| Annotated slides | [pdf](slides-annotated.pdf) |
 | Recording, Winter 2021: Chapter 7, Part 1  | [(29 mins)](https://youtu.be/72aKoeHqhe8) |
 | Recording, Winter 2021: Chapter 7, Part 2  | [(29 mins)](https://youtu.be/zpMS4jjYpcc) |
 
@@ -20,7 +21,7 @@ output: html_document
 <iframe width="560" height="315" src="https://www.youtube.com/embed/zpMS4jjYpcc" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
 
 <!--
-| Annotated slides | [PDF](slides-annotated.pdf) |
+| Annotated slides | [pdf](slides-annotated.pdf) |
 -->
 
 ----------------------
