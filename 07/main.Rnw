@@ -319,7 +319,7 @@ S_n &=& \frac{1}{\sqrt{N}}\sum_{k=1}^N Y_k\sin(2\pi \omega_n k) \mbox{ for $1\le
 \bi
 \item  The frequency components of the data can be written as real and imaginary parts of the \myemph{discrete Fourier transform},
 \begin{eqnarray*}
-{d_n} &=& \frac{1}{\sqrt{N}} \sum_{k=1}^N \data{y_k} e^{-2\pi i n/N}
+{d_n} &=& \frac{1}{\sqrt{N}} \sum_{k=1}^N \data{y_k} e^{-2\pi i k n/N}
 \\
 &=&{c_n} - i{s_n}
 \end{eqnarray*}
