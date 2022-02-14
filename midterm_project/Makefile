@@ -1,10 +1,13 @@
 default: html-docs
 
 
-html-docs: midterm_project_info.html
+html-docs: midterm_project_info.html midterm_review.html
 
 %.html: %.Rmd
 	Rscript --vanilla -e "rmarkdown::render(\"$*.Rmd\",output_format=\"html_document\")"
+
+%.html: %.md
+	Rscript --vanilla -e "rmarkdown::render(\"$*.md\",output_format=\"html_document\")"
 
 %.R: %.Rmd
 	Rscript --vanilla -e "library(knitr); purl(\"$*.Rmd\",output=\"$*.R\")"

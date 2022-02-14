@@ -1,4 +1,4 @@
-default: participation2.html
+default: participation2.html participation3.html participation4.html
 
 %.html: %.Rmd
 	Rscript --vanilla -e "rmarkdown::render(\"$*.Rmd\",output_format=\"html_document\")"
