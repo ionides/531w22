@@ -88,6 +88,8 @@ Please read the [grading policy in the syllabus](syllabus.html) before submittin
 
 * [Homework 4](hw04/hw04.html), due Mon Feb 14, 11:59pm.
 
+* [Participation 4](participation/participation4.html), due Mon Mar 7, 11:59pm.
+
 <!--
 
 [Solution](hw04/sol04.html).
