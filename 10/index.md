@@ -1,5 +1,5 @@
 ---
-title: "Analysis of Time Series<br>STATS/DATASCI 531, Winter 2022<br>Chapter 10: Introduction to partially observed Markov process models"
+title: "Modeling and Analysis of Time Series Data<br>STATS/DATASCI 531, Winter 2022<br>Chapter 10: Introduction to partially observed Markov process models"
 author: "Edward L. Ionides"
 output: html_document
 ---
@@ -10,6 +10,7 @@ output: html_document
 |:----------------|:---------------------------------------------------------------------------------:|
 | Lecture slides  | [pdf](slides.pdf) |
 | Lecture notes   | [pdf](notes.pdf) |
+| Annotated slides | [pdf](slides-annotated.pdf) |
 | Recording, Winter 2021: Chapter 10, Part 1  | [(22 mins)](https://youtu.be/gEx8qpqmTFE) |
 | Recording, Winter 2021: Chapter 10, Part 2  | [(21 mins)](https://youtu.be/nBxvbU7GkEc) |
 | Recording, Winter 2021: Chapter 10, Part 3  | [(13 mins)](https://youtu.be/ArdtfLLL-a4) |
