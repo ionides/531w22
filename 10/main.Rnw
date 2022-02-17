@@ -257,7 +257,7 @@ f_{Y_n|X_{0:N},Y_{1:n-1},Y_{n+1:N}}(y_n\given x_{0:N},y_{1:n-1},y_{n+1:N}) = f_{
 \item  The measurement model is \myemph{time-homogeneous} if there is a conditional probability density function $g(\cdot \given \cdot )$ such that, for all $n\in 1:N$,
 \begin{equation} f_{Y_n|X_n}(y_n\given x_{n})= g(y_n\given x_n).\end{equation}
 
-\item Time-inhomogeneous process and measurement models are sufficiently common that we benefit from the extra generality of writing $f_{X_n|X_{n-1}}(x_n|x_{n-1}$ and $f_{Y_n|X_n}(y_n|x_n)$ versus $f(x_n|x_{n-1}$ and $g(y_n|x_n)$.
+\item Time-inhomogeneous process and measurement models are sufficiently common that we benefit from the extra generality of writing $f_{X_n|X_{n-1}}(x_n|x_{n-1})$ and $f_{Y_n|X_n}(y_n|x_n)$ versus $f(x_n|x_{n-1})$ and $g(y_n|x_n)$.
 
 \ei
 
