@@ -321,7 +321,7 @@ A reason that POMP models form a useful tool for statistical work is that there 
 
 \item This can be evaluated numerically or algebraically. We will see that Monte Carlo methods can be a good tool.
 
-\item The name ``filtering'' comes from the history of signal processing. A noisy received signal was filtered through capacitors and resistors to estimate the source signal.
+\item The name ``filtering'' comes from the history of signal processing. A noisy received signal was passed through capacitors and resistors to construct a band pass filter estimating the source signal, just like an optical filter removes unwanted frequencies of light.
 
 \ei
 
