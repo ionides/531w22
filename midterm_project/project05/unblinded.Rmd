@@ -1,0 +1,272 @@
+---
+title: Study on the Birth Rate in the U.S.A.
+subtitle: "SATST531 Midterm Project"
+author: Yurui Chang, Haichao Ji, Ruoyang Liu
+output: 
+  html_document: 
+    theme: united
+    toc: yes
+    toc_float: true
+    highlight: tango
+bibliography: midtermref.bib
+csl: ecology.csl
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = FALSE,
+	message = FALSE,
+	warning = FALSE,
+	fig.align='center'
+)
+rm(list = ls())
+library(zoo)
+library(tidyverse)
+library(ggplot2)
+library(astsa)
+library(tseries)
+library(forecast)
+library(ggplot2)
+library(knitr)
+library(sjPlot)
+library(sjmisc)
+library(sjlabelled)
+```
+
+# 1.Introduction
+
+Growth of population has always been a concern for governments of many countries. The birth rate is one of the most significant indicators that influence the population and structure of the population. It determines the speed of growth of population and the percentage of people of different ages in a country. It is well known that the scale and structure of population have important effects on the development of economics, education and social structure. Also, the birth rate depends on various factors, such as economics, and agricultural production, science and technology, especially medical level, and culture. Exploring the features of birth through history can help us view the development and constantly changing culture of a country. Moreover, knowing more about the birth cycle can help women wanting to get pregnant. 
+
+The United States, the fastest developed country in the 20th century, its birth may let us view a tip of the iceberg that why the USA can develop so fast in the last century that it must have certain relation with economics, science and culture. In this report, we are interested in mining the relationship between the birth rate and month, to improve the accuracy of birth rate prediction. We mainly solve the question about the optimal model for this series. To sum up, we would like to select birth data of the late-20-century of the United States as a research object and make a time series analysis to find out the regulation and trend of the birth.
+
+The data we selected is CDC Births Data 1969-2008 [@data]. This data is drawn from the USA Centers for Disease Control and Prevention. There are 5 columns which include 4 numerical variables and 1 categorical variable. The numerical variables are year, month, day and birth. The categorical variable is gender(Male and Female). We selected the data from 1969 to 1988 as we would like to explore the birth before the important timeline--the collapse of the Soviet Union as it is a turning point which has enormous influence on every part of the US. We will use the data to make a time series analysis of the monthly birth of the US.
+
+In this report, we will use $\text{SARIMA}$ method to explore the birth through time series. The report will be divided into parts. The first one is data exploration which includes the overall view of data, heteroscedasticity and decomposition of data. We also determine stationary in this part. The second section is model selection. We use Grid Search method to obtain the best fitted model. The third section is to test the model. We will carry out diagnostics in this part. The last section is the conclusion and possible improvement.
+
+# 2.Data Exploration
+
+The information we used includes dates and birth rate. Firstly, we make a plot of birth for every month with the original data. We intend to find out the relation of birth rate and the changes of birth between different months. Thus, we make the month variable from 1969 to 1988 to be a consecutive variable. As it can be seen from the time series plot with birth as y-label and month as x-label, the trend of the data can be approximately splitted into 3 parts. The first is approximately from 0 to 25, which has a significant increasing trend. The second part is from 25 to 50, and the values are descending. The last part, generally, shows an evident increasing trend. Besides the trend of the time series data, we also notice that the data has very regular fluctuations which seem to have periodicity. We, therefore, suppose that this data may fit with a $\text{SARIMA}$ model with overall trend and periodic seasoning effect [@proj][@proj2].
+Before the subsequent process of analysis and model selection, the original data is found to be heteroscedastic and non-stationary. Hence, we transform the data through logarithm and then difference it. Thereafter, our data successfully meets the model assumption and is stationary. We further use grid search method to determine other parameters as long as we figure out the periodicity by using the logged data. More details have been presented in the following.
+
+```{r fig.width = 6,fig.height = 3.5}
+birth = read.csv('births.csv')
+
+birth_month = birth %>% filter(year %in% c(1969:1988)) %>% group_by(year, month) %>% summarize(births=sum(births))
+birth_month$dates = paste(birth_month$year, birth_month$month, sep='-') %>% as.yearmon("%Y-%m")%>% as.Date(format="%Y-%m")
+ggplot(birth_month, aes(x=dates, y=births)) + geom_line() + xlab("Year")+ylab("Birth Rate")+theme_bw()
+
+birth_per_month = birth_month$births
+```
+
+## 2.1 Heteroscedasticity Removing
+
+The series shows compound growth and has evident patterns, which is a sign of heteroscedasticity, and the logarithm may be helpful to remove the increase in variance. Taking the logarithm of the data will not fatten an inflationary growth pattern, but it will straighten it out so that it can be fitted by a linear model(e.g., a random walk or ARIMA model with constant growth, or a linear exponential smoothing model) [@heter]. Also, taking the logarithm of the data will convert multiplicative seasonal patterns to additive patterns, so that if we perform seasonal adjustments after taking the logarithm, we should use the additive type. 
+
+```{r fig.width = 6,fig.height = 3.5}
+ggplot(birth_month, aes(x=dates, y=log(births))) + geom_line() + xlab("Year")+ylab("Logged Birth Rate")+theme_bw()
+```
+
+Log serves our purpose since it did remove the increase in variance. 
+
+## 2.2 Data Decomposition
+
+```{r}
+Log_Birth = log(birth_per_month)
+date = seq(from=1969,length=length(Log_Birth),by=1/12)
+trend = ts(loess(Log_Birth~date, span=0.8)$fitted,
+            start=1969,frequency=12)
+noise = ts(Log_Birth - loess(Log_Birth~date,span=0.1)$fitted,
+           start=1969,frequency=12)
+seasonal = Log_Birth - trend - noise
+plot(ts.union(Log_Birth, trend, noise, seasonal),
+     main="Decomposition of logged birth as trend + noise + cycles")
+```
+
+Based on the decomposition of the time series[@note], we could figure out that this birth series is generally a combination of level, trend, seasonality, and noise components. 
+
+## 2.3 Stationarity Check
+
+```{r}
+acf2(birth_per_month, main='ACF & PACF for Series: Birth Rate')
+```
+
+We have seen by the ACF and PACF that this is not white noise, but a series of correlated values. Nevertheless, we can do the Ljung-Box test on the time series to formally validate this claim. 
+
+```{r}
+#adf.test(birth_per_month,alternative = 'stationary')
+Box.test(log(birth_per_month), lag=20, type="Ljung-Box")
+```
+
+By using Ljung-Box test, it yields a small p-value which rejects the null hypothesis, showing the data is not stationary. So this supports our ACF plot consideration above where we stated: it is likely that this is not purely white noise and some time series information exists in this data. Actually, there is an obvious trend in the time series, and thus we difference the data to detrend it. The corresponding figure is shown below and proves that the series now does not have apparent trend now: 
+
+```{r fig.width = 6,fig.height = 3.5}
+df = data.frame(birth_month$dates[2:240], diff(log(birth_month$births)), rep(mean(diff(log(birth_per_month))), 239))
+colnames(df)=c('dates', 'birth', 'mu')
+ggplot(df) + geom_line(aes(x=dates, y=birth)) + geom_line(aes(x=dates, y=mu), color="red") + xlab("Year")+ylab("Diff(Log(Birth Rate))")+theme_bw()
+```
+
+## 2.4 Period Detection
+
+```{r}
+smoothed_r = spectrum(log(birth_per_month))
+omega = smoothed_r$freq[which.max(smoothed_r$spec)]
+f=1/omega
+```
+
+According to the plots above, we could figure out there seems to have cycles in the rear of the data. We use frequency domain to analyze the spectral density of the series and here is the smoothed periodogram with an obvious peak. We found that the highest frequency is 0.0833, which corresponds to 12 months(a year). This phenomenon agrees with our hypothesis that the period is 12 months. 
+
+# 3. Model Selection
+
+## 3.1 SARIMA Model
+
+Given that the period is equal to 12 (one year), it is supposed a general $\text{SARIMA}(p,1,q)\times(P,1,Q)_{12}$ model [@shumway2000time] should be conducted for monthly data:
+
+$$\phi(B)\Phi(B^{12})[(1-B)^d(1-B^{12})^D(Y_n - \mu)] = \psi(B)\Psi(B^{12})\epsilon_n$$
+where $\left\{\epsilon_n\right\}$ is a white noise process and:
+$$
+\begin{aligned}
+\mu &= \mathbf{E}\left\{(1-B)^d(1-B^{12})^DY_n\right\}\\
+\phi(x) &= 1-\phi_1x-\cdots-\phi_px^p\\
+\psi(x) &=1+\psi_1x+\cdots+\psi_qx^q\\
+\Phi(x) &= 1-\Phi_1x-\cdots-\Phi_Px^P\\
+\Psi(x) &=1+\Psi_1x+\cdots+\Psi_Qx^Q\\
+\end{aligned}
+$$
+
+## 3.2 Hyperparameters Configuration by Grid Search
+
+Plot the ACF and PACF of monthly births number with first `diff` 1 and then `diff` with a period:
+
+```{r}
+acf(diff(diff(log(birth_per_month)),12),drop.lag.0 = FALSE)
+pacf(diff(diff(log(birth_per_month)),12))
+```
+
+According to ACF and PACF, $P,Q,p,q$ can be roughly estimated as $p = 1,2$, $q = 0, 1, 2, 3$, $P = 0,1$, and $Q = 0,1$. Some possible models will be conducted and compared with AIC. We try to find the optimal model by grid search method[@grid], and the results are listed here:
+
+```{r}
+aic_table <- function(data,P,Q,p,q){
+  table <- matrix(NA,(p+1),(q+1))
+  for(i in 0:p) {
+    for(j in 0:q) {
+       table[i+1,j+1] <- arima(data,order=c(i,1,j),include.mean=TRUE,seasonal = list(order=c(P,1,Q),period=12))$aic
+    }
+  }
+  dimnames(table) <- list(paste("AR",0:p, sep=""),paste("MA",0:q,sep=""))
+  table
+}
+```
+
+For $P = Q = 0$:
+
+```{r}
+kable(aic_table(log(birth_per_month),0,0,2,3))
+```
+
+For $P = 1, Q = 0$:
+
+```{r}
+kable(aic_table(log(birth_per_month),1,0,2,3))
+```
+
+For $P = Q = 1$:
+
+```{r}
+kable(aic_table(log(birth_per_month),1,1,2,3))
+```
+
+For all combinations of possible parameters, the model $\text{SARIMA}(2,1,3)\times(1,1,1)_{12}$ has the smallest AIC value. We select two models $\text{SARIMA}(2,1,2)\times(1,1,1)_{12}$ and $\text{SARIMA}(2,1,3)\times(1,1,1)_{12}$ as our candidate models. 
+
+The coefficients of the fitted model with `AR=2` and `MA=3` are:
+```{r}
+arima_23 <- arima(log(birth_per_month),order=c(2,1,3),include.mean=TRUE,seasonal=list(order=c(1,1,1),period=12))
+```
+<div align="center">
+```{r}
+tab_model(arima_23)
+```
+</div>
+
+Here are the corresponding roots for `AR` and `MA` respectively:
+```{r}
+kable(polyroot(c(1,-coef(arima_23)[c("ar1", "ar2")])), caption = "AR")
+kable(polyroot(c(1,coef(arima_23)[c("ma1", "ma2", "ma3")])), caption = "MA")
+```
+
+Actually, almost all roots are on the unit circle, showing that this model is at the threshold of non-invertibility. 
+
+The coefficients and roots for another model are:
+```{r}
+birth_arima <- arima(log(birth_per_month),
+                     order=c(2,1,2),include.mean=TRUE,seasonal=list(order=c(1,1,1),period=12))
+```
+
+<div align="center">
+```{r}
+tab_model(birth_arima)
+```
+</div>
+
+```{r}
+kable(polyroot(c(1,-coef(birth_arima)[c("ar1", "ar2")])), caption = "AR")
+kable(polyroot(c(1,coef(birth_arima)[c("ma1", "ma2")])), caption = "MA")
+```
+
+Comparatively, roots are just outside the unit circle, suggesting we have a stationary causal fitted SARIMA. 
+
+Next, we will do a formal hypothesis test using Wilk's theorem. Suppose we have two nested hypothesis 
+$H_0: \text{SARIMA}(0,1,0)\times(1,1,1)_{12}$ and
+$H_1: \text{SARIMA}(2,1,2)\times(1,1,1)_{12}$. Under the null hypothesis, we have
+
+$$
+1/2\Lambda = l^{(1)}-l^{(0)}\approx1/2\chi^2_{D^{(1)}-D^{(0)}}
+$$
+
+where $\chi^2_{d}$ is a chi-squared random variable on d degree of freedom, and $l^{(i)}$ is the maximum likelihood under the hypothesis $H_i$. 
+
+```{r}
+arma00 = arima(Log_Birth, order=c(0, 1, 0),include.mean=TRUE,seasonal=list(order=c(1,1,1),period=12))
+cut = qchisq(0.95, 4)
+lam = 2*(birth_arima$loglik - arma00$loglik)
+```
+
+The cut-off value for $\chi^2_4$ distribution with $95\%$ significance confidence is 9.49, which is smaller than $\Lambda=29.53$. So we could reject the null hypothesis and thus $\text{SARIMA}(2,1,2)\times(1,1,1)_{12}$ is appropriate for the data. To sum up, based on AIC table, roots, and hypothesis test result, we select this model as the best one. The fitted model is: 
+
+$$(1+0.82B+0.58B^2)(1+0.02B^{12})[(1 - B)(1 - B^{12})Y_n] = (1+0.53B+0.32B^2)(1-0.76B^{12})\epsilon_n$$
+
+# 4.Diagnostics
+
+```{r fig.width = 6,fig.height = 3.5}
+df_fitted = data.frame(birth_month$dates, log(birth_per_month), fitted(birth_arima))
+colnames(df_fitted) = c("dates", "Original", "Predicted")
+df_fitted %>% 
+  ggplot() + geom_line(aes(x=dates, y=Original, color="Original")) + geom_line(aes(x=dates, y=Predicted, color="Predicted")) + ylab("Log(Birth Rate)")+labs(color="Legend")+scale_color_manual(values = c("blue","red"))+theme_bw()
+```
+
+In this plot, the blue line stands for the true log-transformed data while the red line represents the predicted data. We can see that the fitted values are quite close to the original ones. The trend and the seasonality have been captured well by our model. However, the ranges of our predicted value, namely the difference between maximum and minimum in one cycle, are generally larger than the original points for data after 200, which indicates we should adjust our model to better fit the data.
+
+```{r}
+par(mfrow=c(3,1))
+plot(birth_arima$residuals,ylab="Residuals",main="Residuals for the SARMA(2,1,2)(1,1,1)[12] errors model")
+qqnorm(birth_arima$residuals)
+qqline(birth_arima$residuals)
+acf(birth_arima$residuals,lag.max=20,xlab="Lag(Days)")
+Box.test(birth_arima$residuals, lag=20, type="Ljung-Box")
+#adf.test(birth_arima$residual)
+#checkresiduals(birth_arima$residual,test="LB")
+```
+
+The residuals oscillated around zero symmetrically over time. Besides, the QQ-plot proves that the residuals are normally distributed, which are generally consistent with the assumption that the residuals are white noise. The ACF plot of the residual does not show quite significant autocorrelations, even though there are few values of ACF fall outside the dashed lines. The result in Box-Ljung test does not the reject the null hypothesis, demonstrating the residuals are independently distributed as well.
+
+# 5. Conclusion and Further Work
+In this report, we are mainly interested in exploring the changes of birth rate over a few years, which is one of the most basic and important measures in demography. In fact, birth rates affect public policy and budgeting for education and health systems, and could have major impacts on the well-being of a country’s population. The plot of the data tells us the birth rate is increasing gradually, and it also has some seasonal features. After removing the trend of the series, we use grid search method to find the optimal hyperparameters p, q, P, and Q based on the AIC criterion. Finally, we obtain the model $\text{SARIMA}(2,1,2)\times(1,1,1)_{12}$. The diagnostics validate our methods and show availability of the model. It tells us the birth rate has close relationship with the months and it is also periodic with the cycle 12 months. However, it also indicates that predicting the birth rate merely depending on the date is not quite comprehensive and convincing. Possibly, we could add other information like sex to improve our model [@sex]. 
+
+# Reference
+<div id="refs"></div>
+\newpage
+
+# Collaboration
+Haichao Ji found the data, and he was responsible for the model selection, including programming and analyzing the results. Yurui Chang also found possible datasets, wrote codes to make basic analysis of the data, and finished the data exploration and conclusion parts. Ruoyang Liu mainly focused on organization, finding the background information, integration, and writing the introduction. We worked on the diagnostics together and all actively took part in the group discussions. 
+
+
+
