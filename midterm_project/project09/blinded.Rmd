@@ -1,0 +1,290 @@
+---
+title: "Stats 531 Midterm Project"
+output:
+  html_document: default
+  pdf_document: default
+---
+```{r setup, include=FALSE} 
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+```
+
+## 1 Introduction 
+### 1.1 Background
+* National Association of Securities Dealers Automated Quotations, also called as Nasdaq or Nasdaq exchange, is a global electronic marketplace for buying and selling securities. Nasdaq is also used to refer to the __Nasdaq Composite__, an index of more than 3,000 stocks listed on the Nasdaq exchange. 
+
+* Gold is the most popular investment of all the precious metal. Its price volatility and differentiated characteristics from stocks have made the gold price an important indicator of global economic trends.
+
+* Nasdaq index and Gold price are both important indicators of global economy. Historically, people treated gold as a safe-harbor asset that protects purchasing power against inflation. Also, Nasdaq index showed superior hedging ability than other financial products in terms of multiple compositions of almost all stocks listed on the Nasdaq stock exchange. It is reasonable for us to think that they may have some certain relationship and associated behavior pattern.
+
+### 1.2 Objective
+
+In this project, we would figure out the relationship between the Nasdaq index and the Gold Price. We would fit the suitable model between two data sets and look up for their patterns. 
+
+## 2. Data Overview
+
+We used 10 years Nasdaq index price data and Gold price data in this project. The time conditions for two data sets are equal with March 2012 to January 2022, total of 119 months. The historical data of Nasdaq index and Gold Price were downloaded from the yahoo finance (https://finance.yahoo.com/).
+```{r}
+data=read.csv("data.csv", header = TRUE)
+head(data)
+```
+
+```{r}
+summary(data)
+```
+
+In the summary of the data, we could figure out that the price range of the Nasdaq was 2827 to 15645, while the price range of the gold price was 1064 to 1966. It can be assumed that the Nasdaq price fluctuated much more violently than the Gold Price in the given time series.
+
+```{r}
+data$date = as.Date(data$Date)
+date=data$date
+Nasdaq=data$NASDAQ_Index
+Gold=data$Gold_Price
+par(mar=c(5, 4, 4, 5))
+plot(date, Nasdaq, col = "red", xlim = c(as.Date("2012-03-01"), as.Date("2022-01-01")),main = "Time Plot of NASDAQ Index and Gold Price", xlab = "", ylab = "NASDAQ Index", col.lab = "red", type = 'l')
+par(new = TRUE)
+plot(date, Gold, col = "blue", xlim = c(as.Date("2012-03-01"), as.Date("2022-01-01")), axes = FALSE, xlab="Time", ylab = "", type = 'l')
+axis(side=4, col ="blue")
+mtext("Gold Price", col = "blue", side = 4, line = 4)
+```
+
+We used blue line to represent the Gold Price and red line to represent the Nasdaq index data during the time window of 2012 to 2022. During the given time sereis, the Nasdaq index steadily increased while the Gold price tended to decrease until 2016 and increase from 2016 to 2022. Also, after 2016, the Nasdaq index and the gold price showed similar pattern. In conclusion, from the data overview, we could check that there exists reasonable relationship between the Nasdaq index and the gold price data. However, there also existed too much fluctuation between two time series data sets which may caused by other factors in the market.
+
+## 3 Building Model    
+
+### 3.1 Eliminating Trend   
+As we learnt in the lecture, we need to find whether the fluctuations are relevant. We use Loess Smoothing to extract the trend, noise and cycle component.
+
+Low frequency component could be considered as trend. High frequency component could be considered as noise. Trend component may be affected by long-term economic and financial situations, and noise could be attributed to various reasons and factors. Therefore, we don't need to include these parts while building models.
+
+Mid-range frequency component could be considered as cycle component. It is what we should use to build relavant models.
+
+```{r, echo=FALSE}
+Year=as.numeric(format(date,format="%Y"))
+Month=as.numeric(format(date,format="%m"))
+time=Year+(Month-1)/12
+nas_low=ts(loess(Nasdaq~time,span=0.5)$fitted,start=time[1],frequency=12)
+nas_high=ts(Nasdaq-loess(Nasdaq~time,span=0.1)$fitted,start=time[1],frequency=12)
+nas_cycles=ts(Nasdaq-nas_low-nas_high,start=time[1],frequency=12)
+ts.nas=ts.union(Nasdaq,nas_low,nas_high,nas_cycles)
+colnames(ts.nas)=c("Index","trend","noise","cycles")
+
+plot(ts.nas,main="Decomposition of Nasdaq index as trend + noise + cycles")
+```
+
+```{r, echo=FALSE}
+gold_low=ts(loess(Gold~time,span=0.5)$fitted,start=time[1],frequency=12)
+gold_high=ts(Gold-loess(Gold~time,span=0.1)$fitted,start=time[1],frequency=12)
+gold_cycles=ts(Gold-gold_low-gold_high,start=time[1],frequency=12)
+ts.gold=ts.union(Gold,gold_low,gold_high,gold_cycles)
+colnames(ts.gold)=c("Index","trend","noise","cycles")
+
+plot(ts.gold,main="Decomposition of Gold Price as trend + noise + cycles")
+
+```
+
+Now we could put the cycle component of two data sets into one plot. As we could see, fluctuation of gold price is much more violent than NASDAQ index. However, we could still see a tendency that as two data sets fluctuate in a similar pattern. What's more, it's better comparing with previous plots. Therefore, we could say eliminating the trend and noise is a good choice.
+
+```{r, echo=FALSE}
+par(mar=c(5, 4, 4, 5))
+plot(time,nas_cycles,type="l",xlab="",ylab="NASDAQ Index",
+     col="red",col.lab="red",main="Cycle components of NASDAQ Index and Gold Price")
+par(new=TRUE)
+plot(time,gold_cycles,type="l",col="blue",xlab="",ylab="",axes=FALSE)
+axis(side=4,col="blue")
+mtext("Gold Price", col = "blue", side = 4, line = 4)
+```
+In the plot, we could find that the gold price tends to increase as Nasdaq index increases, and decreases otherwise. In other words, we could find a strong tendency that two data sets fluctate in a simliar pattern.
+
+### 3.2 ARMA Model    
+As we know, a general ARMA(p,q) model is
+$$\phi(B)(Y_n-\mu)=\psi(B)\epsilon_n$$   
+
+where
+$$\mu=E[Y_n]$$
+$$\phi(x)=1-\phi_1x-\phi_2x^2-...-\phi_px^p$$  
+
+$$\psi(x)=1+\psi_1x+\psi_2x^2+...+\psi_px^p$$    
+
+What's more, {$\epsilon_n$} is the white noise process and B is the backshift operator.
+
+In our problem, we use following ARMA errors model    
+$$I_n^c=\alpha+\beta P_n^c+w_n$$  
+where {$w_n$} is the Gaussian ARMA Process and $I_n^c$, $P_n^c$ are cycle components.
+
+### 3.3 Model Selection    
+We use AIC to choose a suitable ARMA Model for our models.    
+
+```{r, echo=FALSE}
+aic_table <- function(data,P,Q,xreg=NULL){
+  table <- matrix(NA,(P+1),(Q+1))
+  for(p in 0:P) {
+    for(q in 0:Q) {
+      table[p+1,q+1] <- arima(data,order=c(p,0,q),xreg=xreg)$aic
+    }
+  }
+  dimnames(table) <- list(paste("<b> AR",0:P, "</b>", sep=""),paste("MA",0:Q,sep=""))
+  table
+}
+nas_aic_table <- aic_table(nas_cycles,4,4,xreg=gold_cycles)
+require(knitr)
+kable(nas_aic_table,digits=2)
+```
+
+Based on AIC table, ARMA(1,4) model showed the minimum AIC value. Because large models may have some problems such as redundancy, causality, and invertibility, we should check whether our models are suitable.
+
+
+
+```{r}
+arma14=arima(nas_cycles,xreg=gold_cycles,order=c(1,0,4))
+
+abs(polyroot(c(1,-arma14$coef[1])))
+
+```
+
+```{r}
+abs(polyroot(c(1,arma14$coef[2:5])))
+```
+
+Based on the results above, ARMA(1,4) has both causality and invertiblity. Therefore, we could choose ARMA(1,4) as our model. However, since the AIC table shows that ARMA(1,4), ARMA(2,4), and ARMA(3,4) have close AIC values, we should perform diagnostic check before choosing the final model.
+
+
+## 4. Diagnostic Analysis  
+### 4.1 Significance Test
+We first perform log-likelihood ratio test between ARMA(1,4) and ARMA(3,4) with a 2 degrees of freedom. 
+```{r}
+loglikratio=as.numeric(logLik(arima(nas_cycles,xreg=gold_cycles,order=c(1,0,4)))
+              -logLik(arima(nas_cycles,xreg=gold_cycles,order=c(3,0,4))))
+p_value=1-pchisq(2*loglikratio,df=2)
+p_value
+```
+
+Since the p-value is very large, we could not reject our null hypothesis. That is, we should choose ARMA(1,4) over ARMA(3,4). Then, we perform the log-likelihood test on ARMA(1,4) and ARMA(2,4). 
+
+```{r}
+loglikratio=as.numeric(logLik(arima(nas_cycles,xreg=gold_cycles,order=c(1,0,4)))
+              -logLik(arima(nas_cycles,order=c(2,0,4))))
+p_value=1-pchisq(2*loglikratio,df=1)
+p_value
+```
+
+We could see that the p-value is still greater than 0.05, so we should choose our final model as ARMA(1,4).
+
+### 4.2 Residual Analysis
+
+Last but not least, we need to check model assumptions. From the plot below we can know that although the residuals vary a lot, its changes are mainly around 0. 
+
+```{r, echo=FALSE}
+plot(arma14$residuals,ylab="Residuals",main="Residuals for the ARMA(1,4) Errors Model")
+```
+
+From the ACF plot below we can see that most lags do not have a significant autocorrelation. Overall we can conclude that the errors are not correlated.
+
+
+```{r, echo=FALSE}
+acf(arma14$residuals, main="ACF of Residuals")
+```
+
+### 4.3 Normality
+From the QQ plot below we could see that the residuals are mostly normally distributed with slightly heavy right and left tail, indicating the normality assumption are mostly being met.
+
+```{r, echo=FALSE}
+qqnorm(arma14$resid)
+qqline(arma14$resid)
+```
+
+## 5. Further discussion
+### 5.1 Fitting the model in different time window
+
+To test our model, we fit our model in the different time window from Feb 2007 to Feb 2012.
+
+```{r, echo=FALSE}
+data2=read.csv("data_test.csv", header = T)
+colnames(data2) = c('Date', 'NASDAQ_Index', 'Gold_Price')
+head(data2)
+```
+```{r, echo=FALSE}
+data2$date = as.Date(data2$Date)
+date2=data2$date
+Nasdaq.test=data2$NASDAQ_Index
+Gold.test=data2$Gold_Price
+
+Year=as.numeric(format(date2,format="%Y"))
+Month=as.numeric(format(date2,format="%m"))
+t=Year+(Month-1)/12
+nas_low=ts(loess(Nasdaq.test~t,span=0.5)$fitted,start=t[1],frequency=12)
+nas_high=ts(Nasdaq.test-loess(Nasdaq.test~t,span=0.1)$fitted,start=t[1],frequency=12)
+nas_cycles.test=ts(Nasdaq.test-nas_low-nas_high,start=t[1],frequency=12)
+ts.nas.test=ts.union(Nasdaq.test,nas_low,nas_high,nas_cycles.test)
+colnames(ts.nas.test)=c("Index","trend","noise","cycles")
+
+gold_low=ts(loess(Gold.test~t,span=0.5)$fitted,start=t[1],frequency=12)
+gold_high=ts(Gold.test-loess(Gold.test~t,span=0.1)$fitted,start=t[1],frequency=12)
+gold_cycles.test=ts(Gold.test-gold_low-gold_high,start=t[1],frequency=12)
+ts.gold.test=ts.union(Gold.test,gold_low,gold_high,gold_cycles.test)
+colnames(ts.gold.test)=c("Index","trend","noise","cycles")
+par(mar=c(8, 7, 7, 8))
+plot(t,nas_cycles.test,type="l",xlab="",ylab="NASDAQ Index",
+     col="red",col.lab="red",main="Cycle components of NASDAQ Index and Gold Price")
+par(new=TRUE)
+plot(t,gold_cycles.test,type="l",col="blue",xlab="",ylab="",axes=FALSE)
+axis(side=4,col="blue")
+mtext("Gold Price", col = "blue", side = 4, line = 4)
+```
+
+```{r}
+modtest1=arima(nas_cycles.test,xreg=gold_cycles.test,order=c(1,0,4),include.mean = FALSE)
+modtest1
+```
+According to the the results above, we could find that the coefficients of ARMA(1,4) are significant.
+
+```{r}
+abs(polyroot(c(1,-modtest1$coef[1])))
+```
+
+```{r}
+abs(polyroot(c(1,modtest1$coef[2:5])))
+```
+Also, the model is casual and invertible since the roots of $\phi(x)$ and $\psi(x)$ are outside the unit circle.
+
+We can check the Gaussian White noise assumption from the residuals.
+
+```{r, echo=FALSE}
+acf(modtest1$residuals, main="ACF of Residuals")
+```
+
+According to ACF, using our model to fit the data from 2007 to 2012 seems reasonable and the Gaussian white noise assumption is not violated. We can conclude that we build the well suited model to find the relationship between two data sets.
+
+
+### 5.2 Other Factors
+
+As we mentioned in the Data overview part, the Gold price decreased before 2016 while Nasdaq was increased at that time window. Since our model was well fitted for the previous test data set, this violence seems not to be significant in building relationship between two data sets. However, we can still think about other factors that may impact when we are trying to find some relationships between composite stock prices and the precious metals.
+
+* The gold price can be under-perfored when people are less confident in the long-standing safe assets. This may be generated by the continued depreciation of currency. The causes of this phenomenon may be the central bank activities, rampant inflation, or potential interest rate changes. We can consider those impacts by including related parameters in our models.
+
+* Some specific events can also be other factors that may influence the Nasdaq index and Gold Price. For instance, the Covid-19 in 2019 had a huge impact on the global financial markets. Although there are always new critical events in the market, we may consider those factors also by factorizing those events into numeric values.
+
+
+## 6. Conclusion
+
+* A model for Nasdaq indexa and Gold price was following
+$(1 - 0.68B)(I_n^c - 0.47P_n^c) = (1 + 1.77B + 1.79B^2 + 1.67B^3 + 0.77B^4)\epsilon_n$
+
+* Not only fitted well for the training data from 2012 to 2022, our model also fitted well for the different time window data from 2007 to 2012. However, we can still consider other factors and variables to advance our model since our model only can evaluate the cycle components.
+
+
+## 7. Reference
+
+Class notes of Stats 531 (Winter 2022) ‘Analysis of Time Series’, instructor: Edward L. Ionides (https://ionides.github.io/531w22/)
+
+Investopedia (https://www.investopedia.com/terms/n/nasdaq.asp)
+
+Investopedia (https://www.investopedia.com/articles/stocks/11/how-to-invest-in-the-periodic-table.asp)
+
+The Relationship between the NASDAQ Index and Crude Oil Price (https://ionides.github.io/531w18/midterm_project/project42/Midterm_Project.html)
+
+USnews (https://money.usnews.com/investing/investing-101/articles/should-you-invest-in-gold)
+
+
+
+
+

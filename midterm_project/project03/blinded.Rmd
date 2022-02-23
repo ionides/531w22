@@ -1,0 +1,270 @@
+---
+title: "STATS531 Midterm Project"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+require(knitr)
+```
+
+<b><font size=5>1. Introduction</font></b>  
+Precious metals are metals that are rare and have a high economic value, due to various factors, including their scarcity, use in industrial processes, and role throughout history as a store of value. The most popular precious metals with investors are gold, platinum, and silver$^{1}$. Among them, people are very familiar with gold due to its scarcity.  
+
+Gold has always been an important form of investment method due to its  robustness to monetary policies, central banks or governments, its liquidity, and its indication of the economy$^{2}$. Since gold is so widely welcomed by worldwide investors and is so crucial for economy, this project hopes to analyze the gold price with the following research question:
+**Can we use time series analysis to forecast future gold returns?**  
+
+This project downloads data from *GOLDHUB*, which offers us the gold price over a range of timeframes from 1979 and under many consumer currencies$^{3}$. Since the market changes from time to time, this project turns to daily data for analysis to get a more detailed analysis of gold price.
+
+<b><font size=5>2. Exploratory Data Analysis</font></b>  
+<font size=5>2.1 Basic Analysis and Data Split</font>  
+As we can see from the following data structure, we find that there is a large value range for gold price from 1979 to 2022. <!-- Among them, the maximum gold price is nearly ten times the minimum gold price. Since there is large difference between gold price in latest years and gold price in years before 2010. We decide to split the data and focus on analyzing the gold price data in latest five years, which will be more useful for people to refer to for investment.  -->Gold prices are influenced by many macroeconomic factors, e.g. inflation, consumer sentiment, and federal monetary policy$^{4}$. We believe that the underlying behavior of gold prices over a specific time period of a few years might depend on the macroeconomic conditions during that time, and the "best" model over one time period may differ for another time period. Our current economy is strongly impacted by COVID-19. So, to forecast future gold returns in the present, we will only analyze data from the past two years.  
+```{r, echo=FALSE, out.width="50%"}
+# setwd("C:/Users/jonyc/Desktop/STATS531/Midterm_Project")
+price = read.csv("price.csv")
+colnames(price) <- c('Date','USD')
+price$USD = as.numeric(sub(",","",price$USD))
+price = na.omit(price)
+plot(strptime(price$Date, '%Y/%m/%d'), price$USD,type="l",xlab = "Date", ylab = "USD", main = "Daily Gold Price from 1979 to 2022")
+
+# Get and plot the latest five years' data
+plot(strptime(price$Date[10700:11220], '%Y/%m/%d'),price$USD[10700:11220],type="l",xlab = "Date", ylab = "USD", main = "Daily Gold Price from 2020 to 2022")
+two_years_price = price[10700:11220,]
+```
+
+```{r}
+summary(price$USD)
+summary(two_years_price$USD)
+```
+
+<font size=5>2.2 Autocorrelation and Data Preprocessing</font>  
+With the ACF figure below, we can see that there is substantial autocorrelation between gold price and its previous data.
+
+<!-- Therefore, we take the difference between the gold price. With the acf of price difference, we see that the price difference has little autocorrelation now. -->
+<!-- ![](acf_original.jpg)![](acf_diff.jpg) -->
+```{r, echo=FALSE, fig.align = 'center'}
+acf(two_years_price$USD,main = "Daily Gold Price (USD)")
+```
+It is common to analyze the log returns of financial products rather than the raw difference in prices, there is a random walk theory of financial markets that the log return of financial products, which gold can be considered as, behaves as a white noise process$^{5}$. We are interested in finding if this seems to hold true or not for gold returns, so we will analyze the log differences. The fact that there seems to be a non-stationary mean and variance of the price seems to fluctuate too also suggests this could help introduce stationarity to our data.
+```{r, echo=FALSE, fig.align = 'center'}
+# Perform log differencing on the original price data
+log_data = log(two_years_price$USD)
+log_returns = c()
+for (i in 1:(nrow(two_years_price)-1)){
+  log_returns[i] =  log_data[i+1] - log_data[i]
+}
+
+date = strptime(two_years_price$Date[1:nrow(two_years_price)-1], '%Y/%m/%d')
+log_returns_data = data.frame(date, log_returns)
+colnames(log_returns_data) <- c('Date','USD')
+plot(log_returns_data$Date, log_returns_data$USD, type='l', xlab="Data", ylab="Log return", main="Daily Gold Log Returns")
+```
+
+We see that the daily gold log returns appears stationary with no trend, with a mean around 0 and the variance not having any clear trend so we are ready to apply our time series analysis techniques.
+
+<!-- ```{r, echo=FALSE, fig.align='center'} -->
+<!-- acf(log_returns, main = "ACF of Daily Gold Log Returns") -->
+<!-- ``` -->
+
+<font size=5>2.3 Frequency Analysis</font>  
+As for the unsmoothed price difference, the period is about 9.64 days, and the period is around 12 days for smoothed price difference.
+  
+<!-- ![](original_spectrum.jpg)![](original_spectrum_smooth.jpg) -->
+<!-- ![](diff_spectrum.jpg)![](diff_spectrum_smooth.jpg) -->
+
+```{r, echo=FALSE, fig.align = 'center'}
+#Spectrum Analysis
+spec = spectrum(log_returns_data$USD,main = "Unsmoothed periodogram (Log Difference)")
+1/spec$freq[which.max(spec$spec)]
+smooth_spec = spectrum(log_returns_data$USD,spans = c(3,5,3), main = "Smoothed periodogram (Log Difference)")
+1/smooth_spec$freq[which.max(smooth_spec$spec)]
+```
+<b><font size=5>3. Model Selection and Analysis</font></b>  
+
+We now consider a time series for the log differences between the consecutive gold prices. It allow us to see the gold price's change so that the investor can predict the risk of investment as well as the approximate range of the future gold price. The following is the plot of the log difference returns with the mean included:
+
+```{r, echo=FALSE, fig.align = 'center'}
+plot(strptime(price$Date[10701:11220], '%Y/%m/%d'),log_returns_data$USD,type='l',main="Daily Gold Log Returns from 2020 to 2021",xlab="Date",ylab="USD")
+abline(h=mean(log_returns_data$USD),col="red",lwd=2)
+```
+
+According to the time series plot, we observe that there may be no specific trend and it shows fluctuating patterns around the mean 0.000295 (red horizontal line) which is basically zero.
+
+<!-- However, we notice that the rate of gold price's change is very high during 2020. We think the reason would be that the outbreak of Covid-19 affected gold market a lot and made variability of gold price unstable as we might see the similar pattern in the stock market. Interestingly, despite of the high rate of variability, we see the fluctuation occur around the mean. -->
+
+```{r, echo=FALSE}
+mean(log_returns_data$USD)
+```
+
+Thus, we think it is reasonable to fit a stationary autoregressive moving average model **ARMA(p,q)** and see further if our model assumptions are appropriate or not. We seek to fit a stationary Gaussian ARMA(p,q) model given by 
+
+\begin{equation}
+ Y_n -\mu = \phi_1(Y_{n-1} -\mu) + \cdots + \phi_p(Y_{n-p} -\mu) + \epsilon_n + \psi_1\epsilon_{n-1} + \cdots + \psi_q\epsilon_{n-q},
+\end{equation}
+where $\{\epsilon_n\} \sim N(0,\sigma^2)$, which is a white noise process, and the parameter vector
+\begin{equation}
+  \theta=(\phi_1,\cdots,\phi_p,\psi_1,\cdots,\psi_q,\mu,\sigma^2),
+\end{equation}
+with $\phi_1,\cdots,\phi_p$ denoting the coefficients of the AR (autoregressive) part and $\psi_1,\cdots,\psi_q$ the coefficients of the MA (moving average) part.
+
+We can represent ARMA(p,q) model in a more compact way as follows:
+
+\begin{equation}
+ \phi(B)(Y_n - \mu) = \psi(B)\epsilon_n,
+\end{equation}
+where $B$ is the backshift operator and 
+\begin{equation}
+\begin{aligned}
+  \mu &= \mathbb{E}[Y_n], \\
+  \phi(x) &= 1 - \phi_1x - \cdots - \phi_px^p, \\
+  \psi(x) &= 1+ \psi_1x + \cdots + \psi_qx^q, \\
+  \epsilon_n &\sim i.i.d. N(0,\sigma^2).
+\end{aligned}
+\end{equation}
+
+
+To choose appropriate ARMA(p,q) model, we consider **AIC** (Akaike Information Criterion) so that the lowest AIC value may indicate a good candidate of $p, q$ among several $p, q$ combinations for fitted ARMA(p,q). We fit multiple ARMA(p,q), ranging from 0 to 4 for $p, q$ and tabulate AIC values for each choise of $p$ and $q$. We will select candidate ARMA models based off their AIC scores, a lower AIC score generally indicating a "better" model with more predictive power.
+
+```{r, echo=FALSE}
+aic_table <- function(data,P,Q){
+    table <- matrix(NA,(P+1),(Q+1))
+    for(p in 0:P) {
+    for(q in 0:Q) {
+    table[p+1,q+1] <- arima(data,order=c(p,0,q))$aic
+    }
+  }
+  dimnames(table) <- list(paste("AR",0:P, sep=""),
+  paste("MA",0:Q,sep=""))
+  table
+}
+AIC_diff_USD <- aic_table(log_returns_data$USD,4,4)
+kable(AIC_diff_USD,digits=2)
+```
+The above AIC table tells most of the ARMA(p,q) models have similar AIC values, but the ARMA(2,2) model has the lowest AIC. There are some other ARMA(p,q) models with slightly higher AIC values but we won't consider them because the ARMA(2,2) model is more parismonious and already has a lower AIC. We will also consider the ARMA(0,0) model because it may give us a more parsimonious model and because ARMA(0,0) is represented by $Y_n=\mu+\epsilon_n,\; \{\epsilon_n\} \sim i.i.d. N(0,\sigma^2)$ which is essentially a white noise model that does not assume dependence in the gold price's change from the previous day to the following day which is what the random walk hypothesis states.$^{6}$
+
+<!-- Let us fit the two ARMA(p,q) models that are ARMA(0,0), ARMA(0,1), ARMA(1,0), and ARMA(1,1) as follows: -->
+
+Let us fit the two ARMA models:
+
+**ARMA(0,0)**
+```{r, echo=FALSE}
+arma00 = arima(log_returns_data$USD,order=c(0,0,0))
+arma00
+```
+
+**ARMA(2,2)**
+```{r, echo=FALSE}
+arma22 = arima(log_returns_data$USD,order=c(2,0,2))
+arma22
+```
+
+<!-- **ARMA(0,1)** -->
+<!-- ```{r, echo=FALSE} -->
+<!-- arma01 = arima(diff_data$USD,order=c(0,0,1)) -->
+<!-- arma01 -->
+<!-- ``` -->
+<!-- **ARMA(1,0)** -->
+<!-- ```{r, echo=FALSE} -->
+<!-- arma10 = arima(diff_data$USD,order=c(1,0,0)) -->
+<!-- arma10 -->
+<!-- ``` -->
+<!-- **ARMA(1,1)** -->
+<!-- ```{r, echo=FALSE} -->
+<!-- arma11 = arima(diff_data$USD,order=c(1,0,1)) -->
+<!-- arma11 -->
+<!-- ``` -->
+
+<!-- From the output of ARMA(p,q) above, we can notice that the estimates for intercepts are 0.5061, 0.5061, 0.5054, 0.5060 in order, which are very similar one another. The standard errors for intercepts are also not much differece by showing 0.3851, 0.3820, 0.3818, 0.3801, repectively for ARMA(0,0), ARMA(1,0), ARMA(0,1), and ARMA(1,1).  -->
+
+<!-- Thus, we may focus on ARMA(0,0) and ARMA(1,1) and conduct testing which model is more appropriate statistically. Before that, we can examine the roots of the AR polynomial for ARMA(1,1) as follows. Again, ARMA(0,0) is the form: -->
+
+Thus, we may focus on ARMA(0,0) and ARMA(2,2) and conduct testing which model is more appropriate statistically. Before that, we can examine the roots of the AR polynomial for ARMA(2,2) as follows. Again, ARMA(0,0) is the form:
+
+\begin{equation}
+  Y_n = 0.0003 + \epsilon_n
+\end{equation}
+ARMA(2,2) is the form:
+\begin{equation}
+  \phi(B)(Y_n-0.0003) = \psi(B)\epsilon_n
+\end{equation}
+where the AR polynomial is given by $\phi(x)=1-0.637x+0.888x^2$, and the MA polynomial is given by $\psi(x)=1-0.639x+0.967x^2$. The roots of these polynomials are as follows:
+
+
+```{r}
+  AR_roots <- polyroot(c(1,-coef(arma22)["ar1"],-coef(arma22)["ar2"]))
+  AR_roots
+```
+```{r}
+  MA_roots <- polyroot(c(1,coef(arma22)["ma1"],coef(arma22)["ma2"]))
+  MA_roots
+```
+
+The results say the roots of $\phi$ are $0.36\pm i$ and the roots of the $\psi$ are $0.33\pm 0.96i$. All of these results are outside the unit circle which means that our fitted ARMA(2,2) model is causal and invertible which are appealing features. But, we might still consider preferring an ARMA(0,0) model over the ARMA(2,2) model because the AR and MA roots are similar in magnitude (1.06 and 1.02, respectively) and very close to the unit circle. Being similar in magnitude means that we could have cancellation to reduce our model to an ARMA(1,1) or AR(0) model. Now, we conduct a hypothesis testing using Wilks' approximation by setting ARMA(0,0) as the null hypothesis $H^{<0>}$ and ARMA(2,2) as an alternative hypothesis $H^{<1>}$. Under the following null hypothesis $H^{<0>}$, we perform a likelihood ratio test.
+
+\begin{equation}
+  \Lambda = 2(\ell^{<1>}-\ell^{<0>}) \approx \chi^2_{D_1-D_0}
+\end{equation}
+where $\ell^{<i>}$ is the maximum log-likelihood under the hypothesis $H^{<i>}$ and $D_i$ is the number of parameters under the hypothesis $H^{<i>}$. We reject the null if $\Lambda$ is larger than the $\chi^2(\alpha)$ cutoff at level $\alpha$, and $\chi^2_d$ is a chi-squared random variable on $d$ degress of freedom.
+```{r lrt, include=FALSE}
+2*(arma22$loglik - arma00$loglik)# \Lambda = 2(\ell^{<1>}-\ell^{<0>})
+qchisq(0.95,df=4) # \chi^2_{D_1-D_0}
+```
+If we compute $\Lambda$ using the log-likelihoods, $\Lambda$ is 15.66879 If we compute the $\chi^2$ cutoff value, it is 9.487729 at the 5\% significant level with 4 degrees of freedom (since the ARMA(2,2) model has four more parameters than the AR(0) model). This means we reject the null. Thus, according to the hypothesis testing, the ARMA(2,2) model is more promising than the ARMA(0,0) model. In conclusion, as suggested by the likelihood ratio test and the AIC table, we follow the ARMA(2,2) model as our concluded model. Additionally, we can check the model assumptions through residual analyses: 
+
+* plot of the residuals
+
+* autocorrelation plot of the residuals
+
+* QQ plots
+
+First, the residual plot of the fitted ARMA(2,2) model.is follows:
+```{r resid1, echo=FALSE, fig.align = 'center'}
+plot(strptime(price$Date[10701:11220], '%Y/%m/%d'),residuals(arma22),xlab="Time",ylab="Residuals",main="Residuals") 
+```
+
+```{r}
+mean(residuals(arma22))
+```
+
+The residual plot as a time series shows similar random pattern around 0 as the original gold price's change patterns with $\mu$ without increasing or decreasing or pop-up pattern which is what we want, since we're assuming our model has captured all the information needed to predict future values, the residuals across different times should be independent as the noise term is. 
+<!-- Of course, there are heterogenous patterns during 2020. It may tell we need a model with remedial method. We can analysis this situation more deeply later on.  -->
+
+Below is the autocorrelation plot of residuals of the fitted ARMA(2,2) model. 
+```{r resid2, echo=FALSE, fig.align = 'center'}
+acf(residuals(arma22),main="Autocorrelation Plot of Residuals")
+```
+
+The acf plot shows low autocorrelation values at most lag, suggesting that our assumption that the errors $\{\epsilon_n\}$ are uncorrelated. Of course, at lag 4, 6, and 18, there are some higher ACF values but since the ones at lags less than 4 are all insignificant, these could just be spurious results. 
+
+Below is the normal QQ-plot of the fitted ARMA(2,2) model.
+```{r resid3, echo=FALSE, fig.align = 'center'}
+qqnorm(residuals(arma22),main="Normal QQ-Plot")
+qqline(residuals(arma22),col="steelblue",lwd=1)
+```
+
+This normal QQ-plot allows us to check the normality assumption with the ARMA(2,2) model. Overall, our normality assumption, say, $\{\epsilon_n\}\sim N(0,\sigma^2)$ is not quite appropriate but the normality assumption can be reduced as sample size increases. 
+
+We can further do inference for the parameter estimate $\hat{\mu}$. We use 
+standard errors from the observed Fisher information as the built-in function `arima` suggested. For the approximate 95\% confidence interval (CI) for the $\hat{\mu}$ is as follows:
+```{r conf}
+c(0.0003 - 1.96*0.0005, 0.0003 + 1.96*0.0005)
+```
+
+Thus, the 95% CI for the $\hat{\mu}$ is [-0.0007, 0.0013].
+
+<b><font size=5>4. Conclusion</font></b>  
+
+* The daily log gold return over the past two years seems to be reasonably modeled by an ARMA(2,2) model with positive intercept.
+
+* We prefer the ARMA(2,2) model over the white noise model proposed by the "random walk" hypothesis which we generalized to gold as a financial product$^{7}$.
+
+* We have a negative second order autoregressive coefficient which suggests that gold may tend to trend in the opposite direction that it did in the previous days, or at least three days of returns in the same direction will be muted.
+
+<b><font size=5>5. References</font></b>  
+[1] https://www.investopedia.com/terms/p/preciousmetal.asp  
+[2] https://baxiamarkets.com/en/learn-to-trade/trading-basics/gold-price/  
+[3] https://www.investopedia.com/articles/active-trading/031915/what-moves-gold-prices.asp  
+[4] https://ionides.github.io/531w22/03/slides.pdf  
+[5] https://www.tandfonline.com/doi/abs/10.1080/10293523.1980.11082633?journalCode=riaj20  
+[6] The dataset can be find at this website: https://www.gold.org/goldhub/data/gold-prices  
+[7] https://en.wikipedia.org/wiki/Random_walk_hypothesis

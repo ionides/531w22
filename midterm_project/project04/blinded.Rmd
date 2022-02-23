@@ -1,0 +1,288 @@
+---
+title: "Investigation of similarities between the NFT and Stock Markets"
+output:
+  html_document:
+    toc: yes
+    toc_depth: 3
+    number_sections: TRUE
+  pdf_document:
+    toc: yes
+    toc_depth: 3
+    number_sections: TRUE
+---
+
+\newcommand\prob{\mathbb{P}}
+\newcommand\E{\mathbb{E}}
+\newcommand\var{\mathrm{Var}}
+\newcommand\cov{\mathrm{Cov}}
+
+-----------
+
+# Introduction
+
+This analysis attempts to investigate the behaviour of the Non-Fungible Token (NFT) $^{[1]}$ market, and compare/contrast it to the well studied stock market. While the stock market has been around for a long time, NFTs are only just gaining popularity thus making the comparison non-trivial. As a proxy to the NFT market, this study will use the daily opening price movement of MANA $^{[2]}$ which is the largest cryptocurrency by market cap $^{[3]}$ that is used to buy and sell NFTs in a metaverse$^{[4]}$ called Decentraland$^{[5]}$.
+
+The primary question being addressed here is:
+
+* Does the NFT market follow the Efficient-Market Hypothesis$^{[6]}$ similar to the stock market?
+
+# Analysis
+
+## Visualization
+
+While the Decentraland platform and the MANA cryptocurrency have been around since late 2017, they have only picked up popularity in the recent years. We analyze data from 2021 onwards.
+```{r, echo=F}
+library(ggplot2)
+y <- read.csv(file="MANA-USD.csv", header=TRUE)
+y$Date <- as.Date(y$Date)
+y <- y[y["Date"] >= "2021-01-01", ]
+ggplot(y, aes(Date, Open)) + geom_line() + scale_x_date(date_labels = "%b-%Y")
+```
+
+The first striking observation is the sharp rise in late 2021. Further investigation revealed that on the date Facebook officially announced their rebranding to Meta$^{[7]}$, there was an 82% increase in the MANA price owing to the sentiment of wanting to get in on the metaverse and NFT market.
+
+This is a one-off event, and we don't expect it to occur often. Even if it did, we do not have the means to successfully model it. For the purpose of this analysis, we treat the spike as an artificial breakpoint and aim to model the data on either side of it.
+
+
+```{r, echo=F}
+y_before = y[which(y$Open <= 2),]
+y_after = y[which(y$Open > 2),]
+require(gridExtra, quietly = T)
+plot1 <- ggplot(y_before, aes(Date, Open)) + geom_line() + scale_x_date(date_labels = "%b-%Y") + labs(title="Before spike")
+plot2 <- ggplot(y_after, aes(Date, Open)) + geom_line() + scale_x_date(date_labels = "%b-%Y") + labs(title="After spike")
+grid.arrange(plot1, plot2, ncol=1)
+```
+
+```{r, echo=F}
+y_before$Open = log(y_before$Open)
+y_after$Open = log(y_after$Open)
+```
+
+Before proceeding with any further analysis, we perform a log-transformation on the data. In the context of finance, the difference of log-transformed price values is referred to as the return$^{[8]}$ of a stock or an index. It is convenient for us to make this transformation, as that enables us to look for a random walk model fit, which would provide evidence to suggest that the MANA price movement follows the Efficient Market Hypothesis. 
+
+We re-plot the log-transformed data for clarity:
+
+```{r, echo=F}
+plot1 <- ggplot(y_before, aes(Date, Open)) + geom_line() + scale_x_date(date_labels = "%b-%Y") + labs(title="Before spike")
+plot2 <- ggplot(y_after, aes(Date, Open)) + geom_line() + scale_x_date(date_labels = "%b-%Y") + labs(title="After spike")
+grid.arrange(plot1, plot2, ncol=1)
+```
+
+
+There is visual evidence of a trend in both parts, so we look at ways to model and remove the trend for further analysis.
+
+## De-trending
+
+We look at two options:
+
+* Fitting a quadratic model to the data and subtracting the mean
+* Differencing between consecutive points
+
+The plots below show the trend line as fit by a quadratic model:
+
+$$ \mu(t) = \beta_0 + \beta_1t + \beta_2t^2$$
+
+```{r, echo = F}
+quad_mod_before = lm(Open ~ I(as.numeric(Date)^2) + as.numeric(Date), data=y_before)
+Z_before <- cbind(1, I(as.numeric(y_before$Date)^2), as.numeric(y_before$Date))
+beta_before <- coef(quad_mod_before)
+prediction_before <- Z_before%*%beta_before
+
+quad_mod_after = lm(Open ~ I(as.numeric(Date)^2) + as.numeric(Date), data=y_after)
+Z_after <- cbind(1, I(as.numeric(y_after$Date)^2), as.numeric(y_after$Date))
+beta_after <- coef(quad_mod_after)
+prediction_after <- Z_after%*%beta_after
+
+plot1 <- ggplot(y_before, aes(Date, Open)) + geom_line() + scale_x_date(date_labels = "%b-%Y") + geom_line(mapping = aes(x = Date, y = prediction_before), col="red") + labs(title="Before spike")
+
+plot2 <- ggplot(y_after, aes(Date, Open)) + geom_line() + scale_x_date(date_labels = "%b-%Y") + geom_line(mapping = aes(x = Date, y = prediction_after), col="red") + labs(title="After spike")
+
+grid.arrange(plot1, plot2, ncol=1)
+coef(quad_mod_before)
+coef(quad_mod_after)
+```
+
+When fitting the linear regression, we observe a significant quadratic term with values above. We also attempt differencing as an alternative which is given by the equation:
+
+$$ z_n = \Delta x^{*}_n = x^{*}_n - x^{*}_{n-1} $$
+
+Comparison of both de-trended data is shown below:
+
+```{r, echo=F}
+plot1 <- ggplot(y_before, aes(Date, Open - prediction_before)) + geom_line() + scale_x_date(date_labels = "%b-%Y")  + labs(title="Before Spike", y=expression(x[n] - mu(t)))
+
+plot2 <- ggplot(y_after, aes(Date, Open - prediction_after)) + geom_line() + scale_x_date(date_labels = "%b-%Y") + labs(title="After Spike", y=expression(x[n] - mu(t)))
+
+plot3 <- ggplot(head(y_before, -1), aes(Date, (diff(y_before$Open, diff = 1)))) + geom_line() + scale_x_date(date_labels = "%b-%Y")  + labs(title="Before Spike", y=expression(z[n]))
+
+plot4 <- ggplot(head(y_after, -1), aes(Date, (diff(y_after$Open, diff = 1)))) + geom_line() + scale_x_date(date_labels = "%b-%Y") + labs(title="After Spike" , y=expression(z[n]))
+
+
+grid.arrange(plot1, plot3, plot2, plot4, ncol=2)
+```
+
+After the de-trending from the quadratic model, we observe there is still some trend left over. However, with the first order differencing, we seem to have fairly stationary data under reasonable assumption of constant variance.
+
+We further confirm this by inspecting the sample ACF.
+
+```{r, echo=F}
+par(mfrow=c(2, 2))
+acf(diff(y_before$Open, diff = 1), main="Before Spike: Autocorrelation")
+acf(diff(y_after$Open, diff = 1), main="After Spike: Autocorrelation")
+acf(diff(y_before$Open, diff = 1), type="covariance", main="Before Spike: Autocovariance")
+acf(diff(y_after$Open, diff = 1), type="covariance", main="After Spike: Autocovariance")
+```
+
+Now that the data is de-trended by $y^{*}_t = \Delta log(x^{*}_t)$, where $x^{*}_t$ is the original data, we proceed to model fitting on our new $y^{*}_t$. Without loss of generality, we drop the "Before Spike" data here and proceed with analysis on the "After Spike" data, as we could repeat the same steps to fit a model.
+
+Note: In this next section, we do not work directly with $y^{*}_t$ but rather the log-transformed $x^{*}_t$, and leave the differencing operation to occur as part of the $I$ parameter of ARIMA.
+
+## Model Selection
+
+We attempt to approach the model selection without any prior biases, so we fit a series of ARIMA models for a range of P and Q values. We set $I=1$ to indicate the first order differencing. The general equation is of the form$^{[9]}$:
+
+$$ \Delta y_n = \frac{\Psi(B)}{\Phi(B)}\epsilon_n  $$
+
+where $\Phi(x)$ is a polynomial of order p, $\Psi(x)$ is a polynomial of order q, and $B$ is the backshift operator.
+
+### AIC
+
+We look at all the models along with their AIC scores. A lower AIC score indicates a better model fit, and is given by the equation$^{[10]}$:
+
+$$ AIC = −2  \ell(\theta^{*}) + 2D$$
+where, $\ell(\theta^{*})$ is the log-likelihood and $D$ is the number of parameters.
+
+```{r, echo=F}
+aic_table = function(data, P, Q) {
+    table = matrix(NA, (P+1), (Q+1))
+    for (p in 0:P) {
+        for (q in 0:Q) {
+            table[p+1, q+1] = arima(data, order = c(p,1,q))$aic
+        }
+    }
+    
+    dimnames(table) = list(paste("AR", 0:P, sep = ""), paste("MA", 0:Q, sep = ""))
+    table
+}
+
+my_tbl = aic_table(y_after$Open, 4, 4)
+require(knitr, quietly=T)
+kable(my_tbl, digits = 2)
+```
+
+We notice ARIMA(4,1,4) provides the lowest AIC score. However, we only use AIC as a guideline and not as a concrete means of model selection. We also consider the ARIMA(0,1,0) and ARIMA(3,1,2) model as their AIC values are only slightly larger. Considering ARIMA(0,1,0) would also assist us in answering our questions about whether the data follow a random walk, which is essentially the ARIMA(0,1,0) model. ARIMA(3,1,2) could also be a good model with slightly higher AIC but simpler than ARIMA(4,1,4) in terms of number of parameters.
+
+```{r, echo=T}
+arima414 = arima(y_after$Open, order = c(4,1,4))
+arima312 = arima(y_after$Open, order = c(3,1,2))
+arima010 = arima(y_after$Open, order = c(0,1,0))
+```
+
+We fit the three models and perform some tests to see if one is objectively better than the other.
+
+### Likelihood Ratio Tests
+
+We compare nested models using a Likelihood Ratio Test, given by the Wilks' approximation$^{[11]}$:
+
+$$ \ell_1 − \ell_0 \sim (1/2)\chi^2_{D_1 − D_0} $$
+where, $\ell_1$ and $D_1$ correspond to the log-likelihood and parameters of the larger model, and the subscript 0 refers to the smaller or nested model.
+
+$H_0:$ ARIMA(0,1,0) and ARIMA(4,1,4) are the same
+
+$H_a:$ ARIMA(4,1,4) is objectively better and its parameters are non-zero
+
+```{r, echo=F}
+loglik414 = logLik(arima414)
+loglik010 = logLik(arima010)
+teststat <- -2 * (as.numeric(loglik010)-as.numeric(loglik414))
+p.val <- pchisq(teststat, df = 8, lower.tail = FALSE)
+```
+
+The LRT reveals a test statistic of `r teststat` which corresponds to a p-value of `r p.val` under the $\chi^2$ distribution with 8 degrees of freedom.
+
+The p-value is $< 0.05$ so we reject the null hypothesis, and consider the alternative that the larger model is indeed better.
+
+Next we compare the ARIMA(4,1,4) and ARIMA(3,1,2) models, and perform the same Likelihood Ratio Test.
+
+$H_0:$ ARIMA(3,1,2) and ARIMA(4,1,4) are the same
+
+$H_a:$ ARIMA(4,1,4) is objectively better and parameters are non-zero
+
+```{r, echo=F}
+loglik312 = logLik(arima312)
+teststat <- -2 * (as.numeric(loglik312)-as.numeric(loglik414))
+p.val <- pchisq(teststat, df = 3, lower.tail = FALSE)
+```
+
+The LRT reveals a test statistic of `r teststat` which corresponds to a p-value of `r p.val` under the $\chi^2$ distribution with 3 degrees of freedom.
+
+In this case as well, the p-value is $< 0.05$ so we reject the null hypothesis, and consider the alternative that the ARIMA(4,1,4) model is indeed better.
+
+We perform further diagnostic tests on these models.
+
+## Model Diagnostics
+
+As the first step, we compute the AR and MA roots of the models and plot them with a unit circle for reference. This is a check for causality and invertibility of the models, which are properties we desire in a model. For these properties, all roots must be outside the unit circle.
+
+```{r, echo=F}
+par(mfrow=c(1,2))
+ar_root = polyroot(c(1,
+                     -coef(arima414)["ar1"], 
+                     -coef(arima414)["ar2"], 
+                     -coef(arima414)["ar3"],
+                     -coef(arima414)["ar4"]
+                     )
+                   )
+plot(ar_root, ylim=c(-1, 1), xlim=c(-2,2), col="red", ylab = "Imaginary", xlab = "Real")
+lines(complex(modulus=1, argument=0.01*2*pi)^(0:100), col='grey')
+ma_root = polyroot(c(1,
+                     coef(arima414)["ma1"], 
+                     coef(arima414)["ma2"],
+                     coef(arima414)["ma3"],
+                     coef(arima414)["ma4"]
+                     )
+                   )
+points(ma_root, col="blue")
+
+ar_root = polyroot(c(1,
+                     -coef(arima312)["ar1"], 
+                     -coef(arima312)["ar2"], 
+                     -coef(arima312)["ar3"]
+                     )
+                   )
+plot(ar_root, ylim=c(-1, 1), xlim=c(-2,2), col="red", ylab = "Imaginary", xlab = "Real")
+lines(complex(modulus=1, argument=0.01*2*pi)^(0:100), col='grey')
+ma_root = polyroot(c(1,
+                     coef(arima312)["ma1"], 
+                     coef(arima312)["ma2"]
+                     )
+                   )
+points(ma_root, col="blue")
+```
+
+The ARIMA(4,1,4) model has its MA roots (blue) very close to (and on) the unit circle, while the AR roots (red) are safely outside the unit circle. This implies the model is causal but not invertible.
+
+For the ARIMA(3,1,2) model, all of the roots, except one AR root is on the unit circle. This model too, is not causal and not stationary. The one AR root is large and outside the range of the plot, and is not depicted here.
+
+A non-invertible or non-causal model is not ideal, so we are not keen to accept them. We also refrain from further diagnostic tests for these models for this same reason. Further discussions follow in the next section.
+
+# Conclusions
+
+While the likelihood ratio test indicates that the larger model, ARIMA(4,1,4), is a better fit than the ARIMA(0,1,0) or ARIMA(3,1,2), our diagnostics revealed that the larger model is non-invertible. We prefer causal and invertible models, so we may be inclined to accept the ARIMA(0,1,0) model instead, even though it has higher AIC and is not favoured by the likelihood ratio test.
+
+Considering the random walk model also follows theory from economics, we could have enough support to say the NFT market adheres to the Efficient Market Hypothesis. However, the answer is inevitably not so obvious. We conclude with the statement that there is evidence to build an argument either way, and further work is required to present more concrete results.
+
+
+# References
+
+\[1]: https://en.wikipedia.org/wiki/Non-fungible_token \
+\[2]: https://www.coinbase.com/price/decentraland \
+\[3]: https://coinmarketcap.com/view/collectibles-nfts/ \
+\[4]: https://en.wikipedia.org/wiki/Metaverse \
+\[5]: https://decentraland.org/whitepaper.pdf \
+\[6]: https://en.wikipedia.org/wiki/Efficient-market_hypothesis \
+\[7]: https://about.fb.com/news/2021/10/facebook-company-is-now-meta/ \
+\[8]: https://ionides.github.io/531w22/01/slides-annotated.pdf (Slide 23) \
+\[9]: https://ionides.github.io/531w22/04/slides-annotated.pdf (Slide 16) \
+\[10]: https://ionides.github.io/531w22/05/slides-annotated-part1.pdf (Slide 21) \
+\[11]: https://ionides.github.io/531w22/05/slides-annotated-part1.pdf (Slide 19) \

@@ -1,0 +1,604 @@
+---
+title: "Time Series Analysis on Chinese Yuan and USD Exchange Rates"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 5
+---
+\newcommand\prob{\mathbb{P}}
+\newcommand\E{\mathbb{E}}
+\newcommand\var{\mathrm{Var}}
+\newcommand\cov{\mathrm{Cov}}
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(message = FALSE, echo = FALSE)
+suppressPackageStartupMessages({
+  library(tidyverse)
+  library(lubridate)
+  library(astsa)
+  library(forecast)
+  library(readr)
+  library(ggplot2)
+  library(MLmetrics)
+  library(TSstudio) 
+  library(caret)
+  library(plotly)
+  library(dplyr)
+  library(tseries)
+  library(tidyquant)
+  library(padr)
+  library(lubridate)
+  library(tsfeatures)
+})
+```
+
+## About
+
+### Introduction
+
+The foreign exchange market has been growing significantly over the past few decades. Because of the internationalization of global enterprises, exchange rate is considered to be a key factor for major global enterprises. Small exchange rate fluctuations do not matter much. However, when international trade occurs, the exchange rate fluctuations can be very large. Suppose there is one billion US dollars' transactions, the buyer lives in the United States and the seller lives in China. Minor changes in the exchange rate may have a significant impact, and the seller may need to pay more than the settlement amount.
+
+Because of its importance and the volatility of exchange rate, a lot of research has been done to explain its behavior and make appropriate predictions. Rasekhi (2011) divided the models used to predict exchange rates into technical models and basic models. Fundamental methods determine exchange rates based on basic economic variables, while technical methods rely on past trends to find specific models for predicting the future$^{[1]}$ . Maaerinskien and balciunas (2014) stated that one possible reason for the failure of fundamental methods is the inaccurate prediction of exchange rate due to the wrong prediction of independent variables$^{[2]}$ . A technical approach with univariate models or a-theoretical models, which predict future on the basis of past trends, could come into replacement$^{[2]}$ .
+
+The main objective of the project is to predict the exchange rate of Chinese Yuan and US Dollar in the coming 12 months using ARIMA model. This will help people know the currency exchange rate in advance before any transaction.
+
+### Data Description
+The data used for this project is the [Chinese Yuan Renminbi to U.S. Dollar Spot Exchange Rate Data](https://fred.stlouisfed.org/series/EXCHUS) $^{[3]}$. This data record the first day of every month starting from January 1, 1981 and ending on January 1, 2022. We use this dataset except the last 12 data, which we want to use for the forecast to see the performance of our model.
+
+## Exploratory Data Analysis
+
+First, we read the data and see the summary of it. We can see that there are 2 variables and both have 493 observations. The first variable is `DATE`, which gives the corresponding date. The second variable is `EXCHUS`, which gives how much 1 dollar is worth.
+
+From the summary of the data below we can see that the mean exchange rate is 6.210, the max exchange rate is 8.725 and the min is 1.552. We also check whether there is any missing value and do not find it.
+
+```{r}
+## data loading
+path = './'
+Exchange_file = sprintf('%s/EXCHUS.csv', path)
+Exchange = read_csv(Exchange_file)
+names(Exchange) = c("Date", "EXCHUS")
+summary(Exchange$EXCHUS)
+```
+
+```{r load, fig.cap=cap_fig1}
+cap_fig1 = paste(
+  "**Figure 1.** *Chinese Yuan Renminbi to U.S. Dollar Spot Exchange Rate.*",
+   "Red line represents the mean of the exchange rate ."
+)
+## time series: ---------------------------------------------------------------
+Exchange %>%
+  ggplot(aes(x = Date, y = EXCHUS)) +
+  geom_line() +
+  geom_smooth(method = 'lm',
+              formula = y ~ x) +
+  xlab("Year") +
+  ylab("Exchange rate") +
+  theme_bw()+
+  geom_hline(yintercept = mean(Exchange$EXCHUS),
+             col = "tomato3")
+```
+
+Then we create a time plot for the data, where the red line represents the mean of the exchange rate. A linear regression line (blue line) is added to the plot. 
+
+From the plot, we can see that there is not an obvious cycle. It increases from 1980, starts to decrase from 1995 and finally oscillate between the mean exchange rate.
+
+### Data smoothing
+Using Loess smoothing, we can take a look at the general trend of the exchange rate dataset. Below is a time plot of the Chinese Yuan Renminbi to US dollar exchange rate. 
+
+```{r smoothing, fig.cap=cap_fig2}
+cap_fig2 = "**Figure 2.** *Estimating trend by Loess smoothing.*"
+
+u = t(as.matrix(Exchange[2]))
+dim(u) = NULL
+date = seq(from = 1981, length = length(u), by = 1/12)
+u_loess = loess( u ~ date, span = 0.5)
+plot(date, u, type = "l", col = "red", xlab="Year", ylab="Exchange Rate", main = "Estimating trend by Loess smoothing")
+lines(u_loess$x, u_loess$fitted, type = "l")
+```
+
+From the plot, we can see before 2000, the exchange rate between Chinese RMB and US dollar increased year by year. The trend from 2000 to 2015 is to decrease year by year. After that, there was a trend of slow increase.
+
+## Decomposition
+`stl()` function is used to decompose a time series into seasonal, trend and irregular components using loess$^{[4]}$. It calculates the seasonal component using smoothing and then adjust the original series for seasonality$^{[4]}$. The result is a seasonality adjusted time series.
+
+```{r dec1, fig.cap=cap_fig3}
+cap_fig3 = "**Figure 3.** *Decomposition of the Exchange Rate.*"
+count_ts=ts(na.omit(Exchange$EXCHUS), frequency=12, start = 1981)
+
+# Making the data into trend, seasonal and reminder
+decomp <- stl(count_ts, s.window = "periodic")
+
+# Seasonally adjusting the data
+deseasonal_ts <- seasadj(decomp)
+plot(decomp, main="Decomposition of time series")
+```
+
+### Stationarity test
+
+We use Augmented Dickey–Fuller test (ADF)$^{[5]}$ for sationary test.
+
+Null Hypothesis ($H_0$): The time series has a unit root, which means it's non-stationary.
+
+Alternate Hypothesis ($H_1$): The time series does not have a unit root, meaning it is stationary. 
+
+p-value $> 0.05$: Fail to reject the null hypothesis ($H_0$), the data has a unit root and is non-stationary.
+
+p-value $\leq 0.05$: Reject the null hypothesis ($H_0$), the data does not have a unit root and is stationary.
+
+The results are as follows.
+
+```{r warning=FALSE}
+adf<-adf.test(count_ts, alternative = "stationary")
+adf
+```
+
+p-value of Adf test showed that the time series is not stationary.
+
+### Number of differences needed
+
+```{r, warning=FALSE}
+ndiffs(count_ts)
+```
+
+The data seems to become stationary after 2 differences.
+
+### Differencing the data at d = 1
+
+#### ADF test
+
+The information about ADF test is shown above.
+
+```{r, warning=FALSE}
+ts_d1 = diff(deseasonal_ts, differences=1)
+
+#stationary test for d=1
+adfd1 <- adf.test(ts_d1, alternative = "stationary")
+adfd1
+```
+
+For ADF test, we got p-value 0.01, less than 0.05, which is ideal for stationary confirmation.
+
+#### ACF and PACF plot
+
+Autocorrelation is the linear correlation of a signal with itself at two different points in time, ACF (autocorrelation function) is just such correlation as a function of the lag h between two points of time. It correlates with itself through time.
+
+PACF (partial autocorrelation function) is essentially the autocorrelation of a signal with itself at different points in time, with linear dependency with that signal at shorter lags removed, as a function of lag between points of time.
+
+```{r, warning=FALSE, fig.cap=cap_fig4}
+cap_fig4 = "**Figure 4.** *ACF plot of difference data at lag=1.*"
+Acf(ts_d1, main='ACF of diff1 data')
+```
+
+```{r, warning=FALSE, fig.cap=cap_fig5}
+cap_fig5 = "**Figure 5.** *PACF plot of difference data at lag=1.*"
+Pacf(ts_d1, main='PACF of diff1 data')
+```
+
+From the ACF/ PACF plot the new differenced data looks stationary.
+
+
+## Fitting an ARMA(p,q) model
+First, we start by fitting a stationary ARMA(p,q) model. 
+
+Based on the stationarity and periodic variation we found above, it is promising to fit a stationary Gaussian ARMA(p, q) with parameter vector $\theta = (\phi_{1:p}, \psi_{1:q}, \mu, \sigma^2)$ given by 
+$$\phi(B)(Y_n-\mu)=\psi(B)\epsilon_n$$
+where
+\begin{equation}
+\begin{split}
+\mu &= \E(Y_n) \\
+\phi\left(x\right) &= 1 - \phi_{1}x - \dots - \phi_{p}x \\
+\psi\left(x\right) &= 1 + \psi_{1}x + \dots + \psi_{p}x \\
+\epsilon_{n} &\sim i.i.d. N\left(0, \sigma^2\right)
+\end{split}
+\end{equation}
+
+### Choosing a model using AIC
+
+Then, we need to select the best p and q for the model based on the AIC, which is given by
+$$AIC = -2 \times \ell(\theta) + 2D$$
+
+We will construct a table that displays the AIC values for the different ARMA(p,q) models.
+
+```{r aic_tab1, warning=FALSE}
+## fitting a SARIMA(0,1,0)x(P,Q)12 model based on AIC
+aic_table_S = function(data, P, Q){
+  table = matrix(NA, (P + 1), (Q + 1) )
+  for(p in 0:P){
+    for(q in 0:Q){
+      table[p+1, q+1] = arima(data,
+                              order = c(p, 0, q)
+      )$aic
+    }
+  }
+  dimnames(table) = list(paste("AR", 0:P),
+                         paste("MA", 0:Q) )
+  table
+}
+
+aic_table_sd = function(data, P, Q){
+  table = matrix(NA, (P + 1), (Q + 1) )
+  for(p in 0:P){
+    for(q in 0:Q){
+      table[p+1, q+1] = arima(data,
+                              order = c(p, 1, q)
+      )$aic
+    }
+  }
+  dimnames(table) = list(paste("SAR", 0:P),
+                         paste("SMA", 0:Q) )
+  table
+}
+cap_tab1 = paste(
+ "**Table 1.** *AIC values for ARMA(p,q) models.",
+ "Numbers are rounded to three decimal places."
+)
+aic_table_S(Exchange$EXCHUS, 4, 5) %>%
+  knitr::kable(cap = cap_tab1, digits = 3)
+```
+
+From the AIC table, we see that the model with the lowest AIC value is ARMA(2,0) at -508.380. Thus, we will choose the ARMA(2,0) model as a start of our analysis. 
+
+We now fit an ARMA(2,0) model for our dataset.
+
+```{r warning=FALSE}
+# ARMA(2,0)
+
+ar2 = arima(Exchange$EXCHUS, order = c(2,0,0))
+ar2
+```
+
+The equation is 
+$$(X_n-\mu)-\phi_1(X_{n-1}-\mu)-\phi_2(X_{n-2}-\mu)=\epsilon_n$$
+From the above result, we can know $\mu=4.9553$, $\phi_1=1.0791$, $\phi_2=-0.0809$.
+
+
+### Diagnosis
+First, We plot the fitted value and the original time series together to see how well the model is fitted. 
+
+#### Fitted value
+```{r, warning=FALSE, fig.cap=cap_fig6}
+cap_fig6 = paste(
+  "**Figure 6.** *Fitted value(Red) and Original time series(Black).*"
+)
+Mod_exchange = Arima(Exchange$EXCHUS,
+      order = c(2, 0, 0)
+      )
+
+Exchange %>%
+  ggplot(aes(x = Date, y = EXCHUS)) +
+  geom_line() +
+  geom_line(aes(y = fitted(Mod_exchange)),
+            col = "tomato3") +
+  xlab("Month") +
+  ylab("Exchange Rate") +
+  theme_bw()
+```
+
+The black line in the plot represents the original time series and the red line represents the fitted value. This model seems to fit well, but it is only a preliminary judgment of the model. We also need to rely on other diagnosis methods and some formal tests to diagnose the model.
+
+
+#### Residual Assumption
+Based on the assumption, the residuals are Gaussian white noise series, which indicate uncorrelation, normality and mean zero. We will check these properties in this section.
+
+##### Mean zero
+
+```{r sd}
+sd = Exchange %>%
+  summarise(sd = sqrt(var(EXCHUS))) %>%
+  unlist()
+sprintf("The standard deviation of Exchange Rate data is %.3f", sd)
+```
+
+We plot the residuals below. 
+
+```{r residual, fig.cap=cap_fig7}
+## Residual plot
+cap_fig7 = paste(
+  "**Figure 7.** *Residuals of the ARMA model.*"
+)
+tibble(Date = Exchange$Date, Residual = Mod_exchange$resid) %>%
+  ggplot(aes(x = Date, y = Residual)) +
+  geom_line() +
+  xlab("Year") +
+  ylab("Residuals") +
+  geom_hline(yintercept = 0,
+             col = "tomato3") + 
+  theme_bw()
+```
+
+Except that the residuals of a few points near 1994, other residuals distributed uniformly around y = 0. And the standard deviation of the time series is 2.058, which is not high. This is reasonable because the exchange rate is generally stable and there will be no large fluctuations except in a few cases. And there is no specific pattern in this plot. .
+
+
+##### Normality
+
+We use the qq plot to check normality.
+
+```{r qqplot, fig.cap=cap_fig8}
+cap_fig8 = paste(
+  "**Figure 8.** *QQ-plot of residuals.*"
+)
+qqnorm(Mod_exchange$residuals, main = "QQ-Plot: Residuals")
+qqline(Mod_exchange$residuals)
+```
+
+If the distribution is close to normal, the QQ plot should be a line. However, we can see the slope of line is very small. So, we can use the Shapiro-Wilks test to test for normality of the residuals, with a null hypothesis that the residuals are normal.
+
+```{r}
+shapiro.test(ar2$residuals)
+```
+
+The p-value is smaller than the critical value of $\alpha=0.05$. So, we reject the null hypothesis and conclude that the residuals are not normally distributed. 
+
+##### Uncorrelation
+
+In this section, we will check if the residuals are uncorrelated.
+
+The null hypothesis is:
+$$H_0: \epsilon_n \sim i.i.d \quad N(0,\sigma^2)$$
+which means they are simple random samples from the Gaussian white noise.
+
+First, we can look at the autocorrelation plot.
+```{r acf_resi, fig.cap=cap_fig9}
+cap_fig9 = paste(
+  "**Figure 9.** *Residuals of the ARMA model.*"
+)
+acf(Mod_exchange$residuals, main = "Residuals Autocorrelation")
+```
+
+All the lags are fallen into the the dashed lines showing pointwise acceptance regions at the 5% level, thus we can not reject $H_0$ and can believe that the uncorrelation assumption holds.
+
+And then, we can use Ljung-Box-Pierce Chi Square test.
+
+Construct the following Ljung-Box-Pierce$^{[6]}$ statistics, which is given by:
+$$\hat{Q} = N(N+2)\sum_{k=1}^{L(N)}\frac{1}{N-k}|\hat{\rho_k}|^2$$
+where $L(N)$ is usually set as $L(N) = [\sqrt{N}]$ or $L(N) = [\frac{N}{10}]$.
+
+Ljung and Box proved that 
+$$\hat{Q} \sim \chi^2\left(L(N)-p-q\right)$$
+Therefore we can compute the p-value of this statistic, and if 
+$$\prob\left(\hat{Q}\geq \chi^2_\alpha\right) > \alpha=0.05$$
+We can not reject the null hypothesis.
+
+This test can be done by R base function `Box.test`
+Since the sample size of our data is 493, $[\sqrt{493}]=22$, $[\frac{493}{10}]=49$, we try lags with value 24, 36, and 48. The results are shown below.
+
+```{r box}
+Box.test(Mod_exchange$residuals, lag = 24, type = "Ljung-Box", fitdf = 9)
+Box.test(Mod_exchange$residuals, lag = 36, type = "Ljung-Box", fitdf = 9)
+Box.test(Mod_exchange$residuals, lag = 48, type = "Ljung-Box", fitdf = 9)
+```
+
+The p-values are significantly larger than $\alpha = 0.05$, so we can not reject the null hypothesis, which means $\epsilon_n$ are simple random samples from the Gaussian white noise.
+
+#### Causality and Invertibility
+
+In this section, we will test causality and invertibility of model.
+
+Causality requires having roots of AR and MA polynomials outside the unit circle in the complex plane, which is equivalent to having the inverse characteristic roots in the unit circle. We plot the inverse roots below. 
+
+
+```{r root, fig.cap = cap_fig10}
+cap_fig10 = paste(
+  "**Figure 10.** *Inverse AR roots and inverse MA roots displayed in a complex plane.*"
+)
+plot(Mod_exchange, type = "both")
+
+abs(polyroot(c(1, -1.0791, 0.0809)))
+```
+
+The roots have absolution values that are greater than 1, so the model is therefore causal.
+
+## Spectrum Analysis
+Then, we do the spectrum analysis. First, we look at the unsmoothed periodogram.
+
+```{r spectrum, fig.cap = cap_fig11}
+cap_fig11 = "**Figure 11.** *Unsmoothed Periodogram.*"
+unsmoothed <- spectrum(Exchange$EXCHUS, main="Unsmoothed Periodogram")
+```
+
+We can see from the plot that the dominant frequency value is nearly 0. This is very reasonable and accords to the observation we get before that the dollar to CHY time plot does not show stationary and does not appear to have an obvious cycle. Therefore, we decide to smooth the periodogram to see if there is a reasonable density function for the spectrum.
+
+```{r smooth, fig.cap = cap_fig12}
+cap_fig12 = "**Figure 12.** *Smoothed Periodogram.*"
+smoothed <- spectrum(Exchange$EXCHUS, spans=c(10), main="Smoothed Periodogram")
+```
+
+The smoothed periodogram is shown as above and the frequency with the highest spectrum value on this plot is:
+
+```{r}
+smoothed$freq[which.max(smoothed$spec)]
+```
+
+It means that the cycle period is 500 months or 41.667 years. The cycle is longer than the number of years of the data, which is also correspondent to the observation we get before that there is not an obvious complete cycle in the data. The exchange rate increases very fast from 1980 until 1995, and then starts to decrase relativly slowly until 2012, where the exchange rate is approximately the mean exchange rate. Then it starts to oscillate between the mean exchange rate. Therefore, we assume that there is only one cycle on the time plot.
+
+## Fitting an ARIMA(p,1,q) model
+Since ARMA model assumes that the dataset is stationary, the data, that is exchange rate of dollars to CHY, does not look stationary, we apply a difference operation to our data to make it look more stationary and therefore more appropriate for ARMA modeling. We can transform the original data $x_{1:N}$, to $z_{2:n}$ by
+$$z_n=\Delta y_n=y_n-y_{n-1}$$
+It is called an ARIMA(p,1,q) model where the equation can be represented as:
+$$\phi(B)((1-B)X_n-\mu)=\psi(B)\epsilon_n$$
+The variables and equations in this model are the same with those of  the ARMA(p,q) model, and B is the backward operator where $BX_n=X_n-1$
+
+Then we create the time plot and acf for the new dataset $z_{1:N}$.
+
+We can see from the below time plot that the new data set look a bit more stationary than the original data. From the acf plots we can see that all the lags do not have autocorrelation. But it still look more like white noise than our original dataset.
+
+```{r diff, fig.cap = cap_fig13}
+cap_fig13 = "**Figure 13.** *time plot of difference data.*"
+z <- diff(Exchange$EXCHUS)
+plot(z, type="l", xlab="Time")
+```
+
+```{r acf, fig.cap = cap_fig14}
+cap_fig14 = "**Figure 14.** *ACF plot of the difference data.*"
+acf(z)
+```
+
+### Choosing a model using AIC
+Like for the ARMA(p,q) model, we construct a table of the AIC values for different ARIMA(p,1,q) models. The table is shown below.
+
+```{r aic_tab2, warning=FALSE}
+aic_table2 <- function(data,P,Q){
+    table <- matrix(NA,(P+1),(Q+1))
+    
+    for(p in 0:P){
+        for(q in 0:Q){
+            table[p+1,q+1] <- arima(data,order=c(p,1,q))$aic
+        }
+    }
+    dimnames(table) = list(paste("AR", 0:P, sep=""), 
+                         paste("MA", 0:Q, sep=""))
+    table
+}
+cap_tab2 = paste(
+ "**Table 2.** *AIC values for ARIMA(p,1,q) models.",
+ "Numbers are rounded to three decimal places."
+)
+aic_table2(Exchange$EXCHUS, 4, 5) %>%
+  knitr::kable(cap = cap_tab2, digits = 3)
+```
+
+From the table above, we can see that the model with lowest AIC value is ARIMA(1,1,0), whose AIC value is -516.63. We use ARIMA(1,1,0) model to fit our data and the result is shown as below.
+
+```{r,echo=FALSE}
+arma1_0 = arima(Exchange$EXCHUS, order = c(1,1,0))
+arma1_0
+```
+
+Therefore, the equation of our model can be represented as:
+$$(X_n-X_{n-1}-\mu)-\phi_1(X_{n-1}-X_{n-2}-\mu)=\epsilon_n$$
+where $\phi_1=0.0799$ and $\mu=0$.
+
+### Diagnostics
+
+Then we create the plot of residual and acf for ARIMA(1,1,0) to see whether the residuals satisfy the assumption of normality and white noise.
+```{r resid, fig.cap = cap_fig15}
+cap_fig15 = "**Figure 15.** *Plot of residuals of ARIMA(1,1,0).*"
+plot(arma1_0$residuals, main="Plot of residuals of ARIMA(1,1,0)")
+```
+
+```{r acf2, fig.cap = cap_fig16}
+cap_fig16 = "**Figure 16.** *Residuals Autocorrelation.*"
+acf(arma1_0$residuals, main="ACF of Residuals")
+```
+
+From the above plot we can see that the plot of residuals look like white noise, and there is no significant signs of autocorrelation between lags. Therefore, we can see that it is appropriate to model the residuals as white noise.
+
+Then we create a qqplot to see whether the normality assumption is valid for the residuals. From the result we can see that this is a long tailed distribution, which is not really noramally distributed. Then we construct a Shapiro-Wilks test, and find that the p-value is less than $2.2*10^{-16}$, which is very small. Therefore, we can not conclude that the residuals of our data are normally distributed. Although the normality assumption is not valid for the residuals, we think that ARIMA(1,1,0) model can still be applied to our data.
+
+```{r qqplot2, fig.cap=cap_fig17}
+cap_fig17 = paste(
+  "**Figure 17.** *QQ-plot of residuals.*"
+)
+qqnorm(arma1_0$residuals, main = "QQ-Plot: Residuals")
+qqline(arma1_0$residuals)
+```
+
+We can see the slope of the line is very small. So, we can use the Shapiro-Wilks test to test for normality of the residuals, with a null hypothesis that the residuals are normal.
+
+```{r}
+shapiro.test(arma1_0$residuals)
+```
+
+The p-value is smaller than the critical value of $\alpha=0.05$. So, we reject the null hypothesis and conclude that the residuals are not normally distributed. 
+
+## Automatic selection
+
+We used the function auto arima in forecast module in R. This function auto differencing needed to make data stationary and estimate the AR and MA orders using AICc$^{[7]}$ .
+
+```{r, warning=FALSE}
+model1<-auto.arima(deseasonal_ts, seasonal = F)
+model1
+```
+
+The model that R fitted automatically is arima(1,2,1). We will keep this result for later comparison.
+
+
+## Forecast
+
+We forecast the 12 observations (from 2021/2/1 to 2022/1/1) for the ARIMA(1,1,0) model and ARIMA(1,2,1) model, respectively.
+
+### ARIMA(1,1,0) model
+
+First, we use ARIMA(1,1,0) model. The possible range is shown in the forecast plot.
+```{r warning=FALSE}
+Exchange_n = Exchange[-c(482:493),]
+count_ts_n=ts(na.omit(Exchange_n$EXCHUS), frequency=12, start = 1981)
+decomp_n <- stl(count_ts_n, s.window = "periodic")
+deseasonal_ts_n <- seasadj(decomp_n)
+```
+
+```{r fore_tab1, warning=FALSE}
+model1 = arima(deseasonal_ts_n, order = c(1,1,0))
+future1 = forecast(model1, h = 12)
+future1
+```
+
+### ARIMA(1,2,1) model
+
+And then, we use ARIMA(1,2,1) model. The possible range is shown in the forecast plot.
+
+```{r echo=FALSE}
+model2<-auto.arima(deseasonal_ts_n, seasonal = F)
+```
+
+```{r fore_tab2, warning=FALSE}
+future2 = forecast(model2, h = 12)
+future2
+```
+
+As can be seen from the tables, the point estimate forecast values for ARIMA(1,2,1) seem to be decreasing and are closer to the trend of real data.
+
+### Plot using the better model
+
+```{r forecast, fig.cap=cap_fig18}
+cap_fig18 = paste(
+  "**Figure 18.** *Forcast for the future 12 observations using ARIMA(1,2,1) model.*"
+)
+plot(future2, main="Forcast for the future 12 observations")
+```
+
+
+## Conclusion
+
+In this project, we analyzed the monthly currency exchange rate between USD and Chinese Yuan from 01/01/1981 to 01/01/2022. We predicted the trend of monthly currency exchange rate between USD and Chinese Yuan in the coming twelve months.
+
+After conducting the time series plot, we found that the data looks un-stationary. To fit the appropriate ARIMA model, we first decomposed the data into trend, seasonal and reminder. Then, we did the stationary test (ADF test, ACF plot, PACF plot) on the original time series. Seeing the result of non-stationarity, we differenced the data at $d = 1$ and conducted the stationary test again. The data was stationary after differencing at $d = 1.$
+
+We used the criterion of finding smallest AIC value in the section of ARMA(p,q) model and Spectrum analysis. Overall, ARIMA(1,1,0) model has the smallest AIC value. We also fit the ARIMA model using auto.arima and found the optimal model ARIMA(1,2,1). To compare the forecast results of ARIMA(1,1,0) model and ARIMA(1,2,1) model, we decided to use the adjusted data set (from 1981/1/1 to 2021/1/1). Then, we compared the forecast values ranging from 2021/2/1 to 2022/1/1 with the true values in the same time range.
+
+The forecast result indicated that ARIMA(1,2,1) model gets the forecast values close to the real trend of true data.
+
+## Reflections
+
+The data we used only contained the first day of each month starting from 1981 to 2022. There could be more accuracy in finding the appropriate model if we used the the daily exchange rate data.
+
+The ARMA model found by the AIC criterion seemed to be un-stationary for forecasting. The reason could be the data we used was not stationary.
+
+
+## References
+
+[1]  Rasekhi, S., Rostamzadeh, M. (2011). Fundamental Modeling Exchange Rate using Genetic Algorithm: A Case Study of European Countries. Journal of Economics & Behavioral Studies, Vol. 3, Issue 6352-359.
+
+[2]  Maaerinskienn, I. and Balciunas, A. (2014). Fundamental Exchange Rate Forecasting Models: Advantages and Drawbacks. SSRN Electronic Journal.
+
+[3]  Chinese Yuan Renminbi to U.S. Dollar Spot Exchange Rate Data (https://fred.stlouisfed.org/series/EXCHUS)
+
+[4]  https://www.rdocumentation.org/packages/stats/versions/3.6.2/topics/stl
+
+[5]  https://www.statisticshowto.com/adf-augmented-dickey-fuller-test/
+
+
+[6]  Box, George; Jenkins, Gwilym (1970). Time Series Analysis: Forecasting and Control. San Francisco: Holden-Day.
+
+[7]  https://www.rdocumentation.org/packages/forecast/versions/8.16/topics/auto.arima
+
+
+## Acknowledgements
+
+The information about Ljung-Box test and the formulas are from [one of the previous projects](https://ionides.github.io/531w21/midterm_project/project02/project.html).
+
+Function `stl()` is taken from https://www.rdocumentation.org/packages/stats/versions/3.6.2/topics/stl
+
+Function `auto.arima` is taken from https://www.rdocumentation.org/packages/forecast/versions/8.16/topics/auto.arima
+

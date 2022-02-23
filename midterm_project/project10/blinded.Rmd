@@ -1,0 +1,596 @@
+---
+title: "Time Series Analysis on Daily Confirm and Vaccination in Texas"
+output: html_document
+---
+
+```{r setup, include=FALSE, echo=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Introduction
+
+The Covid-19 pandemic has led to a great amount of threat to public health, put huge pressure upon world's medical and food systems, and drastically changed our way of living [1]. To better study the ongoing scenario of Covid-19, the daily confirmed case, and one of the most effective precautionary approach to fight the pandemic, the vaccination, we propose this study from a time series perspective, which, hopefully, allows us to make better decisions and predictions. Generally, we focus on three questions. Is there any rule in daily confirmed cases? What about vaccination? Is there any relation between daily confirmed cases and vaccination? In this report, we will answer these three questions one by one. 
+
+The data is obtained from "COVID-19 Data Hub" [2], which contains various information about the current Covid-19 status (record date, confirmed cases, etc). "The goal of COVID-19 Data Hub is to provide the research community with a unified dataset by collecting worldwide fine-grained case data, merged with exogenous variables helpful for a better understanding of COVID-19." [2] The data is collected worldwide, but in some nations, there are many missing data. We focus on dataset related to USA, because it has less missing data compared with other nations. Considering the fact that different states have different policies regarding Covid-19 vaccination, we select Texas as our main state of concern, whose data is also much more comprehensive. Specifically, we select 2021-02-15 ~ 2021-10-23 as our time interval for analysis, the latter portion of which coincides with the period of the Delta variant. Additionally, from 02-15, the local government of Texas announced policy related to vaccination. That is the reason why we choose that date as the begining. Start from November, there is evidence showing that the Omicron variant began to spread, which totally change the trend of our data, so we choose 10-23 as the end date. We carefully chose the date period based on real-world situation to make our analysis more meaningful.
+
+Our research questions are given this time interval, how to describe 1, Covid-19 daily confirmed cases and 2, daily vaccinated population with proper time series models. Last but not least, 3, what is the relationship between confirmed cases and vaccinated population.
+
+### Analysis on confirmed cases
+
+#### Data Manipulation For confirmed cases.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+library("COVID19")
+library(tidyverse)
+library(forecast)
+library(car)
+require(knitr)
+```
+
+For the confirmed Covid case, after reading in the data, we take the first difference to obtain the daily confirmed number of Covid cases. After plotting the daily confirmed case(below), we notice that the number of confirmed cases first stays stable for around 150 days, then increases to the peak at around day 200, and finally decreases to the end. The data is highly unstationary and possesses clear pattern.
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+#Load data.
+texas = read.csv("dat.csv")
+#Obtain daily confirmed cases and plot.
+dailyConfirm = diff(texas$confirmed)
+plot(dailyConfirm, type="l", xlab="days", ylab="confirmed", main="Daily confirmed COVID cases")
+```
+
+Thus, we decide to take the log transformation of confirmed cases to stablize the data. After take the log transformation, we can still observe considerable oscilliating patterns (below). Also, each oscilliation seems to occur over a similar time interval, which may indicate seasonality.
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+#Log the daily confirmed cases and plot.
+logDaily = log(dailyConfirm)
+plot(logDaily, type="l", xlab="days", ylab="confirmed", main="Logged daily confirmed COVID cases")
+```
+
+To keep seeking transformation to stationarity, we take the difference operation on the logged data [3], trying to see if there is a change on stationarity. From the plot below, we can see that now the data is becoming much more stationary, roughly centering around 0, but with variance slighly varying across the series. This indicates that an Arima model may be suitable for the confirmed case analysis. Again, the ACF subplot for covariance is showing some sign of seasonality.
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+#Different operation and arima model.
+logDaily %>% diff() %>% ggtsdisplay(main="First difference on daily logged confirmed COVID cases", plot.type = "hist", lag.max=20)
+```
+
+To check for seasonality, we first plot the spectral density (below). Excluding the global maximal peak spectrum, which roughly corresponds with frequency 0, the second local maximal peak spectrum corresponds with frequency 0.144. This gives us a cycle of approximately 7 (6.9) days. 
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+#Seasonality.
+season = spectrum(logDaily, c(5, 5), main="Spectral density of logged confirmed cases")
+abline(v=season$freq[36], col="red")
+```
+
+Looking back at the plot of logged daily confirmed cases (below), we find out that a cycle of 7 days can decently describe the periodic details of the series. 
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+plot(logDaily, type="l", xlab="days", ylab="confirmed", main="Logged daily confirmed COVID cases with three 7 days intervals")
+abline(v=c(13, 20, 27, 34), col="red")
+```
+
+It is likely that such seasonality is caused by the weekly testing recommendations proposed by CDC [4], which may be the primary reason that the confirmed cases are also discovered in the same pattern. Thus, we decide to add a seasonality of 7 into our Arima model, which finally leads us to consider a potential $SARIMA(p,d,q)\times(P,D,Q)_{7}$ model. According to the lecture slides [5], the ideal model, with ${\epsilon}$ being white noise process and $\phi(x), Φ(x), \psi(x), Ψ(x)$ being ARMA polynomials, is given by: 
+
+$$\phi(B)Φ(B^{7})(1−B)^d(1−B^{7})^DY_n−\mu= \psi(B)Ψ(B^{7})\epsilon_n$$
+
+#### Model Selection.
+
+To select the ideal SARIMA model, we set P to be 1 to achieve differential operation and use AIC value as a guide to locate the optial p and q parameters. From the selection below, we find that model(1,1,1) and model (1,1,3) have relatively low AIC values, which make them both promising models. Although the model(1,1,3) is quite tempting, further look into this model and its comparison with the model(1,1,1) is still needed.
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+#AIC selection.
+aic_table <- function(data,P,Q)
+{
+  table <- matrix(NA,(P+1),(Q+1))
+  for(p in 0:P)
+    {
+    for(q in 0:Q)
+      {
+      table[p+1,q+1] <- arima(data,order=c(p,1,q), seasonal=list(order=c(1,0,0),period=7))$aic
+      }
+    }
+  dimnames(table) <- list(paste("AR",0:P,sep=""), paste("MA",0:Q,sep=""))
+  table
+}
+aic_table <- aic_table(logDaily,4, 4)
+kable(aic_table,digits=2)
+```
+
+Below are the detailed coefficients of of two models. Both models have low $\sigma^2$ that are close to each other and similar log likehood.
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+#Two Potential models.
+sarima111 <- arima(logDaily, order=c(1,1,1), seasonal=list(order=c(1,0,0), period=7))
+sarima111
+sarima113 <- arima(logDaily, order=c(1,1,3), seasonal=list(order=c(1,0,0), period=7))
+sarima113
+```
+
+#### Model Checking.
+
+Considering causality and invertibility, together with the complexity of high order ARIMA models [6], we perform a unit root test to check if the roots of the AR/MA portion are outside the unit cycle for two promising models. From the result below, we can see that for the SARIMA(1,1,1) model, both roots are outside (inside for the inverse roots), which indicates causality and invertibility.
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+#Unit Roots.
+print("SARIMA111 roots")
+c(polyroot(c(1,-coef(sarima111)["ar1"])), polyroot(c(1,-coef(sarima111)["ma1"])))
+autoplot(sarima111, main = "Plotting the SARIMA(1,1,1) characteristic roots")
+```
+
+However, the ma1 and ma2 roots for the SARIMA(1,1,3) are inside the unit cycle, which may suggest a problem with causality and invertibility.
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+print("SARIMA113 ar root") 
+polyroot(c(1,-coef(sarima113)["ar1"]))
+print("SARIMA113 ma roots") 
+polyroot(c(1, -coef(sarima113)[c("ma1", "ma2", "ma3")]))
+```
+
+To further check our concern, we perform a simulation of the SARIMA(1,1,3) model to obtain the density of all the coefficients. Also, we construct and draw 95% Fisher confidence intervals for ma1 and ma2 coefficients from the model report and plot their simulated density (below). We can see that the simulation and Fisher CIs do not agree with each other, and the Fisher CIs are not covering the peak density of two coefficients. Thus, we choose not to use the SARIMA(1,1,3) model and declare SARIMA(1,1,1) as our ideal model.
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+#Simulation.
+set.seed(578922)
+J <- 500
+params <- coef(sarima113)
+ar <- params[grep("^ar",names(params))]
+ma <- params[grep("^ma",names(params))]
+sar <- params[grep("^sar",names(params))]
+sigma <- sqrt(sarima113$sigma2)
+theta <- matrix(NA,nrow=J,ncol=length(params),
+dimnames=list(NULL,names(params)))
+for(j in 1:J){
+    Y_j <- arima.sim(
+      list(ar=ar,ma=ma,sar=sar),
+      n=length(logDaily),
+      sd=sigma,
+      )
+    theta[j,] <- coef(arima(Y_j, order=c(1, 1, 3), seasonal=list(order=c(1, 0, 0), period=7), method="ML"))
+}
+#Simulation test.
+plot(xlim = c(-2.5,0.6), density(theta[, "ma1"], bw=0.05), main="Density for coefficient ma1")
+abline(v=c(0.4204-1.96*0.0770, 0.4204+1.96*0.0770))
+plot(xlim = c(-1,2), density(theta[, "ma2"], bw=0.05), main="Density for coefficient ma2")
+abline(v=c(-0.749-1.96*0.049, -0.749+1.96*0.049))
+```
+
+#### Diagnostic.
+
+Now for the SARIMA(1,1,1) model, its residuals are decently centered around 0, also with variance relatively stable across the series.
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+#Residual mean and variance.
+plot(sarima111$residuals)
+abline(h=0)
+```
+
+For the residual normality assumption, most of the points are aligned with the line (below). However, there are some points at two ends that are deviating from the line, which may indicate certain left skewness. 
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+#Residual normality.
+qqPlot(residuals(sarima111))
+```
+
+Finally, although with one or two exceeding the acceptable range for some lags, the autocorrelation of the model are mostly falling inside the acceptable range and close to 0. Thus, we can conclude that the SARIMA(1,1,1) may be an ideal model to describe the confirmed number of Covid cases from this given period of time.
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+plot(acf(sarima111$resid, na.action = na.pass, plot = FALSE) , main = "ACF of SARIMA 111 residuals")
+```
+
+### Vaccination
+```{r, include=FALSE}
+library("COVID19")
+library(tidyverse)
+library(ggplot2)
+library(forecast)
+require(knitr)
+```
+
+#### EDA and Data Manipulation
+```{r, include=FALSE}
+dat = read.csv("dat.csv")
+```
+
+The original data for the number of fully-vaccinated people is the cumulative data. In this analysis, we subtract the number of fully-vaccinated people of previous days from the data to achieve the number of new fully-vaccinated people per day. We notice from the time plot that the data skews to the right, suggesting non-stationarity with unstable variance and mean. Therefore, we take the log transformations to stabilize the variance and apply a difference operation to the data to make it look more stationary and therefore more appropriate for ARMA modeling [7].
+
+```{r, echo=FALSE}
+# achieve new fully-vaccinated people per day
+day = dat$date
+vaccines_diff = diff(dat$people_fully_vaccinated)
+
+# log the data
+log_vaccines_diff = log(vaccines_diff)
+
+df = data.frame(day = c(1:250), vaccines_diff = vaccines_diff, log_vaccines_diff = log_vaccines_diff)
+ggplot(df, aes(x=day, y=vaccines_diff)) + geom_line() + ylab("number of new vaccinations") + labs(title = "Time plot of number of new vaccinations")
+ggplot(df, aes(x=day, y=log_vaccines_diff)) + geom_line() + ylab("number of new vaccinations") + labs(title = "Time plot of number of new vaccinations on log scale")
+log_vaccines_diff %>% diff() %>% ggtsdisplay(main="First Difference of newly vaccinated people per day on log scale", plot.type = "hist", lag.max=20)
+```
+
+The first two plots below display the data before and after the log transformation. We can see that the data becomes more stationary after transformation but still shows some nonstationary features. In the third plot, we can see that the transformed time series appears to be stationary after differencing. The subplot on the top allows us to see that the data have a mean of zero and an almost constant variance. The subplot on the left displays the ACF which is almost within the dashed line. Even though some ACF lines are out of the dashed line, they show patterns of seasonality. The ACF plot is an indication of the stationarity if we take into account the seasonality. In the later section, we will apply the integrated autoregressive moving average model with seasonality on the data.
+
+#### Methods and Results
+In this section, we will find the time series models with seasonality that fits best to data.
+
+##### Seasonality
+The previous ACF plot does not display an obvious trend in the data but shows a periodic behavior, suggesting that seasonality is present. We first try to find the period displays in the data by conducting a spectrum analysis. In particular, we approximate the spectral density function of the data by using a smoothed periodogram. There seem to be a couple of dominant frequencies. The first is $\omega_1=0.008$, which corresponds to a period of $1/0.004=250$ days which equals the number of the data set. This does not seem to be very interesting considering the size of our data set. There is also a noticeable local maximum at around $\omega_2=0.144$, which corresponds to a much shorter period of $1/0.144 = 6.944 \approx 7$ days or a week. This fits in with our intuition. For example, it is likely that more people take vaccines on weekends since they may have more free time on the weekend than on weekdays. On the other hand, it is also likely that fewer people take vaccines on weekends due to fewer working personnel to vaccine people. Therefore, we will include period = 7 in our model-fitting below. There is another local maximum at around 0.285; however, we can ignore this since it corresponds to the second harmonic of $\omega_2$.
+
+```{r, echo=FALSE}
+cycle_spec <- spectrum(log_vaccines_diff, spans=c(3,5,3), main="Spectrum of newly vaccinated people per day on log scale", ylab="spectrum", xlab="Cycles per day")
+peak_freq <- cycle_spec$freq[which.max(cycle_spec$spec)]
+period <- 1/peak_freq
+abline(v = c(peak_freq, 0.144, 0.285), col=c("red", "blue", "grey"), lty=c(2,2,2))
+period2 = 1/0.144
+```
+
+```{r, include=FALSE}
+peak_freq
+period
+period2
+```
+
+##### Model Selection
+As we found above, the time series data has a seasonal component with a period of 7 days. Therefore, we add the seasonal component into our model and look for the model with seasonality that fits the data best. Furthermore, since we found that differencing makes the data more stationary, we will fit data to an integrated ARMA model with seasonality. That is, we will fit SARIMA$(p,d,q)×(P,D,Q)_{7}$ given by $$\phi(B)Φ(B^{7})(1−B)^d(1−B^{7})^DY_n−\mu= \psi(B)Ψ(B^{7})\epsilon_n$$, where ${\epsilon_n}$ is a white noise process, the intercept $\mu$ is the mean of the differenced process ${(1−B)^d(1−B^{12})^DY_n}$, and we have ARMA polynomials$\phi(x), Φ(x), \psi(x), Ψ(x)$ [8]. 
+
+Since the raw data is not stationary, we set $d = 1$. To fit an ARIMA$(p,1,q)$ model, we need to determine the best values of p and q. To achieve the optimal p and q, we tabulate AIC values for a range of different choices of p and q ranging from 0 to 5 [9]. The following table displays the results.
+
+```{r, echo=FALSE}
+aic_table <- function(data,P,Q){
+  table <- matrix(NA,(P+1),(Q+1))
+  for(p in 0:P) {
+    for(q in 0:Q) {
+      table[p+1,q+1] <- arima(data,order=c(p,1,q), seasonal=list(order=c(1, 0, 0), period=7))$aic
+      }
+    }
+  dimnames(table) <- list(paste("AR",0:P, sep=""),
+                          paste("MA",0:Q,sep=""))
+  table
+  }
+covid_aic_table <- aic_table(df$log_vaccines_diff,5,5)
+kable(covid_aic_table,digits=2)
+```
+
+We hope to choose the models with low values of the AIC. From the table, we can see that except for the model with $p=0$ and $q=0$, the other models all have relatively small AIC. However, we do not hope to use more with large p and q which are likely to be unstable. Therefore, we follow recommendations but choose from models with $p=0$ and $q=1$ with competitive AIC. We will also consider a more complex model with $p=2$ and $q=1$ as potential best models as it lows AIC. However, we have to be cautious if this complex model displays lower AIC due to computational issues with maximization or evaluation. Therefore, we take a further look at it in the later section by examining the invertibility and causality.
+
+```{r,echo=FALSE}
+mod2<- arima(log_vaccines_diff, order=c(0, 1, 1), seasonal=list(order=c(1, 0, 0), period=7))
+mod3<- arima(log_vaccines_diff, order=c(2, 1, 1), seasonal=list(order=c(1, 0, 0), period=7))
+#acf(mod2$residuals, main='SARIMA(0, 1, 1)×(1,0,0)_7 ACF')
+#acf(mod3$residuals, main='SARIMA(2, 1, 1)×(1,0,0)_7 ACF')
+```
+
+##### invertibility and casuality
+
+In this section, we check the causality and invertibility of the SARIMA$(0,1,1)×(1,0,0)_{7}$ model and SARIMA$(2,1,1)×(1,0,0)_{7}$ by computing and plotting the roots of the AR polynomial and MA polynomial.
+
+```{r, echo=FALSE}
+MA_roots <- polyroot(c(1,-coef(mod2)[c("ma1")]))
+autoplot(mod2, main = "Plot the inverse roots of SARIMA(0,1,1)×(1,0,0)_7")
+```
+```{r, include=FALSE}
+MA_roots
+```
+
+We have a stationary causal fitted using SARIMA$(0,1,1)×(1,0,0)_{7}$. The plot of the inverse roots of SARIMA$(0,1,1)×(1,0,0)_{7}$ model shows that the inverse MA root is inside the unit circle, suggesting the MA root is outside the unit circle so the model is invertible. 
+
+```{r,echo=FALSE}
+AR_roots2 <- polyroot(c(1,-coef(mod3)[c("ar1","ar2")]))
+MA_roots2 <- polyroot(c(1,-coef(mod3)[c("ma1")]))
+#autoplot(mod3, main = "Plot the inverse roots of SARIMA(2,1,1)×(1,0,0)_7")
+```
+```{r, include = FALSE}
+AR_roots2
+MA_roots2
+```
+
+On the other hand, the MA root of SARIMA$(2,1,1)×(1,0,0)_{7}$ is on the unit circle. The MA root is -1, showing that the fitted model is at the threshold of non-invertibility. This accords with our concern that even though complex models have lower AIC, they may have issues such as non-causality and non-invertibility problems. We further investigate the potential non-invertibility problem by using profile and bootstrap methods.
+
+##### Profile likelihood estimation and simulation study 
+In this section, we first perform a profile likelihood estimation to see if the approximate confidence interval constructed using profile likelihood is in agreement with the approximate confidence interval constructed using the observed Fisher information used by `arima` [10]. 
+
+```{r, include=FALSE}
+# CI using Fisher Information
+ub_fisher = mod3$coef["ma1"]+1.96*sqrt(mod3$var.coef['ma1', 'ma1'])
+lb_fisher = mod3$coef["ma1"]-1.96*sqrt(mod3$var.coef['ma1', 'ma1'])
+```
+```{r, include=FALSE}
+set.seed(123)
+# code from slide 33 lecture 5
+K <- 500
+ma1 <- seq(from=-1.15,to=-0.85,length=K)
+profile_loglik <- rep(NA,K)
+for(k in 1:K){
+profile_loglik[k] <- logLik(arima(log_vaccines_diff, order=c(2, 1, 1), seasonal=list(order=c(1, 0, 0), period=7), method="ML",fixed=c(NA, NA, ma1[k], NA)))
+}
+```
+
+```{r, echo=FALSE}
+plot(profile_loglik~ma1,ty="l", main = "profile log likelihood of ma1")
+abline(h = max(profile_loglik), col = "blue")
+abline(h = max(profile_loglik)-1.92, col = "blue")
+abline(v = ub_fisher, col = "red", lty=2)
+abline(v = lb_fisher, col = "red", lty=2)
+abline(v = -1.092, col = "blue", lty=2)
+abline(v = -0.915, col = "blue", lty=2)
+```
+
+From the plot, we can see that the profile confidence interval (the dashed blue line) is much wider than the confidence interval (the dashed red line) proposed by the Fisher methods. The observed Fisher information matches the profile cutoff but for a quadratic approximation to the profile at its maximum. As a result, the quadratic approximation used by the Fisher method is not reliable over the range of the CI, so the method is probably not reliable. Next, we do a simulation study to further verify this.
+
+```{r, include=FALSE}
+# code from slide 36 lecture 5
+J <- 1000
+params <- coef(mod3)
+ar <- params[grep("^ar",names(params))]
+ma <- params[grep("^ma",names(params))]
+#intercept <- params["intercept"]
+sigma <- sqrt(mod3$sigma2)
+theta <- matrix(NA,nrow=J,ncol=length(params),
+dimnames=list(NULL,names(params)))
+for(j in 1:J){
+  try({
+    Y_j <- arima.sim(
+      list(ar=ar,ma=ma),
+      n=length(log_vaccines_diff),
+      sd=sigma
+      )#+intercept no intercept after differencing
+    theta[j,] <- coef(arima(Y_j, order=c(2, 1, 1), seasonal=list(order=c(1, 0, 0), period=7)))
+  })
+}
+```
+```{r}
+plot(density(theta[,"ma1"],bw=0.05), main = "density plot of simulated ma1")
+abline(v=ub_fisher, col="red")
+abline(v=lb_fisher, col="red")
+```
+
+The plot seems consistent with the profile likelihood plot. Both profile log-likelihood method and simulation study does not the ma1 results achieved by using Fisher information. Therefore, it may be sensible to avoid the SARIMA$(2,1,1)×(1,0,0)_{7}$ model that displays the issue of invertibility.
+
+#### diagnostics
+
+From the previous part, we concluded that SARIMA$(0,1,1)×(1,0,0)_{7}$ is the best model to use considering the lowe AIC, causality, and invertibility. In this section, we do a diagnostic analysis. The first thing to do is to look at the residuals. 
+
+```{r, echo=FALSE}
+plot(residuals(mod2))
+abline(h = 0)
+```
+
+We see the residual scatter around 0. The residuals of both models show no striking patterns or significant signs of autocorrelation. We then check if the residuals are close to uncorrelated by plotting their pairwise sample correlations at a range of lags [11]. 
+
+```{r, echo=FALSE}
+AutoCorrelation = acf(mod2$resid, na.action = na.pass, plot = FALSE) 
+plot(AutoCorrelation, main = "ACF of residuals")
+```
+
+From the ACF plot, we observe that overall the autocorrelations are sufficiently close to zero.
+
+Finally, we make a plot to show the fit of our model against the data. The SARIMA$(0,1,1)×(1,0,0)_{7}$ model seems to fit well with the data.
+```{r, echo=FALSE}
+#plotting the series along with the fitted values
+ts.plot(log_vaccines_diff)
+AR_fit <- log_vaccines_diff - residuals(mod2)
+points(AR_fit, type = "l", col = 2, lty = 2)
+```
+
+### Relation Between Confirmed Cases And Vaccination
+
+```{r echo=FALSE,warning=FALSE,message=FALSE}
+library("forecast")
+library("astsa")
+```
+
+```{r echo=FALSE,warning=FALSE,message=FALSE}
+dat = read.csv(file='dat.csv',header=TRUE)
+#head(data,2)
+```
+
+```{r echo=FALSE,warning=FALSE,message=FALSE}
+confirm = diff(dat$confirmed)
+vaccines = diff(dat$people_fully_vaccinated)
+confirm = log(confirm)
+vaccines = log(vaccines)
+```
+
+We investigate the dependence of "confirm" and "vaccines" using a regression with SARIMA errors model,
+$$Confirm_n = \alpha + \beta Vaccines_n+\epsilon_n,$$
+where $\epsilon_n$ is a Gaussian SARIMA process. We use an $SARIMA(0,1,2)*(1,0,0)_7$ model. [12] We introduce seasonality here, because from previous study on "confirm" and "vaccines", we have seen seasonality. A more detailed analysis about model selection is covered in Appendix, where we will talk about why we choose ARIMA(0,1,2) with seasonality.
+
+```{r echo=FALSE,warning=FALSE,message=FALSE}
+model <- arima(confirm,order=c(0,1,2),seasonal=list(order=c(1,0,0),period=7),xreg=vaccines)
+model
+```
+
+The standard error (computed via observed Fisher information) gives a z-statistic of $0.6899/0.0802 = 8,8.60$ for the coefficient of "vaccines". we can also compute a p-value from a likelihood ratio test, which gives us a value as follows. 
+
+```{r echo=FALSE,warning=FALSE,message=FALSE}
+log_lik_ratio <- as.numeric(
+  logLik(arima(confirm,order=c(0,1,2),seasonal=list(order=c(1,0,0),period=7),xreg=vaccines)) -
+  logLik(arima(confirm,order=c(0,1,2),seasonal=list(order=c(1,0,0),period=7)))
+)
+LRT_pval <- 1-pchisq(2*log_lik_ratio,df=1)
+LRT_pval
+```
+
+Thus, from the z-statistic and the likelihood ratio test, we can conclude that we have clear statistical evidence for a positive association between "comfirm" and "vaccines". 
+
+We also plot the sample cross-correlation function (CCF) to check whether there exists a lag relationship between the two time series. (If a reader takes a look at our code, he/she will notice that we use the diff() function when plotting sample cross-correlation function. This is because that we are using SARIMA model instead of SARMA model.)
+
+```{r echo=FALSE,warning=FALSE,message=FALSE}
+ccf(diff(confirm),diff(vaccines))
+```
+
+We can see that the cross-correlation at lag zero is strongest and positive. We can see similar strong and positive cross-correlation at other lags because the seasonality of our data. Besides, we can also see the oscillatory pattern in the CCF, which is also significant in the coherency (the normalized cross-spectrum) showing in the following.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+s <- spectrum(cbind(diff(confirm),diff(vaccines)),spans=c(3,5,3),plot=F)
+plot(s,plot.type="coherency",main="")
+```
+
+Now, we can conclude that there is strong evidence of positive relation between "comfirmed" and "vaccines". How can we interpret the positive relation? Obviously, it is not reasonble to draw a conclusion that when more people get vaccinated, more people will be confirmed of covid-19. Conversely, the positive relation indicates that when the spread of covid-19 became more severe, more people tend to get vaccinated to protect their health. Besides, the government may also update policy on vaccination to tackle covid-19, which can be proved from the dataset [2]. (If interested, readers can load the whole dataset and look into related policies. We can find that, during this period,  the government updated related policies, including stay-home restrictions, face covering, vaccines and so on.)
+
+Next, we can inspect the residuals for the fitted model, and look at their sample autocorrelation.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+r <- resid(model)
+plot(r)
+```
+
+Generally, the residuals look like white noise, but there is some evidence for fluctuations increasing in amplitude over time, which can be studied in the future.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+acf(r)
+```
+
+The ACF is high at lag 7 and lag 14, which is related to the seasonality. Generally, it is acceptable that acf at most lags is inside the confidence interval.
+
+To conclude, we find several interesting phenomena. Firstly, there is strong evidence of seasonality in our data. A possible explanation is that there is periodic behavior in people's daily life. Secondly, there is positive relation between "confirm" and "vaccines". We think that when more people get confirmed of covid-19, people become more willing to get the vaccination for their health and government will update related policies to protect public health.
+
+### Conclusion
+
+In this analysis, we focus on the number of fully-vaccinated people and confirmed Covid cases and their relationship using time series methods. We use the SARIMA model to fit the data. Before fitting the models, we make the log transformation and differencing to make the highly non-stationary data to be more stationary. We have drawn the following conclusions:
+
+1. Both the number of fully-vaccinated people and confirmed Covid cases display seasonality with a period of 7. A possible explanation is that there is periodic behavior in people’s daily life. For instance, people may get vaccinated during weekends, rather than working days. In particular, the best model for fully-vaccinated people is SARIMA$(0,1,1)×(1,0,0)_{7}$. SARIMA$(1,1,1)×(1,0,0)_{7}$ is a reasonable model to describe the confirmed number of Covid cases. 
+
+2. There is a statistically significant positive association between confirmed cases and the number of fully-vaccinated people using the SARIMA$(0,1,2)×(1,0,0)_{7}$ model to investigate the dependency. This conclusion seems counter-intuitive that when more people get vaccinated, more people will be confirmed of covid-19. However, it is reasonable in a sense that the positive relation indicates that when the spread of covid-19 became more severe, more people tend to get vaccinated to protect their health. Besides, the government may also update policy on vaccination to tackle covid-19.
+
+There are several limitations of our analysis. Since Covid is affected by many factors such as government policies, sanitation conditions, and other unpredictable events such as virus mutation, it is hard to use our models to do predictions. As a result, since our models are based on the data within a certain time, we may not extrapolate the conclusions to other times. In the future, we can try to improve our model by including more explanatory variables and other relevant data.
+
+### Appendix
+
+In this part, we show some detailed analysis about model selection about the relation between "confirmed" and "vaccines".
+
+We generate an AIC table to choose better models.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+aic_table <- function(data,P,Q,xreg=NULL){
+  table <- matrix(NA,(P+1),(Q+1))
+  for(p in 0:P) {
+    for(q in 0:Q) {
+      table[p+1,q+1] <-arima(data,order=c(p,1,q),seasonal=list(order=c(1,0,0),period=7),xreg=xreg)$aic
+  } 
+}
+  dimnames(table) <- list(paste("AR",0:P, sep=""),paste("MA",0:Q,sep=""))
+  table
+}
+aic_table <- aic_table(confirm,4,4,xreg=vaccines)
+require(knitr)
+kable(aic_table,digits=2)
+```
+
+Here, we introduce seasonality into our model because of all the strong evidence we mentioned above. We also tried not to introduce seasonality, but the result is not so good. We did not include that part to save readers' time, because we already have strong evidence to support seasonality. One might ask why the parameter of seasonality is (1,0,0). This can be considered as the simplest model with seasonality. We choose this for generally two reasons. Firstly, there is no existing theory that supports more complex models. Secondly, if we try more complex model, such as (1,0,1), there will be a "non-finite" error in the "arima()" function. Since we fixed the parameter of seasonality, we will omit the seasonality part in the following, which means SARIMA(p,d,q) represents SARIMA(p,d,q)*(1,0,0).
+
+SARIMA(0,1,2) shows the best AIC for small models. The AIC of SARIMA(1,1,1) is close to that of SARIMA(0,1,2). SARIMA(2,1,4), a larger model, has better AIC. Notice that there is inconsistency in the AIC table. The AIC of SARIMA(2,1,3) is much larger than that of SARIMA(1,1,3). We can check the roots of SARIMA(2,1,4) by calculating the roots and plot the inverse roots. Note that we plot inverse roots, so a causal and invertible SARIMA model should have all inverse roots inside a unit circle.
+
+```{r echo=FALSE,message=FALSE,warning=FALSE}
+a2_4 <- arima(confirm,xreg=vaccines,order=c(2,1,4),seasonal=list(order=c(1,0,0),period=7))
+a2_4
+```
+
+```{r echo=FALSE,message=FALSE,warning=FALSE}
+AR_roots1 <- polyroot(c(1,-coef(a2_4)[c("ar1","ar2")]))
+print(AR_roots1)
+MA_roots1 <- polyroot(c(1,-coef(a2_4)[c("ma1","ma2","ma3","ma4")]))
+print(MA_roots1)
+```
+
+We can see that there are some roots near the boundry of the unit circle (actually inside the unit circle). We can implement a simulation study [13] to show that the fisher information is not reliable.
+
+``` {r echo=FALSE,message=FALSE,warning=FALSE}
+# This part of code take a long time to run. J should be 500 or larger.
+library('astsa')
+J <- 500
+params <- coef(a2_4)
+ar <- params[grep("^ar",names(params))]
+ma <- params[grep("^ma",names(params))]
+sar <- params[grep("^sar",names(params))]
+coeff <- params[grep("^vaccines",names(params))]
+sigma <- sqrt(a2_4$sigma2)
+theta <- matrix(NA,nrow=J,ncol=length(params)-1,
+  dimnames=list(NULL,c('ar1','ar2',"ma1","ma2","ma3","ma4","sar1")))
+j <- 1
+while (j<J){
+  Y_j <- sarima.sim(
+    sar=sar,ar=ar,ma=ma,D=1,S=7,
+    n=length(confirm),
+    sd=sigma,)
+  tryCatch(
+  {theta[j,] <- coef(arima(Y_j,order=c(2,1,4),seasonal=list(order=c(1,0,0),period=7),method="ML"))
+  j = j+1},
+  error = function(e){
+    j=j-1
+  }
+  )
+}
+```
+
+``` {r echo=FALSE,message=FALSE,warning=FALSE}
+hist(theta[,"ma1"],freq=FALSE)
+```
+
+We can see that the coefficient of "ma1" centers nearly -1, which is different from what we observed from fisher information. Therefore, this model has a problem of instability. We have to admit that the simulation study may not be perfect. Because of the instability of this model, the "arima()" function sometimes gives a "non-finite" error when tring to fit the simulated data. Nevertheless, this flaw does not influence our conclusion that this model is instable.
+
+We also check the roots of SARIMA(0,1,2) and SARIMA(1,1,1). The results are shown as follows.
+
+```{r echo=FALSE,message=FALSE,warning=FALSE}
+a0_2 <- arima(confirm,xreg=vaccines,order=c(0,1,2),seasonal=list(order=c(1,0,0),period=7))
+a0_2
+```
+
+```{r echo=FALSE,message=FALSE,warning=FALSE}
+MA_roots2 <- polyroot(c(1,-coef(a0_2)[c("ma1","ma2")]))
+MA_roots2
+```
+
+```{r echo=FALSE,message=FALSE,warning=FALSE}
+autoplot(a0_2, main = "Plot the inverse roots")
+```
+
+```{r echo=FALSE,message=FALSE,warning=FALSE}
+a1_1 <- arima(confirm,xreg=vaccines,order=c(1,1,1),seasonal=list(order=c(1,0,0),period=7))
+a1_1
+```
+
+```{r echo=FALSE,message=FALSE,warning=FALSE}
+AR_roots3 <- polyroot(c(1,-coef(a1_1)[c("ar1")]))
+print(AR_roots3)
+MA_roots3 <- polyroot(c(1,-coef(a1_1)[c("ma1")]))
+print(MA_roots3)
+```
+
+```{r echo=FALSE,message=FALSE,warning=FALSE}
+autoplot(a1_1, main = "Plot the inverse roots")
+```
+
+We can see that, all the roots of the two models are outside the unit circle (inverse roots are inside the unit circle). For now, we have no reason to reject any of them. Therefore, we choose the model that have lower AIC, which is SARIMA(0,1,2).
+
+
+### Contribution
+
+In terms of group work distribution, three research questions above are respectively assigned to three group memebers. Detailed information is hidden in this blinded file.
+
+### Source
+
+Some concepts, formula, and code included in this report refer to the following lecture slides. We list the detailed lecture and slide number as the following. The indices are included in the report where the contents are used. We then do calculations, coding, and interpretation based on these materials.
+
+[1] Covid 19 impact from WHO: https://www.who.int/news/item/13-10-2020-impact-of-covid-19-on-people's-livelihoods-their-health-and-our-food-systems
+
+[2] Guidotti, E., Ardia, D., (2020), “COVID-19 Data Hub”, Journal of Open Source Software 5(51):2376, doi: 10.21105/joss.02376. This is the source of our dataset. Loading the whole dataset in R takes a long time, so in this project, we generate a subdataset and store it in a csv file.
+
+[3] page 11, lecture slide 6.
+
+[4] "Given that the incubation period can be up to 14 days, CDC recommends conducting screening testing at least weekly." https://www.cdc.gov/coronavirus/2019-ncov/hcp/testing-overview.html#:~:text=Given%20that%20the%20incubation%20period,screening%20testing%20at%20least%20weekly.
+
+[5] page 15, lecture slide 6.
+
+[6] About high order ARMA models: https://stats.stackexchange.com/questions/223726/order-of-arma-models and also the potential concerns: https://stats.stackexchange.com/questions/285093/why-does-default-auto-arima-stop-at-5-2-5/285099#285099
+
+[7] slide 11 lecture 6
+
+[8] slide 15 lecture 6
+
+[9] slide 29,30 lecture 5, code from 29
+
+[10] profile code from slide 33, simulation code from 36 lecture 5
+
+[11] slide 19, 20 lecture 1
+
+[12] The procedure of this part generally follows the case study in lecture 9
+
+[13] We use "sarima.sim()" from "astsa" to simulate ARIMA model with seasonality. The method is inspired by https://www.rdocumentation.org/packages/astsa/versions/1.12/topics/sarima.sim and the piazza question $@90$. 

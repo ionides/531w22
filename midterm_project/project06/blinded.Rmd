@@ -1,0 +1,267 @@
+---
+title: "Analysis on NFT sales"
+author: "Blind"
+date: "2/21/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+set.seed(12345)
+Prices <- read_delim("chart.csv", delim = ',')
+Searches <- read_delim("multiTimeline.csv", delim = ',')
+nfts <- Searches %>%
+  rename(Date = Week) %>%
+  filter(nft != '<1') %>%
+  right_join(Prices, by = 'Date') %>%
+  arrange(Date) %>%
+  filter(Date >= min(Searches$Week[Searches$nft != '<1'])) %>%
+  mutate(nft= as.numeric(nft)) %>%
+  fill(nft, .direction = 'down') 
+
+#All these columns were marked <1 so we have approximated to 0
+for (i in 2:112){
+  nfts[i,2] = 0
+}
+
+#Last reported number is for Feb13th-19th
+nfts <- nfts[-512,]
+```
+
+# Introduction
+
+A non-fungible token (NFT) is a non-interchangeable unit of data stored on a blockchain that can be sold and traded. Various types of NFT data units may be associated with digital files such as photos, videos, and audio, or skins in video games like Counter Strike: Global Offensive. Since each NFT has a unique identifier, they is different from cryptocurrencies, such as bitcoin, which only exists as a chain of transactions. To analyze the  recent social interest in NFTs, we collected data from NonFungible.com, one of the largest databases of blockchain gaming and crypto-collectible market activity. The sales data, described on their website as, __"Total usd spent on completed sales"__. This data ranges from June 22nd 2017 to February 20th 2022 with the unit of USD. Additionally, we collected Google Trends data described as representing the average weekly searches on the __*topic* of NFT_s__, which notably is *not* limited to the query "nft". We will examine both datasets concurrently to establish a relationship between the sales data and the trending data. As opposed to stocks, NFTs are given value by the people that buy and sell them. With our analysis we wish to explore how public interest and total money in NFTs is related.
+
+# Data Preprocessing
+The Google trend data takes the average over a week, but we noticed that the most of data starting in 2017 contain zero terms. These terms will be unhelpful for analysis. From the data, we assume that since the social popularity of NFT has not been recognized in 2017, this time frame is not relevant to our exploration's question, so we picked the data starting from September 27th 2020 to February 20th 2022 for analysis. The sales data of NFT is given daily, which corresponds to the 512 observations that streched over the period of valid Google Trends data.
+
+# Exploratory Data Analysis
+
+Our final data consists 511 observations, which are the daily USD amount for NFT sales in million USD from September 27, 2020 to February 16, 2022. The mean sale is \$35292401 and the standard deviation is \$47384351, which is notably higher than the mean. Since we not only want to find the general trend for NFT sales, we also want to link the sales with the Google search trend for the word 'NFT'. Hence, we also attached the weekly Google trend analytic data.
+
+However, one problem is the Google trend only counts data weekly, which is less precise than our daily sales, we decided to smooth it using the generalized linear model (GAM) with natural spline. We set the number of knots as large as possible (30) to preserve the underlying trend.
+
+```{r eda_general, echo = F, fig.cap='Figure 1: General Visualization for NFT sales and search trend', fig.align='center', fig.width=5, fig.height=4}
+nfts %>%
+ggplot() +
+  geom_line(aes(x = Date, y = `Sales USD`/1000000)) +
+  geom_line(aes(x = Date, y = nft*4), size=0.3,linetype=2, col = 'red') +
+  stat_smooth(aes(x = Date, y = nft*4), size=0.5, col = 'red', method = "gam",
+              formula = y ~ splines::ns(x, 30) + 1, se = FALSE) +
+  scale_y_continuous(
+    name = "NFT Sales in million USD",
+    sec.axis = sec_axis(~./(max(.)-min(.))*100, name="NFT search trend (smoothed)")
+  ) + 
+  theme_minimal() +
+  theme(
+    axis.title.y = element_text(size=10),
+    axis.title.y.right = element_text(color='red', size=10)
+  )
+
+idx <- as.numeric(nfts$Date) - min(as.numeric(nfts$Date)) + 1 
+nft_smooth <- gam::gam(nft ~ splines::ns(idx, 30), data = nfts)
+nfts['nft_s'] <- nft_smooth$fitted.values
+```
+
+
+The first huge sales boom happens on May 3, 2021. the first spike seen above. This spike is in a lag of the rise in 'NFT' search trends in April. The most active trade in the history happens from July 29 to September 7, with an insane transaction amount, however, the search engine reported a steady but relatively slow growth of the word. NFT sales remain relatively steady with little growth afterwards, while it appears more and more often in search engines.
+
+It may be difficult for us to model the sales data directly, since we cannot guarantee its stationarity. In contrast; the sales difference looks more stationary. The autocorrelation plot also shows a *nice approximate white noise pattern*, thus we decided to construct our model on this sales difference.
+
+```{r eda_diff, echo=F, fig.cap='Figure 2: Difference for NFT sales and search trend & ACF for sales difference', fig.align='center', fig.width=6, fig.height=3}
+p1 <- nfts %>%
+  ggplot() + 
+  geom_line(aes(x = Date, y = c(0, diff(`Sales USD`))/1000000)) + 
+  theme_minimal() +
+  scale_y_continuous("Difference in million USD")
+
+acf_gen <- acf(diff(nfts$`Sales USD`)/1000000, plot = F)
+p2 <- with(acf_gen, data.frame(lag, acf)) %>%
+  ggplot(aes(x = lag, y = acf)) + 
+  geom_hline(aes(yintercept = 0)) +
+  geom_segment(mapping = aes(xend = lag, yend = 0)) +
+  geom_hline(yintercept=c(-1,1)*qnorm((1 + 0.95)/2)/sqrt(acf_gen$n.used), lty=2, col='blue') +
+  scale_y_continuous('ACF')
+
+gridExtra::grid.arrange(p1, p2, ncol=2)
+```
+
+# ARIMA fitting
+
+We implemented a loop similar to the procedure introduced in lecture to fit ARIMA models with all combinations of AR and MA structures, specifically from $ARIMA(0,1,0)$ to $AR(5,1,5)$, using AIC as the model selection criteria. Our fitting results are the following:
+
+```{r ARIMA_aic, echo=FALSE, message=FALSE, warning=FALSE}
+aic_table <- function(data,P,Q){table <- matrix(NA,(P+1),(Q+1)) 
+for(p in 0:P) {
+  for(q in 0:Q) {
+    table[p+1,q+1] <- arima(data,order=c(p,1,q))$aic
+    }}
+dimnames(table) <- list(paste("AR",0:P, sep=""),
+                        paste("MA",0:Q,sep=""))
+return(table)
+}
+knitr::kable(aic_table(nfts$`Sales USD`/1000000,5,5),digits=2)
+```
+
+We find the $ARIMA(2,1,2)$ model gives the smallest AIC score with a relatively simple structure. To take a deeper look on our fitted model, we will examine some of the parameter estimates. The characteristic roots for these estimates is the following:
+$$
+\begin{aligned}
+Roots\ for\ AR&:\alpha_1=0.6865+0.9806i,\ \alpha_2=0.6866-0.9807i \\
+Roots\ for\ MA&:\beta_1=-0.6872,\ \beta_2=2.5219
+\end{aligned}
+$$
+The characteristic roots comes with problems: Most of them are inside the unit circle, meaning this model is not causal. This may be the result of the abnormal NFT sales boom in late August 2021 which brings much uncertainty to our model.
+
+```{r aic_test,echo=F,fig.cap='Figure 3: ARIMA(2,1,2) Residuals and its ACF', fig.align='center', fig.width=6, fig.height=3}
+(arima_212 <- arima(nfts$`Sales USD`/1000000, order = c(2,1,2)))
+#polyroot(c(1, -arima_212$coef[c('ar1', 'ar2')]))
+#polyroot(c(1, -arima_212$coef[c('ma1', 'ma2')]))
+par(mfrow=c(1,2))
+plot(as.vector(arima_212$residuals), cex=0.5, ylab = "Residuals")
+abline(h=0, col='red')
+acf(arima_212$residuals, main = "Residuals ACF")
+```
+
+The residual and ACF plots, however, give relatively desirable results for our assumptions. Residuals center at 0 with few outilers. Alsom there seems to be no significant correlation between the residuals.
+
+# Frequent and Seasonailty
+
+Another intuitive guess about the NFT market, we think, is that it also experience some periodicity like the normal market. Perhaps people tend to trade more in weekdays rather than weekends, or most of the deals take place on the second half of every month. Hence, we want to check the spectrum to find possible periodicity evidences.
+
+```{r spectrum, echo=F,fig.cap='Figure 4: Unsmoothed and span-smoothed spectrum', fig.align='center', fig.width=10, fig.height=3}
+par(mfrow=c(1,2))
+spectrum(diff(nfts$`Sales USD`)/1000000)
+sp_s <- spectrum(diff(nfts$`Sales USD`)/1000000, spans=c(10,10))
+abline(v=sp_s$freq[which.max(sp_s$spec)], col = 'red')
+#1/sp_s$freq[which.max(sp_s$spec)]
+```
+
+The maximum spectral density has the corresponding frequency of 0.1680, resulting in a period of $5.95\approx 6$ days. This may suggests us adding a seasonal term into our model. We tried to change our model into $SARIMA(2,1,2)\times(1,0)_6$, and conducted a significance test by comparing the log likelihood statistics. The log likelihood shows $l_{SARIMA}=-2204.03 < l_{ARIMA}=-2202.21$, which means that our SARIMA model actually performs worse. Hence, adding a seasonal term does not improve our model fit since the spectral density is possibly well explained by the normal ARIMA model.
+
+```{r sarima_fitting, echo=F}
+sarima_212 <- arima(nfts$`Sales USD`/1000000,order=c(2,1,2), 
+                    seasonal = list(order=c(1,0,0), period = 6))
+#sarima_212$loglik
+```
+
+# Trend analysis
+
+Our ultimate goal for our analysis is to find potential trend for NFT trade and link it with the search trend. Hence, in this part, we try to focus back on our original sales data rather than the difference version, and try to regress the search trend on it. In general, we assume our model as:
+$$
+Y_i = \beta_0 + \beta_1+\epsilon_i,\quad \epsilon_i\sim ARMA(p,q)
+$$
+
+We begin with a similar procedure to find a potential favorable model for our analysis. The model we choose is $ARMA(4,2)$ with the log likelihood $l_{ARMA}=-1750.33$ and $AIC_{ARMA}=3516.65$:
+
+```{r regress_basic, echo=FALSE}
+aic_table <- function(data,P,Q){table <- matrix(NA,(P+1),(Q+1)) 
+for(p in 0:P) {
+  for(q in 0:Q) {
+    table[p+1,q+1] <- arima(data,order=c(p,0,q))$aic
+    }}
+dimnames(table) <- list(paste("AR",0:P, sep=""),
+                        paste("MA",0:Q,sep=""))
+return(table)
+}
+#knitr::kable(aic_table(nfts$`Sales USD`/1000000,5,5),digits=2)
+rarima_42b <- arima(nfts$`Sales USD`/1000000, order = c(4,0,2))
+```
+
+And our comparison model with regression on the weekly trend gives the following result:
+
+```{r regress_reg, echo=FALSE}
+(rarima_42 <- arima(nfts$`Sales USD`/1000000,order=c(4,0,2), xreg = nfts$nft_s))
+```
+
+We conduct the significance test again, and this time we have:
+
+$$
+\begin{aligned}
+\lambda_{LR} &= -2[l_{ARMA}-l_{ARMA_{reg}}] \\
+&= -2\times(-2198.89+2195.59) \\
+&= 6.6 \sim X_1^2
+\end{aligned}
+$$
+
+The test statistic gives a p-value of 0.01, indicating that our regression model improves our model. Also, the parameter estimates for $\beta_1$ result in a positive slope 0.87 with 95% confidence interval [0.2773, 1.4652], indicating a significant non-zero positive trend. By this model there is significant evidence to claim that *increasing searching trend for NFTs increase with their sales*.
+
+# Truncated analysis after Boom
+
+The huge NFT boom in August really draws our attention. Due to this actively-traded period, our model is kind of unstable. Also, since the trend data suggests that the word 'NFT' becomes increasingly popular since October 2021, in this part, we tried to remove all the data before the boom ends(September 7, 2021) and try fitting using the rest 166 observations since we want to make our model more stable using a fairly enough sample. We hope the result will be more favorable:
+
+```{r truncated, echo=F,fig.cap='Figure 5: Top Left: Differce series; Top Right: ACF of difference series; Bottom Left: Smooth Periodigram; Bottom Right: ARIMA(1,1,1) Residuals', fig.align='center', fig.width=8, fig.height=6}
+nfts_t <- nfts[nfts$Date > as.Date('2021-09-07'), ]
+aic_table <- function(data,P,Q){table <- matrix(NA,(P+1),(Q+1)) 
+for(p in 0:P) {
+  for(q in 0:Q) {
+    table[p+1,q+1] <- arima(data,order=c(p,1,q))$aic
+    }}
+dimnames(table) <- list(paste("AR",0:P, sep=""),
+                        paste("MA",0:Q,sep=""))
+return(table)
+}
+#knitr::kable(aic_table(nfts_t$`Sales USD`/1000000,4,4),digits=2)
+arima_111t <- arima(nfts_t$`Sales USD`/1000000, order = c(1,1,1))
+par(mfrow=c(2,2))
+plot(diff(nfts_t$`Sales USD`)/1000000, type = 'l', ylab = "Difference in million USD", xlab="Date",
+     main = 'Sales difference - Truncated')
+abline(h=0, col='red')
+acf(diff(nfts_t$`Sales USD`)/1000000, main = 'ACF for Tuncated Sales difference')
+sp_st <- spectrum(diff(nfts_t$`Sales USD`)/1000000, spans=c(10,10), main = 'Smoothed Periodogram' )
+abline(v=sp_st$freq[which.max(sp_st$spec)], col = 'red')
+plot(as.vector(arima_111t$residuals), cex=0.5, ylab = "Residuals", main = 'ARIMA(1,1,1) Residuals')
+abline(h=0, col='red')
+
+sarima_111t <- arima(nfts$`Sales USD`/1000000,order=c(1,1,1), 
+                    seasonal = list(order=c(1,0,0), period = 4))
+```
+
+However, the results have approximately no difference. The difference series still looks stationary, with a new $ARMA(1,1)$ model, and we should not add a seasonal term into it.
+
+```{r regress_basic_t, echo=FALSE}
+aic_table <- function(data,P,Q){table <- matrix(NA,(P+1),(Q+1)) 
+for(p in 0:P) {
+  for(q in 0:Q) {
+    table[p+1,q+1] <- arima(data,order=c(p,0,q))$aic
+    }}
+dimnames(table) <- list(paste("AR",0:P, sep=""),
+                        paste("MA",0:Q,sep=""))
+return(table)
+}
+#knitr::kable(aic_table(nfts_t$`Sales USD`/1000000,4,4), digits=2)
+rarima_10bt <- arima(nfts_t$`Sales USD`/1000000, order = c(1,0,0))
+rarima_10t <- arima(nfts_t$`Sales USD`/1000000,order=c(1,0,0), xreg = nfts_t$nft_s)
+```
+
+The interesting part lies in the regression part, where we suggest using a $ARMA(1,0)$ model for the sale trend. The new $\beta_1$ estimate (from $ARMA(1,0)$) gives 0.2477, with 95% confidence interval [-0.1608, 0.6561], which means the trend is not that informative, corresponding to a likelihood ratio test statistic of 1.36.
+
+| Estimates | Whole set | Truncated set |
+| --- | --- | --- |
+| $\beta_1$ | 0.8713 | 0.2477 |
+| 95% C.I. | [0.2773, 1.4652] | [-0.1608, 0.6561] |
+| Test statistic | 6.6 | 1.36 |
+| P-value | 0.0102 | 0.2435 |
+
+This may because the NFT buzz drops mid-January 2022. When the NFT sales drops in a lag. Also, although the search trend did not come to the same level as the NFT sales rise in the August boom, they do proceeds in the same direction. Thus, it is also informative and removing this time period may not be a good choice.
+
+
+# Conclusion
+
+After analyzing the Google Trends data and the NonFungible.com Market data from September 27th 2020 to February 20th 2022, we draw the following conclusions:
+
+During the exploratory stage, the $ARIMA(2,1,2)$ model fits the best for the sales data. And the characteristic roots indicate that the model is not casual due to the abnormal NFT sales boom in late August 2021.
+
+We originally assumed that the data will show a pattern of seasonality as normal markets do. However, by adding a period of 6 days found in the spectral density graph, we find that the SARIMA model does not perform better than the original model.
+
+We tried to link the Google Trend data to the sales in order to find a link. The $ARMA(4,2)$ model turns out to validate our assumption that the increasing searching trend for NFT does facilitate sales.
+
+Due to the prosperity of the NFT sales in August 2021, our model could be unstable. To examine the trend with extra caution, we picked the data after the huge sales (September 7, 2021) and fit the 166 observations. The results turned out to be slightly different to the previous one: the $ARMA(1,1)$ model without a seasonality. However, the regression part suggests that the trend is not informative since the heat of NFT drops off mid-January 2022.
+
+# Acknowledgements
+
+1. [Non-fungible token from Wikipedia, the free encyclopedia](https://en.wikipedia.org/wiki/Non-fungible_token)
+2. [NonFungible Market History](https://nonfungible.com/market/history)
+3. [Google Trends](https://trends.google.com/trends/?geo=US)
+4. [Lecture slides and notes](https://ionides.github.io/531w22/)
+5. [Models for Bitcoin Prices](https://ionides.github.io/531w21/midterm_project/project01/project.html)

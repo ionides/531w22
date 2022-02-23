@@ -1,0 +1,438 @@
+\newcommand\E{\mathbb{E}}
+\newcommand\var{\mathrm{Var}}
+\newcommand\cov{\mathrm{Cov}}
+\newcommand\R{\mathrm{R}}
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE, cache = TRUE)
+library(tidyverse)
+library(fpp2)
+library(forecast)
+library(Ecdat)
+```
+```{r include=FALSE}
+df = read.csv("data/MLTollsStackOverflow.csv")
+months = paste("20", df$month, sep="")
+months = months %>% str_replace_all(c("Jan"="01", "Feb"="02", "Mar"="03", "Apr"="04", "May"="05", "Jun"="06", "Jul"="07", "Aug"="08", "Sep"="09", "Oct"="10", "Nov"="11", "Dec"="12"))
+months = paste(months,"-01",sep="")
+months = as.Date(months, format="%Y-%m-%d")
+r = ts(df$r, start=c(2009, 1), end=c(2019, 12), frequency=12) # convert to time series
+df["time"] = 1:dim(df)[1]
+df["date"] = months
+
+```
+
+# Introduction
+
+Stack Overflow, one of the most popular website in the world, is a public platform and community-based space for finding and contributing to coding questions and answers. In the face of technical challenges, users often turn to this platform to find answers to their questions for a wide range of topics. 
+
+For our project, we will be using a dataset[7] that contains the number of searches for 81 languages and topics, such as `R`, `Python`, `MatLab`, etc., from January 2009 to December 2019. However, the main focus of our analysis will be on the number of searches relative to `R` in that time period. Our analysis consists of performing EDA on our dataset and variable of interest and studying the seasonality trend of our time series from different perspectives. The goals of our analysis are to understand how seasonality affects the trend we see in the number of searches in R-related topics, build a model that best fits this time series, and statistically determine whether the trend in the number of searches is significant or not.
+
+Our analysis will be mainly broke into two parts. In the first part, we will be focusing on addressing the seasonality in the time series. In the second part, we will try to give a more rigorous analysis on whether the trend is statistically significant. 
+
+Throughout this analysis, without explicit mentioning otherwise, sub-scripted letters represent the element of the corresponding vector, *e.g.* $x_i$ is the $i$-th element of $X$ and $\epsilon_i$ is the $i$-th element of $\epsilon$.
+
+# Exploratory data analysis
+```{r}
+sof = read.csv('data/MLTollsStackOverflow.csv')
+
+sof$years = str_split_fixed(sof$month, "-", 2)[,1]
+sof$months = str_split_fixed(sof$month, "-", 2)[,2]
+
+sof$years = as.numeric(paste("20", sof$years, sep=""))
+sof$months = match(tolower(sof$months), tolower(month.abb))
+
+sof$yms = sof$years + sof$months * 1/12
+```
+
+After data cleaning and resolving topics that were separated into multiple columns, *e.g.* `apache.spark` and `Apache` [6], we show the total number of questions posted for the top 10 topics along with their relative proportions among the top 10 topics.
+
+```{r}
+sof$apache.spark = sof$Apache + sof$apache.spark
+sof = subset(sof, select=-c(Apache, python.3.x, matlab.1, stanford.nlp.1, 
+                            Tableau, rasa, AllenNLP, Trifacta, Venes, Flair, 
+                            months))
+```
+
+
+```{r top10, echo=FALSE}
+sof_sum = colSums(sof[c(-1, -73, -74)])
+col_name = names(sof)
+sof_sort = data.frame(col_name[c(-1, -73, -74)], sof_sum, row.names=NULL)
+names(sof_sort) = c("library", "count")
+sof_sort = sof_sort[order(sof_sort$count, decreasing=TRUE),]
+
+# top 10 data
+sof_top10 = sof_sort[1:10,]
+# top 10 library
+top10libs = sof_sort$library[1:10]
+
+# percent
+sof_top10$percent = round(sof_top10$count/sum(sof_top10$count)*100, 2)
+sof_top10$label = paste0(sof_top10$library, " ", sof_top10$percent, "%")
+rownames(sof_top10) = NULL
+knitr::kable(select(sof_top10, -label))
+```
+
+Here we are showing how the question count progress over the past 10 years for a selection of libraries. We can see that most of libraries have a upward trend with `Python` being the fastest grow library.
+
+```{r}
+col = c("python", "r", "numpy", "scipy", 
+        "keras", "pytorch", "pandas", "matlab",
+        "tensorflow", "scikit.learn")
+df %>%
+  select(all_of(col), date) %>% 
+  gather(lib, count, -date) %>% 
+  ggplot() +
+  geom_line(aes(x=date, y=count, color=lib))
+```
+
+Here, we show the question count for `R` for each year. The boxplot shows the increasing trend of the average number of questions per year, except for the last two years of stabilization.
+
+```{r}
+r_sun = data.frame('time'=sof$month, 'rcount'=sof$r)
+r_dat = data.frame('time'=sof$month, 'rcount'=sof$r, 'rper'=round(sof$r/sum(sof$r)*100, 5), "years"=sof$years)
+options(repr.plot.width=8, repr.plot.height=6)
+boxplot(rcount~years, data=r_dat,type="l")
+```
+
+From the above analysis, we can see that the number of questions in the `R` library has been relatively stable in the past two years after experiencing a dramatic increase. This is also a process from the emergence of new things to being recognized and widely used.
+
+# Seasonality
+## Decomposition
+
+In this part of our analysis, we aim to study the seasonal trend of `R` questions on Stack Overflow. We start by plotting the time series and its moving average (in red) [1]. We see from from this plot that there is an evident increasing trend over time, as well as increasing variation. We also see that, after 2014, there seems to be some periodic pattern where the number of `R` questions asked decreases then increases and then decreases again. 
+
+```{r}
+trend = ma(r, order = 12, centre = T) # moving average window of 12
+plot(r, ylab="Question count", xlab="Date")
+lines(trend, col="red")
+```
+
+This time series appears to have a multiplicative composition, meaning as the time series increases in magnitude, the seasonal variation also increases. Therefore, we will decompose this time series to observe what it looks like in terms of its trend, seasonality, and randomness [1]. 
+
+```{r}
+decompose_r = decompose(r, "multiplicative")
+plot(decompose_r, xlab="Date")
+```
+
+From this decomposition of the time series, we, again, see that the time series has a increasing trend over time. Looking at the seasonality pattern, it seems that the highest peak occurs in the beginning of the period, with lower peaks appearing later on. This means that the most `R` questions are asked around the beginning of each cycle, and a moderate amount is asked later on in the cycle. Finally, after removing the trend and seasonality, we see the random noise of the time series. We see that there is a large peak before 2010; however, after 2010, we do not see much of a pattern in the variation.
+
+Because seasonality is included in the trend we saw in the first plot, we will remove the seasonal effect and re-plot the time series to study the actual trend of the data. In terms of the decomposition components, this is essentially plotting the combination of trend and random effect. We see from the seasonally adjusted time series (in blue) that some of the large dips in the original time series seemed to be influenced by seasonality. When we remove the seasonal effect, the cyclical pattern is still evident after 2014; however, the magnitude of some dips and peaks appear to be lower. 
+
+```{r}
+seasonal = as.ts(decompose_r$seasonal)
+adjusted = r/seasonal
+plot(r, ylab="Question count", xlab="Date")
+lines(adjusted, col="blue") # removed seasonal effect
+```
+
+## SARMA Model
+
+The next part of our analysis is to fit a time series model to this data. This time series is non-stationary as it has a clear increasing trend. Because the models we will use require the time series to be stationary, we will try to transform the time series such that it is appropriate for model fitting. To do this, we first try taking the log of the time series and plotting it below [2]. We see that the fluctuation has decreased significantly and the variation is more uniform, with the exception of the data before 2010.
+
+```{r}
+plot(log(r), xlab="Date", ylab="")
+```
+
+We see that there is still a trend evident in the log-transformed data. Therefore, to remove this trend, we will take the differences of the log data and plot them below [2]. We now see data with uniform variation and no increasing trend, with the exception of data before 2010.
+
+```{r}
+plot(diff(log(r)), xlab="Date", ylab="")
+```
+
+Because the large fluctuation before 2010 could violate the stationarity assumption of our models, we remove all data before the start of 2010. Now, our data looks very similar to white noise and appears stationary. We will be using this transformed data for the next model fitting part of our analysis.
+
+```{r}
+adj_r = diff(log(r))[which(months >= "2010-01-01")] # remove years before 2010
+plot(adj_r, type="l", ylab="", xlab="Date")
+```
+
+The model we aim to fit is the seasonal autoregressive moving average (SARMA) model for monthly data SARMA$(p,0,q) \times (P,0,Q)_{12}$, which takes on the following form [3]:
+
+$$\phi(B)\Phi(B^{12})(Y_i-\mu)=\psi(B)\Psi(B^{12})\epsilon_i$$
+
+where $\epsilon_i$ is white noise, $\mu = \E(Y_i)$, and we have the AR and MA polynomial defined as
+\begin{equation}
+\begin{split}
+    \phi(x)&= 1-\phi_1x - \dots - \phi_p x^p,\\
+    \Phi(x)&= 1-\Phi_1x - \dots - \Phi_P x^P,\\
+    \psi(x)&= 1+\psi_1x + \dots + \psi_q x^q,\\
+    \Psi(x)&= 1+\Psi_1x + \dots + \Psi_Q x^Q\\
+.\end{split}
+(\#eq:ar-ma-poly)
+\end{equation}
+
+
+To estimate the $p,q$ parameters of the non-seasonal part of the SARMA model [5], we will first fit an ARMA$(p,q)$ model, which takes on the following form [4]:
+
+$$\phi(B)(Y_i-\mu)=\psi(B)\epsilon_i$$
+
+where $\epsilon_i$ is white noise, $\mu = \E(Y_i)$, $B$ is the backshift operator, and the AR and MA polynomial as same as Eq. \@ref(eq:ar-ma-poly) . We will fit several ARMA$(p,q)$ models over a range of $p$ and $q$ values and select the best model using AIC. The lower AIC, the better prediction power the model has.
+
+```{r}
+aic_table <- function(data,P,Q){
+  table <- matrix(NA,(P+1),(Q+1))
+  for(p in 0:P) {
+    for(q in 0:Q) {
+      table[p+1,q+1] <- arima(data,order=c(p,0,q))$aic
+    }
+  }
+  dimnames(table) <- list(paste("AR",0:P, sep=""),
+  paste("MA",0:Q,sep=""))
+  table
+}
+r_aic_table <- aic_table(adj_r,4,4)
+knitr::kable(r_aic_table,digits=2)
+```
+
+From the table above, we see that the model with the lowest AIC is the ARMA$(2,2)$ model. Using this best model, we plot the residuals and their ACF to analyze the fit of the model. From the ACF plot, we see three lags with significant autocorrelation. Furthermore, we see a periodic pattern in the ACF, which indicates there is seasonality in the data.
+
+```{r}
+arma22 = arima(na.omit(adj_r),order=c(2,0,2))
+plot(arma22$residuals, ylab="Residuals")
+acf(arma22$residuals, main="Autocorrelatin function of residuals")
+```
+
+Using the ARMA$(2,2)$ model for the non-seasonal part of the SARMA model, we will now fit the model SARMA$(2,0,2) \times (P,0,Q)_{12}$ over a range of $P$ and $Q$ values [5]. We are now essentially estimating the seasonal part of our SARMA model. We will select the best fitting model using AIC.
+
+```{r}
+aic_table <- function(data,P,Q){
+  table <- matrix(NA,(P+1),(Q+1))
+  for(p in 0:P) {
+    for(q in 0:Q) {
+      table[p+1,q+1] <- arima(data,order=c(2,0,2), seasonal=list(order=c(p,0,q),period=12))$aic
+    }
+  }
+  dimnames(table) <- list(paste("AR",0:P, sep=""),
+  paste("MA",0:Q,sep=""))
+  table
+}
+r_aic_table <- aic_table(na.omit(adj_r),2,2)
+knitr::kable(r_aic_table,digits=2)
+```
+
+From the table, we see that the the SARMA$(2,0,2) \times (1,0,1)$ is the best fitting model for our data. Again, we will plot the residuals and ACF plot of this model to look at the model fit. The ACF plot shows no significant autocorrelation at any lags, suggesting that this model is a good fit for our transformed data.
+
+```{r}
+sarma = arima(na.omit(adj_r),order=c(2,0,2), seasonal=list(order=c(1,0,1),period=12))
+plot(sarma$residuals, ylab="Residuals")
+acf(sarma$residuals, main="Autocorrelatin function of residuals")
+```
+
+
+
+# Trend
+
+In order to study the trend more rigorously, we will be analyzing our data under the general signal plus noise model [3]
+$$
+Y_i = \mu_i + \eta_i,
+$$
+where $\{\eta_i\}$ is a stationary, mean zero stochastic process, and $\mu_i$ is the mean function. Further we will model the mean function $\mu_i$ with a linear regression model
+$$
+\mu_i = \beta_0 + x_i\beta_{i,1},
+$$
+where $beta_0$ is the intercept and $\beta_1$ is the underlying trend, and $\{x_i\}$ is the number of months elapsed since the earliest available data $x_1:=$ January 2009 in our dataset.
+
+## White Noise
+We first study the signal plus noise model with white Gaussian noise where $\{\eta_i\}$ is further assumed to be uncorrelated Gaussian. Under such setting, our model is equivalent to a ordinary least square model
+$$
+Y_i = \beta_0 + x_i\beta_{i,1} + \epsilon_i,
+$$
+where $\epsilon_i \overset{iid}{\sim} N(0, \sigma^2)$. 
+
+To address our question, we are interested in whether the trend $\beta_1$ is statistically significant. More specifically, on a 95% level, we want to test the hypothesis
+
+\begin{align}
+H_0&: \beta_1 = 0 \\ (\#eq:h0)
+H_1&: \beta_1 \neq 0. \\ (\#eq:h1)
+\end{align}
+
+```{r}
+ols = lm(r~time, data=df)
+```
+
+From the fit result below, we have $\hat\beta_1$ = `r round(ols[["coefficients"]][["time"]], 2)` (labeled as `time`) and a $p$-value of `r round(summary(ols)$coefficients[,4][["time"]], 2)`. In other word, if the model assumption is met, we can reject the null hypothesis Eq. \@ref(eq:h0) and conclude that there's indeed a trend in the number of question count for `R`.
+
+```{r}
+summary(ols)
+```
+
+However, from our earlier analysis on the transformed data, it's expected that the noise is colored. We give a more careful investigation after the trend has been removed by the linear regression. First, we plot the fitted residuals $r_i$ and we can see that the residuals are not equally spread around 0. Viewing $r_i$ as an estimates of the unexplained variation $\epsilon_i$. It's not evident that noise is homoscedastic.
+
+```{r}
+plot(ols, 1, sub="")
+```
+
+Secondly, we make the quantile-quantile plot where on the $x$-axis we have the theoretical quantile from standard normal distribution, and on the $y$-axis we have the standardized residuals from our model. If the noise were indeed from identical Gaussian distributions, we should expect to see most of the points lying on the dashed diagonal line which is not the case here.
+
+```{r}
+plot(ols, 2, sub="")
+```
+
+Lastly, we plot the autocorrelation function of the residual $r_i$. The dashed blue line represents the asymptotic critical boundaries where 95% of the ACF should falls between if $\epsilon_i$ were uncorrelated. However, we observe a high correlation for ACF for smaller lags indicating correlation.
+```{r}
+acf(ols$residuals, main="Autocorrelatin function")
+```
+
+Based on the above result, we confirmed that the noise $\epsilon_i$ were not white Gaussian noise indicating we should not trust the standard error estimation from our OLS model and thus cannot conclude there's a pattern. 
+
+## Colored Noise
+Motivated from the earlier analysis, we model the noise $\eta_i$ as colored noise to accommodate the additional structure. More specifically, we model our data as an linear regression with ARMA$(p,q)$ errors [3],
+
+$$
+\phi(B)(Y_i - \mu_i) = \psi(B) \eta_i,
+$$
+where the AR and MA polynomial is defined in Eq. \@ref(eq:ar-ma-poly). Similar to what we did earlier, we experiment with a range of different combinations of AR and MA orders. For each pair of $p,q$, in addition to fit ARMA$(p,q)$ model with trend, we will be also fitting an ARMA$(p,q)$ model without trend
+$$
+\phi(B)(Y_i - \mu) = \psi(B) \eta_i.
+$$
+Since the two models are nested differed only by slope estimates $\beta_1$, under the null hypothesis that there is no trend, twice of the difference in their log likelihood follows a $\chi^2$ distribution with degree of freedom of 1. 
+
+More specifically, for each $p,q$, we do the following
+
+1. We fit a full ARMA$(p,q)$ trend model as proposed above.
+
+2. We fit a null ARMA$(p,q)$ without trend but an intercept only.
+
+3. We record the AIC from the full ARMA model.
+
+4. We perform the likelihood ratio test and record the $p$-value.
+
+
+```{r include=FALSE}
+arma_table = function(x, y, n_p, n_q) {
+  aics = matrix(nrow=n_p+1, ncol=n_q+1)
+  pvals = matrix(nrow=n_p+1, ncol=n_q+1)
+  dimnames(aics) = list(
+    paste("AR", 0:n_p, sep=""),
+    paste("MA", 0:n_q, sep="")
+  )
+  dimnames(pvals) = list(
+    paste("AR", 0:n_p, sep=""),
+    paste("MA", 0:n_q, sep="")
+  )
+  for (p in 0:n_p) {
+    for (q in 0:n_q) {
+      try({
+        mod.null = arima(y, order=c(p,0,q))
+        mod.full = arima(y,
+                         order=c(p,0,q),
+                         xreg=x)
+        pval = pchisq(-2*(mod.null$loglik - mod.full$loglik),
+                      df=1,
+                      lower.tail = FALSE)
+        aics[p+1, q+1] = mod.full$aic 
+        pvals[p+1, q+1] = pval
+    })
+    }
+  }
+  return(list(aic=aics, pval=pvals))
+}
+tables = arma_table(df$time, df$r, 5, 5)
+```
+The AIC table is shown below. We observe that the region surrounding ARMA$(2,2)$ has smaller AIC while ARMA$(1,2)$ being the one with the smallest AIC value in that region suggesting an ARMA$(1,2)$ model fits the noise the best. 
+```{r}
+knitr::kable(tables$aic, digits=2)
+```
+The $p$-values are shown below. They are all much higher comparing the the $p$-values we obtained from the OLS model confirming our observations earlier. However, except for the ARMA$(2,4)$ model, we can see that all $p$-values are smaller than 0.05 suggesting that there's a trend.
+```{r}
+knitr::kable(tables$pval, digits=5)
+```
+
+Next, we check both the ARMA$(1,2)$ model suggested from the AIC table and the ARMA$(2,4)$ model that produces a $p$-value of one unlike any other models.
+```{r}
+arma12 = arima(df$r, order=c(1,0,2), xreg=df$time)
+arma24 = arima(df$r, order=c(2,0,4), xreg=df$time)
+```
+First, we check the polynomial roots for ARMA$(1,2)$, which their reciprocals are plotted below. First, we have see that AR and MA have distinct roots indicating an non-reducible model. However, the AR roots is close to the boundary indicating potential numerical problems.
+```{r}
+autoplot(arma12)
+```
+
+We then try to use simulation to check the distribution of $\hat\beta_1$ because of the potential numerical issue we observed earlier. For each simulation run, we do the following:
+
+1. We simulate data using the above fitted coefficients including the AR, MA, and linear regression coefficients.
+
+2. We fit an new ARMA$(p,q)$ trend model with the same AR and MA model along with linear regression specification.
+
+3. We record the fitted trend $\hat\beta_1$ from the linear regression part.
+
+```{r include=FALSE}
+set.seed(42)
+J <- 1000
+params <- coef(arma12)
+ar <- params[grep("^ar",names(params))]
+ma <- params[grep("^ma",names(params))]
+intercept <- params["intercept"]
+sigma <- sqrt(arma12$sigma2)
+theta <- matrix(NA,nrow=J,ncol=length(params),
+              dimnames=list(NULL,names(params)))
+for(j in 1:J) {
+  try({
+  Y_j <- arima.sim(
+        list(ar=ar,ma=ma),
+        n=length(df$time),
+        sd=sigma
+  )+intercept+params["df$time"]*df$time
+  theta[j,] <- coef(arima(Y_j,order=c(1,0,2), xreg=df$time))})
+}
+```
+
+The histogram of the trend estimated is plotted below, we can see that it's well distributed away from 0 indicating that the trend is significant.
+
+```{r}
+hist(theta[,"df$time"], main="Histogram of the trend estimate", xlab="Trend estimate")
+```
+
+We do the same thing for the ARMA$(2,4)$ model and the reciprocal of its roots are plotted below. We can see that it has two MA roots being very close to the boundary indicating numerical problems. 
+
+```{r}
+autoplot(arma24)
+```
+
+We also run the same simulation for the ARMA$(2,4)$ model.
+
+```{r include=FALSE}
+set.seed(42)
+J <- 1000
+params <- coef(arma24)
+ar <- params[grep("^ar",names(params))]
+ma <- params[grep("^ma",names(params))]
+intercept <- params["intercept"]
+sigma <- sqrt(arma24$sigma2)
+theta <- matrix(NA,nrow=J,ncol=length(params),
+              dimnames=list(NULL,names(params)))
+for(j in 1:J) {
+  try({
+  Y_j <- arima.sim(
+        list(ar=ar,ma=ma),
+        n=length(df$time),
+        sd=sigma
+  )+intercept+params["df$time"]*df$time
+  theta[j,] <- coef(arima(Y_j,order=c(2,0,4), xreg=df$time))})
+}
+```
+
+As we can see, the trend estimate is distributed well away from 0 and confirming that the trend is significant.
+
+```{r}
+hist(theta[,"df$time"], main="Histogram of the trend estimate", xlab="Trend estimate")
+```
+```{r}
+srima= arima(df$r, order=c(2,0,2), seasonal=list(order=c(1,0,1), period=12, xrega=df$time))
+```
+
+# Conclusion
+
+Our analysis of the number of searches relevant to `R` on Stack Overflow from 2009 to 2019 not only revealed underlying patterns of seasonality but also confirmed its increasing popularity/trend over time. Through decomposing the time series by its trend, seasonality, and randomness components, we showed that there is an evident positive trend in the number of searches for R-related topics over time and that the large variation is due to seasonal effects and random noise. We integrated stationarity into the data and found that SARMA$(2,0,2) \times (1,0,1)$ is the best fit model. We further test the observed trend more rigorously by modeling our data under the signal plus noise framework with several different settings. We give a more detailed investigations for a selection of representative models and we showed that the trend is indeed statistically significant. In terms of the number of question count on Stack Overflow, we confirm that R has been gaining popularity.
+
+
+# References
+- [1] https://anomaly.io/seasonal-trend-decomposition-in-r/index.html
+- [2] http://people.missouristate.edu/songfengzheng/Teaching/MTH548/Time%20Series-ch05.pdf
+- [3] https://ionides.github.io/531w22/06/slides-annotated.pdf
+- [4] https://ionides.github.io/531w22/04/slides-annotated.pdf
+- [5] https://ionides.github.io/531w21/midterm_project/project18/project.html
+- [6] https://en.wikipedia.org/wiki/Apache_Spark  
+- [7] https://www.kaggle.com/aishu200023/stackindex

@@ -1,0 +1,391 @@
+---
+title: "Stats531 Midterm Project"
+date: "2/18/2022"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 5
+    code_folding: hide
+    theme: united
+    highlight: pygments
+---
+
+\newcommand\prob{\mathbb{P}}
+\newcommand\E{\mathbb{E}}
+\newcommand\var{\mathrm{Var}}
+\newcommand\cov{\mathrm{Cov}}
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+library(forecast)
+library(ggplot2)
+library(tidyverse)
+library(lubridate)
+library(astsa)
+```
+
+## Introduction
+
+Shanghai uses an auction system to sell a limited number of license plates to fossil-fuel car buyers every month. The average price of this license plate is about $13,000 and it is often referred to as “the most expensive piece of metal in the world.”
+
+To do some exploratory data analysis, we load the file and plot the raw data and the ACF of it. 
+```{r, echo = FALSE}
+licence_data = read.csv("C:/Users/Torres Yang/Desktop/license_plates_acution_data.csv")
+avg_price = ts(as.matrix(licence_data$avg_deal_price))
+dim(avg_price) = NULL
+date = seq(from = 2002, length = length(avg_price), by = 1/12)
+```
+
+```{r, fig.height=9,fig.width=10, fig.cap=cap_fig1}
+
+cap_fig1 = paste(
+  "**Figure 1.** *Price average of car license by year & Auto-correlation of price average of car license by year.*"
+)
+
+par(mfrow = c(2, 1))
+
+plot(date,avg_price, type = "l", xlab = "Year", ylab = "Average Deal Price",
+     main = "Average Price for Car License by Year")
+avg_price_temp = loess(avg_price~date,span=0.5) 
+lines(avg_price_temp$x, avg_price_temp$fitted,type = 'l',col='red') 
+
+acf(avg_price, main="Auto-Correlation of Price Average")
+```
+
+In this project, we aim to investigate the price and volatility of car license from January 1, 2002 to January 1, 2019. The plot of raw data indicates that there may be a upward trend and some seasonal patterns in this series. However, the second plot (ACF) doesn't provide evidence of the seasonal patterns. Therefore, we will check and try to find out the period (if exists) in the next section. 
+
+Thus, we need to answer the following questions:
+
+  1. Can we fit a model for prices and possibly predict future prices?
+  
+  2. Can we confirm that the trend exist in the car license price?
+  
+  3. Are there any seasonal changes for car license prices?
+  
+
+## Data Analysis 
+
+### 1. Periodogram {.tabset .tabset-fade .tabset-pills}
+
+In order to find out a possible period, we need to look at the spectral density function. Here we use periodogram to estimate it. Both unsmoothed and smoothed periodograms plotted below. 
+
+In both plots, the peak value is 0.005, so we could indicate that $\omega = 0.005$ which means the period $T = \frac{1}{\omega} = 200$. Thus, the period is 200 months or around **16 years**. However, the total time series is 16 years, so we could say that there is no obvious peak of the spectrum density function, so we conclude that there is no seasonal pattern for our data set. In the next section, we start with fitting a ARMA(p,q) to capture the pattern of the data.
+
+#### Unsmoothed Spectrum
+
+```{r, warning=FALSE, fig.cap=cap_fig2}
+cap_fig2 = paste(
+  "**Figure 2.** *Unsmoothed periodogram of price of car license in Shanghai.*"
+)
+
+price_freq = mvspec(avg_price, plot = FALSE)
+price_freq_df = tibble(freq = price_freq$freq, spec = price_freq$spec)
+max_omega = price_freq_df$freq[which.max(price_freq_df$spec)]
+
+price_freq_df %>%
+  ggplot(aes(x = freq, y = spec)) + 
+  geom_line(colour = "dodgerblue4") + 
+  scale_x_continuous(name = "Frequency") + 
+  scale_y_continuous(name = "Spectrum",
+                     trans = "log10") +
+  ggtitle("Average Price: Unsmoothed periodogram") + 
+  theme_bw() +
+  geom_vline(xintercept = max_omega,
+             colour = "tomato3",
+             linetype = "dashed") +
+  geom_text(aes(x = max_omega,
+                label = sprintf("%.3f", max_omega),
+                y = 1e+04),
+            colour = "darkred")
+```
+
+#### Smooth Spectrum
+
+```{r, echo = FALSE, warning=FALSE, fig.cap=cap_fig3} 
+cap_fig3 = paste(
+  "**Figure 3.** *Smoothed periodogram of price of car license in Shanghai.*"
+)
+
+price_freq = mvspec(avg_price, spans=c(3,5,3), plot = FALSE)
+price_freq_df = tibble(freq = price_freq$freq, spec = price_freq$spec)
+max_omega = price_freq_df$freq[which.max(price_freq_df$spec)]
+
+price_freq_df %>%
+  ggplot(aes(x = freq, y = spec)) + 
+  geom_line(colour = "dodgerblue4") + 
+  scale_x_continuous(name = "Frequency") + 
+  scale_y_continuous(name = "Spectrum",
+                     trans = "log10") +
+  ggtitle("Average Price: Smoothed periodogram") + 
+  theme_bw() +
+  geom_vline(xintercept = max_omega,
+             colour = "tomato3",
+             linetype = "dashed") +
+  geom_text(aes(x = max_omega,
+                label = sprintf("%.3f", max_omega),
+                y = 1e+6),
+            colour = "darkred")
+```
+
+### 2. Trend Exploraion
+
+Since in this part, we expect to judge whether the trend exist in the data. Thus, we design a model with linear trend, and the same model without linear trend, then using the LRT(likelihood ratio test) to compare two models.
+
+Firstly, we need to select a model with linear trend, We pick a ARMA(p,q) model under AIC. 
+$$AIC = -2 \times \ell(\theta) + 2D$$
+A table of AIC values for a range of different choices of p,q is printed below. 
+
+```{r message=FALSE, fig.cap=cap_fig4}
+cap_fig4 = paste(
+  "**Figure 4.** *AIC value from different ARMA(p ,q) model.*"
+)
+
+aic_table <- function(data,P,Q){
+  table <- matrix(NA,(P+1),(Q+1))
+  for(p in 0:P) {
+    for(q in 0:Q) {
+      table[p+1,q+1] <- arima(data,order=c(p,0,q), xreg = date)$aic
+    }
+    }
+  dimnames(table) <- list(paste("AR",0:P, sep=""),
+                          paste("MA",0:Q,sep=""))
+  table
+}
+
+x_aic_table <- aic_table(avg_price,4,3)
+require(knitr)
+kable(x_aic_table,digits=2)
+```
+
+In this table we see, **ARMA(1,2) + linear model** has the lowest AIC (3735.11). Then we establish another model with only ARMA(1,2), and do hypothesis test. As mention above that the ARMA(p, q) with linear trend model is: 
+$$(1-\phi(B))(Y_n-\mu-\beta t)=\psi(B)\epsilon_n$$
+
+We test the significance of the linear trend by a formal test. Let beta denote the coefficient of the linear parameter. The null hypothesis denotes that the linear trend in ARMA(1,2) is not statistically significant $(\beta = 0)$, and the alternative hypothesis represents that the linear trend is significant $(\beta\neq 0)$ 
+$$H_0: \beta = 0$$
+$$H_1 : \beta ≠ 0$$
+Then we will use the likelihood ratio test (LRT) to test these hypotheses. Assuming:
+$$2(l_1 - l_0) \approx \chi_{1}^2$$
+
+where l1 is the maximum log likelihood of ARMA(1,2) with linear trend under H1, and the l0 is the maximum log likelihood of ARMA(1,2) without linear trend.
+
+```{r warning=FALSE, echo=FALSE, include=FALSE}
+fit_arma12 = arima(avg_price, order = c(1,0,2))
+fit_arma12_linear = arima(avg_price, order = c(1,0,2), xreg = date)
+
+log_lik12 = fit_arma12$loglik
+log_lik11 = fit_arma12_linear$loglik
+log_diff = 2*(log_lik11 - log_lik12)
+(1 - pchisq(2 * log_diff, 1))
+(1 - pchisq(2 * log_diff, 1)) < 0.05
+```
+
+This approximation is distributed as $X_1^2$, a chi square distribution with 1 degree of freedom…… Therefore, we need to reject the null hypothesis and conclude that $\beta\neq 0$, which means that the linear trend is statistically significant.
+
+Thus, we confirm that the trend exist, then we decide to use first order difference operator to eliminate the trend, the formula of this method is 
+$$Z_n = \Delta y_n = y_n - y_{n-1}$$
+Then, we plot the data with first order difference operator
+
+```{r, fig.cap=cap_fig5}
+cap_fig5 = paste(
+  "**Figure 5.** *Price average of car license by year with lag of 1 by first order difference operator*"
+)
+
+diff_lag = 1
+diff_price = licence_data %>%
+  select(avg_deal_price) %>%
+  .[[1]] %>%
+  diff(lag = diff_lag)
+
+df_date = data.frame(date)
+diff_date = df_date[1:188,]
+
+plot(diff_date, diff_price, type = "l", xlab = "Year", ylab = "Average Price with Lag 1",
+     main = "Average Price for Car License by Year with Lag 1")
+avg_price_temp = loess(diff_price~diff_date,span=0.5) 
+lines(avg_price_temp$x, avg_price_temp$fitted,type = 'l',col='red') 
+
+```
+
+By the plot, we could observe that the trend has already be removed by method. 
+
+### 3. Model Selection
+
+After two sections above, we have already solved two questions. For the periodogram(seasonal), the pattern doesn't exist, but the data have trend, and we have already removed the trend by first order difference operator. Thus, the last question is the model fitting. Thus, the model we decide to use is ARIMA(p,1,q): 
+$$\phi(B)(\triangle Y_n-\mu)=\psi(B)\epsilon_n$$
+$\phi(B)$ and $\psi(B)$ are AR or MA polynomials.
+where $\epsilon_n$ is the white noise process of normal distribution with mean of 0 and constant standard error
+$$\epsilon_n\sim(0,\sigma^2)$$
+and $\triangledown Y_n$ is first order difference operator to eliminate the trend.
+$$\triangledown Y_n=Y_n - Y_{(n-1)}$$
+
+Firstly, we try to use `auto.arima` to fit the data. 
+ 
+```{r}
+auto.arima(avg_price)
+```
+
+Then, use the likelihood ratio test again to check which model is the most significant and suitable for the data.
+
+```{r}
+aic_table <- function(data,P,Q){
+  table <- matrix(NA,(P+1),(Q+1))
+  for(p in 0:P) {
+    for(q in 0:Q) {
+      table[p+1,q+1] <- arima(data,order=c(p,1,q))$aic
+    }
+    }
+  dimnames(table) <- list(paste("AR",0:P, sep=""),
+                          paste("MA",0:Q,sep=""))
+  table
+}
+
+x_aic_table <- aic_table(avg_price,4,4)
+require(knitr)
+kable(x_aic_table,digits=2)
+```
+
+Based on the AIC table, we could observe that the models of ARIMA(1,1,1), ARIMA(0,1,1) and ARIMA(0,1,2) obtain similar AIC, so we could use two times LRT to determine which one is the best model that we need to choose. 
+
+The null hypothesis regards to ARIMA(0,1,1), and the alternative hypothesis is corresponding to ARIMA(1,1,1). Using LRT to calculate the p-value which is 0.05819122. This is lower than 0.10 with 90% confidential level. Thus, we have to reject $H_0$ and accept that ARIMA(0,1,1) is the better one with 90% confidence level.
+
+```{r}
+fit1 = arima(avg_price, order = c(1,1,1))
+fit0 = arima(avg_price, order = c(0,1,1))
+
+log1 = fit1$loglik
+log0 = fit0$loglik
+log_diff = log1 - log0
+p_value = (1 - pchisq(2 * log_diff, 1))
+```
+
+The null hypothesis regards to ARIMA(0,1,1), and the alternative hypothesis is corresponding to ARIMA(0,1,2). Using LRT to calculate the p-value which is larger than 0.10 with 90% confidential level. Thus, we have to accept $H_0$ that ARIMA(0,1,1) is the better one with 90% confidence level.
+
+```{r}
+fit1 = arima(avg_price, order = c(0,1,1))
+fit0 = arima(avg_price, order = c(0,1,2))
+
+log1 = fit1$loglik
+log0 = fit0$loglik
+log_diff = log1 - log0
+p_value = (1 - pchisq(2 * log_diff, 1))
+```
+
+Thus, based on the comparison above, we could confirm that ARIMA(0,1,1) is the better model that should be selected.
+
+```{r}
+fit_model = arima(avg_price, order = c(0,1,1))
+summary(fit_model)
+```
+
+
+## Diagnosis
+
+### 1. Fitted value
+
+```{r, fig.cap=cap_fig6}
+cap_fig6 = paste(
+  "**Figure 6.** *Fitted value(Red) and Original time series(Black).*"
+)
+
+
+
+licence_data %>%
+  ggplot(aes(x = date, y = avg_deal_price)) +
+  geom_line() +
+  geom_line(aes(y = fitted(fit_model)),
+            col = "tomato3") +
+  xlab("Month") +
+  ylab("Average Price of Car Licence") +
+  theme_bw()
+
+```
+
+### 2. Residual Assumption
+
+```{r, warning=FALSE}
+tibble(Date = date, Residual = fit_model$resid) %>%
+  ggplot(aes(x = Date, y = Residual)) +
+  geom_line() +
+  xlab("Year") +
+  ylab("Residuals") +
+  geom_hline(yintercept = 0,
+             col = "tomato3") + 
+  theme_bw()
+```
+
+The red line is of fitted value and the black line represents the original time series. This model seems to fit well and can explain the majority of the underlying structure. Meanwhile, the residuals are distributing around the line of 0. However, the single plot is not enough for statistical significance, and there are also some outliers of residuals that influence the residuals plot. Thus, we also need to draw more plot and test to confirm the residuals are white noise.
+
+### 3. Residuals Analysis {.tabset .tabset-fade .tabset-pills}
+
+#### Uncorrelation
+
+```{r, fig.cap=cap_fig7}
+cap_fig7 = paste(
+  "**Figure 7.** *Residuals of the SARIMA model.*"
+)
+acf(fit_model$residuals, main = "Residuals Autocorrelation")
+```
+
+All the lags are fallen into the the dashed lines showing pointwise acceptance regions at the 5% level, thus we can't reject H0 and can believe that the uncorrelation assumption holds.
+
+#### Normal Analysis
+
+```{r, fig.cap=cap_fig8}
+cap_fig8 = paste(
+  "**Figure 8.** *QQ-plot of residuals.*"
+)
+qqnorm(fit_model$residuals, main = "QQ-Plot: Residuals")
+qqline(fit_model$residuals)
+```
+
+With the exception of a few points along the tails of the residual plot that deviate from the line, the residuals seem to be sufficiently normal to make this assumption valid. We therefore know that the distribution is somewhat close to normal.
+
+### 4. Invertibility
+
+
+```{r, fig.cap=cap_fig8}
+cap_fig8 = paste(
+  "**Figure 8.** *Inverse MA roots displayed in a complex plane.*"
+)
+autoplot(fit_model, main = "Plotting the ARIMA(0,1,1) with a linear trend characteristic roots")
+```
+
+Invertibility require having roots of MA polynomials outside the unit circle in the complex plane. And this is equivalent to having the inverse characteristic roots in the unit circle.
+
+Based on the roots, the absolute value of root is less than 1 and within the circle, so the ARIMA(0,1,1) is invertable.
+
+## Conclusion
+
+Based on our analysis, our final model is ARIMA(0,1,1). Plugging in the coefficients we get from R, the formal model is:
+$$Y_n-Y_{(n-1)}=\epsilon_n-0.2818\epsilon_{(n-1)}$$
+where: 
+$\epsilon_n$ is white noise of normal distribution
+
+```{r, include=FALSE}
+fit_model
+```
+
+Through a series of explorations and tests, ARIMA(0,1,1) is a suitable time series model for the data of the Shanghai average price of a car license. In Figure 6, our model fitted the data well, so it is possible to predict the future average price by our model. However, the residuals cannot fit the linear trend perfectly in Figure 8,
+indicating that the Gaussian residuals assumption may not be entirely valid. Therefore, for future research about this data, we may explore methods to solve this issue or try other models to predict the future price of licenses in Shanghai.
+
+## References
+
+[1] Kaggle Dataset, Shanghai Car License Plate Auction Price, Bo Ju
+[https://www.kaggle.com/bogof666/shanghai-car-license-plate-auction-price]
+
+[2] 2020 midterm projects 2
+[https://ionides.github.io/531w21/midterm_project/project02/project.html#Conclusion]
+
+[3] ARIMA model 
+[https://ionides.github.io/531w21/05/index.html]
+
+[4] Frequency Model
+[https://ionides.github.io/531w21/08/index.html]
+
+[5] Residuals & Diagnosis
+[https://ionides.github.io/531w21/03/index.html]
+
