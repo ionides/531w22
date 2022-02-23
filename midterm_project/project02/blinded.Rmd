@@ -1,0 +1,456 @@
+---
+title: "Ethereum and Investment"
+output:  
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 5
+    code_folding: hide
+    theme: united
+    highlight: pygments
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning=FALSE, message=FALSE)
+```
+
+## Introduction
+
+A cryptocurrency is a digital currency designed to work as a medium of exchange through a computer network that is not reliant on any central authority, such as a government or bank, to uphold or maintain it. Since the release of Bitcoin, many other cryptocurrencies have been created.[1]
+
+Ethereum(ETH), a cryptocurrency which is second only to Bitcoin in market capitalization, outperformed Bitcoin in 2021. The price of ETH rose 404.4% in 2021, while the price of BTC only rose 57.4%. The supporters of ETH believe that ETH has greater utility, is attracting more developers, and the future of cryptocurrency is going toward ETH.[2][3][4]
+
+In this project, we investigate the price of ETH and try to find the  answers of the following questions:
+
+1. Are there any trends or seasonal changes for the price of ETH?
+2. Is there a model that we've learned appropriate for the price?
+3. Can we use our model to predict the future price changes?
+4. Can we use the trend we find and the model that can predict the price to benefit our investments?[6]
+
+
+## Exploratory Data Analysis
+
+```{r, include=FALSE}
+library(tidyverse)
+library(lubridate)
+library(knitr)
+library(fpp2)
+```
+
+
+```{r}
+eth <- read.csv('Ethereum daily.csv')
+colnames(eth)[1] <- "Date"
+eth$Date=dmy(eth$Date)
+eth$Price = as.numeric(gsub(",","",eth$Price))
+eth=arrange(eth, Date)
+plot(eth$Price~eth$Date,type="l",xlab="Years",ylab="ETH($)")
+```
+
+The ETH was initial released on 2015-07-30, and the data consist of the daily price of ETH from 2016-03-10 to 2022-02-17. The time series plot above shows that there is a increase around 2018 and a sharper increase starting in 2021. From the plot, we can see the price is unstable, and the logarithmic transform might be appropriate.
+
+```{r}
+plot(log(eth$Price)~eth$Date,type="l",xlab="Years",ylab="Log(ETH)")
+acf(log(eth$Price),xlab="Lag(Days)", main = "Log(ETH)", lag.max = 2200)
+```
+
+After the logarithmic transformation, the data become much more stable in the plot. However, it has an upward trend and is non-stationary, and the ACF plot shows there may exist a pattern of seasonality, but the period is very long, it might be considered “trend”. Then we try the first difference to see whether it can detrend the log of the price and make the data more appropriate for the stationary ARMA model.
+
+```{r}
+plot(diff(log(eth$Price))~eth$Date[-1],type="l",xlab="Years",ylab="Log and first difference of ETH")
+acf(diff(log(eth$Price)),xlab="Lag(Days)", main = "Log(ETH)")
+
+```
+
+After the first difference was taken, the upward trend was eliminated, the ACF plot becomes closer to the ACF plot of white noise, and there are still some lags show the rejection of white noise. We should be cautious since the first difference may lead to poor model specifications and poor forecasts, we try both the first difference and the original log data when fitting the model.[7]
+
+
+## Spectral Analysis
+
+To find the possible trend and seasonality, we consider the spectral analysis.
+```{r}
+ar = spectrum(log(eth$Price), method = "ar", main = "Spectrum estimated via AR model picked by AIC")
+span1 = spectrum(log(eth$Price), spans = c(3,5,3), main = "Unsmoothed periodogram")
+span2 =spectrum(log(eth$Price), spans = c(25,25), main = "Smoothed periodogram")
+```
+
+
+```{r, include=FALSE}
+ar$freq[which.max(ar$spec)]
+span1$freq[which.max(span1$spec)]
+span2$freq[which.max(span2$spec)]
+
+1/ar$freq[which.max(ar$spec)] 
+1/span1$freq[which.max(span1$spec)] 
+1/span2$freq[which.max(span2$spec)] 
+
+span1$spec
+span2$spec
+
+```
+
+We use spectrum estimated via AR model picked by AIC, and both smoothed and unsmoothed periodogram. AIC is the Akaike information criterion: $$AIC = -2 \ell(\theta) + 2D$$
+Where $\ell(\theta)$ is the log-likelihood and $D$ is number of estimated parameters in the model.
+The parametric method doesn't have a peak. The two unparametric methods with different span have the peak at the same frequency $\omega = 0.000457$, and the corresponding period is $T = \frac{1}{\omega} = 2187$. Which is consist with the result we get from the ACF plot. Then we try decomposition to investigate further.
+
+```{r}
+low <- ts(loess(log(Price)~decimal_date(ymd(Date)), eth, span=0.5)$fitted,start=decimal_date(ymd("2016-03-10")), frequency=365.25)
+high <- ts(log(eth$Price)-loess(log(Price)~decimal_date(ymd(Date)), eth, span=0.1)$fitted,start=decimal_date(ymd("2016-03-10")), frequency=365.25)
+cycles <- log(eth$Price) - high - low
+plot(ts.union(log(eth$Price), low, high, cycles),
+     main="Decomposition of log(ETH Prices) as trend + noise + cycles")
+
+s = spectrum(ts.union(log(eth$Price),cycles),plot=F)
+
+plot(s$freq,s$spec[,2]/s$spec[,1], type = "l",log="y",ylab = "frequency ratio",xlab="frenquency",xlim = c(0,50),
+     main="frequency response(red line at 0.5)")
+abline(h=0.5, lty="dashed",col="red")
+
+ratio1 = tibble(freq = s$freq,
+       ratio = s$spec[,2]/s$spec[,1])
+```
+
+
+```{r, include=FALSE}
+ratio1 %>%
+  filter(ratio > 0.5) %>%
+  summarize(min = min(freq), max = max(freq))
+```
+
+The log of the price is decomposed and the high frequency variation is considered "noise", while the low frequency variation is considered "trend", and the band of mid-range frequencies are considered to correspond to the cycle.[7] We can see there exists a upward trend, if we are patient enough, we can invest in ETH and wait for the price to rise, use the trend to profit. 
+
+And after the trend and the noise are removed, we use the spectrum response ratio to find the frequencies and the periods correspond to the cycle. We set the cutoff value to be 0.5, and find that we keep at least half the powers for frequencies with cycle length between 1/1.837 = 0.544 years and 1/0.668 = 1.497 years, which could be regarded as the periods that correspond to the cycle. However, the cycle is not obvious in the decomposition plot and is less helpful than the trend for our investment.
+
+
+## Model Selection
+
+In this section, we fit ARIMA models, pick the models that perform well, and then do some simulated investments to test them.
+
+The data is split into training and test set, we use the data from 2016-03-10 to 2021-02-17 as the training set, and from 2021-02-18 to 2022-02-17 as the test data to do our simulated investments.
+
+Firstly, we try ARIMA(p,0,q) model.
+ 
+```{r}
+test = eth[1807:2171,]
+train = eth[1:1806,]
+aic_table <- function(data,P,Q){
+table <- matrix(NA,(P+1),(Q+1))
+for(p in 0:P) {
+for(q in 0:Q) {try(
+table[p+1,q+1] <- arima(data,order=c(p,0,q))$aic
+)
+}
+}
+dimnames(table) <- list(paste("AR",0:P, sep=""),
+paste("MA",0:Q,sep=""))
+table
+}
+
+low_aic_table <- aic_table(log(train$Price),5,5)
+kable(low_aic_table,digits=2)
+```
+
+We use AIC to pick the model, and then check the causality and invertibility. The arima function in R can't fit ARIMA(3,0,3) and ARIMA(3,0,4) with our data and will give the error message above, that's the NA in the AIC table.
+
+From the AIC table, we pick ARIMA(3,0,5) and ARIMA(3,0,1) which have the lowest AIC.
+
+```{r}
+arima305 = arima(log(train$Price), order=c(3,0,5))
+autoplot(arima305, main = "Inverse Roots of ARIMA(3,0,5)")
+
+
+arima301 = arima(log(train$Price), order=c(3,0,1))
+autoplot(arima301, main = "Inverse Roots of ARIMA(3,0,1)")
+
+```
+
+We can see each of the model has some of the inverse roots lie on the boundaries of the unit circle. ARIMA(p,0,q) model may not be appropriate for the data, which is not not surprising since the trend exists.
+
+Then we try ARIMA(p,1,q) model.
+
+
+```{r}
+aic_table1 <- function(data,P,Q){
+table <- matrix(NA,(P+1),(Q+1))
+for(p in 0:P) {
+for(q in 0:Q) {try(
+table[p+1,q+1] <- arima(data,order=c(p,1,q))$aic
+)
+}
+}
+dimnames(table) <- list(paste("AR",0:P, sep=""),
+paste("MA",0:Q,sep=""))
+table
+}
+low_aic_table1 <- aic_table1(log(train$Price),5,5)
+kable(low_aic_table1,digits=2)
+```
+
+ ARIMA(2,1,1) and ARIMA(2,1,5) has the lowest AIC, we pick them and check the causality and invertibility.
+
+
+```{r}
+arima211 = arima(log(train$Price), order=c(2,1,1))
+autoplot(arima211, main = "Inverse Roots of ARIMA(2,1,1)")
+arima215 = arima(log(train$Price), order=c(2,1,5))
+autoplot(arima215, main = "Inverse Roots of ARIMA(2,1,5)")
+
+```
+
+These two models also have some of the inverse roots lie on the boundaries of the unit circle. Then we try the linear trend ARIMA models with argument xreg = Date.
+
+The models can be writen as: $$Y_n=\beta_0+\beta_1X_n+\eta_n$$
+
+Where Y is the log of the price, X is the time(days), $\eta$ is the ARIMA error.
+
+```{r}
+aic_table2 <- function(data,reg,P,Q){
+table <- matrix(NA,(P+1),(Q+1))
+for(p in 0:P) {
+for(q in 0:Q) {try(
+table[p+1,q+1] <- arima(data,order=c(p,0,q),xreg = reg)$aic
+)
+}
+}
+dimnames(table) <- list(paste("AR",0:P, sep=""),
+paste("MA",0:Q,sep=""))
+table
+}
+low_aic_table2 <- aic_table2(log(train$Price),train$Date,5,5)
+kable(low_aic_table2,digits=2)
+
+larima301 = arima(log(train$Price), order=c(3,0,1),xreg = train$Date)
+
+loglikratio=larima301$loglik-arima301$loglik
+pval=1-pchisq(2*loglikratio,df=1)
+```
+
+ARIMA(3,0,4) and ARIMA(3,0,1) has the lowest AIC, we pick them. We notice that we picked the ARIMA(3,0,1) without xreg = Date before, so we use the Wilk’s approximation to see whether the trend term is significant or not.[8] $H_0: \beta_1 =0$, $H_1: \beta_1 \neq0$, and under $H_0$ we have $$l_1 - l_0 \approx (1/2) \chi^2_{D_1-D_0}$$
+
+Where $l_i$ is the maximum log likelihood under the hypothesis $H_i$ and $D_i$ is the number of parameters estimated under $H_i$. And in this case, $D_1-D_0 = 1$. We get $l_1 - l_0 = 2.928$ and the p-value is 0.0155, which means the trend term is significant at the level of 0.95.
+
+```{r}
+larima304 = arima(log(train$Price), order=c(3,0,4),xreg = train$Date)
+autoplot(larima304, main = "Inverse Roots of ARIMA(3,0,4)")
+autoplot(larima301, main = "Inverse Roots of ARIMA(3,0,1)")
+
+```
+
+However, we still can't found an ARIMA model that is causal and invertible and the roots are not close to the boundaries of the unit circle. But we decide to do a investment simulation to test these models.
+
+## Forecast and Investment
+
+We use the models we picked in the last section to do an investment simulation.[10] Let's assume we have $10,000 on 2021-02-18. If the model predicts that the price will rise the next day, we buy ETH with all the money, and then wait until the model predicts that the price will go down the next day, we sell all the ETH. The fee for each transaction is set at 0.1%.[10] 
+
+Since the precise multi-step forecast for the price of ETH sounds unrealistic, we do one-step forecasts on the test set. We use the models and the value of parameters we get from the training set, and use the data of test set to forecast every "next day". 
+
+```{r}
+invest = function(model,xreg){
+pricefore = Arima(test$Price, xreg = xreg, model=model)
+forecast = pricefore$fitted[-1]-test$Price[-365]
+x=10000
+fee=0
+money = rep(10000,364)
+for (i in 2:364) {
+  if(forecast[i]>0&forecast[i-1]<0){
+    x = x*test$Price[i+1]/test$Price[i]*0.999
+    fee = fee +x*test$Price[i+1]/test$Price[i]*0.001
+  }
+  else if(forecast[i]>0&forecast[i-1]>0){
+    x = x*test$Price[i+1]/test$Price[i]
+  }
+  else if(forecast[i]<0&forecast[i-1]>0){
+    x = x*0.999
+    fee = fee +x*0.001
+  }
+  money[i]=x
+}
+list(money,fee)
+}
+
+invest211 = invest(arima211,xreg = NULL)
+invest215 = invest(arima215,xreg = NULL)
+invest305 = invest(arima305,xreg = NULL)
+invest301 = invest(arima301, xreg = NULL)
+investl301 = invest(larima301, xreg = as.numeric(test$Date))
+investl304 = invest(larima304, xreg = as.numeric(test$Date))
+
+long = 10000*test$Price[365]/test$Price[1]
+
+coeftable <- matrix(NA,2,7)
+coeftable[1,1]=invest211[[1]][364]
+coeftable[1,2]=invest215[[1]][364]
+coeftable[1,3]=invest305[[1]][364]
+coeftable[1,4]=invest301[[1]][364]
+coeftable[1,5]=investl301[[1]][364]
+coeftable[1,6]=investl304[[1]][364]
+coeftable[1,7]=long*0.999*0.999
+
+coeftable[2,1]=invest211[[2]][1]
+coeftable[2,2]=invest215[[2]][1]
+coeftable[2,3]=invest305[[2]][1]
+coeftable[2,4]=invest301[[2]][1]
+coeftable[2,5]=investl301[[2]][1]
+coeftable[2,6]=investl304[[2]][1]
+coeftable[2,7]= 10000*0.001+long**0.999*0.001
+
+
+dimnames(coeftable) <- list(c("Money","Fee"),
+c("ARIMA(2,1,1)","ARIMA(2,1,5)","ARIMA(3,0,5)","ARIMA(3,0,1)","ARIMA(3,0,1) with trend","ARIMA(3,0,4) with trend","only trade once"))
+
+kable(coeftable,digits=2)
+
+```
+
+The above table shows the money we will have on 2022-02-17, after a year of trading, and the total transaction fee we paid to the cryptocurrency exchange platform for each model. "Only trade once" means we believe the price of ETH has an upward trend, buy ETH on 2021-02-18, ignore the volatility, wait for one year and sell on 2022-02-17. The result is interesting that only one of our six models outperform "only trade once", and one of our model lost more than 25% of our money. We notice that the result of ARIMA(2,1,5) and ARIMA(3,0,5) are the same, we check the value of the coefficients of them and find that they are equivalent, which is the consequence of the roots lie on the boundaries of the unit circle.
+
+The table also shows the total transaction fee we paid to the cryptocurrency exchange platform. Although 0.1% is a small number, the total fee is a large amount of money, our transaction frequency should be lower.
+
+The result shows that it is hard to predict the daily price of ETH and make investments, and since the "only trade once" is actually equivalent to predict the yearly price, and it outperformed most of our models, we would like to try ARIMA models on the weekly price.
+
+
+```{r}
+eth1 <- read.csv('Ethereum week.csv')
+colnames(eth1)[1] <- "Date"
+eth1$Date=dmy(eth1$Date)
+eth1$Price = as.numeric(gsub(",","",eth1$Price))
+eth1=arrange(eth1, Date)
+
+test2 = eth1[259:310,]
+train2 = eth1[1:258,]
+
+low_aic_table3 <- aic_table2(log(train2$Price),train2$Date,5,5)
+kable(low_aic_table3,digits=2)
+```
+
+When using the weekly price, our data size shrink to 310 from the size of daily price 2171. We only try the ARIMA model with trend term, which is the only type of model that outperform yearly prediction in the last section, and we can see the ARIMA(2,0,1) and ARIMA(5,0,4) have the lowest AIC.
+
+```{r}
+week201 = arima(log(train2$Price), order=c(2,0,1),xreg = train2$Date)
+
+pricefore2 = Arima(test2$Price, xreg = as.numeric(test2$Date), model=week201)
+forecast2 = pricefore2$fitted[-1]-test2$Price[-52]
+x=10000
+fee=0
+money = rep(10000,51)
+for (i in 2:51) {
+  if(forecast2[i]>0&forecast2[i-1]<0){
+    x = x*test2$Price[i+1]/test2$Price[i]*0.999
+    fee = fee +x*test2$Price[i+1]/test2$Price[i]*0.001
+  }
+  else if(forecast2[i]>0&forecast2[i-1]>0){
+    x = x*test2$Price[i+1]/test2$Price[i]
+  }
+  else if(forecast2[i]<0&forecast2[i-1]>0){
+    x = x*0.999
+    fee = fee +x*0.001
+  }
+  money[i]=x
+}
+
+coeftable <- matrix(NA,2,2)
+coeftable[1,1]=money[51]
+coeftable[2,1]=fee
+
+
+week504 = arima(log(train2$Price), order=c(5,0,4),xreg = train2$Date)
+
+pricefore2 = Arima(test2$Price, xreg = as.numeric(test2$Date), model=week504)
+forecast2 = pricefore2$fitted[-1]-test2$Price[-52]
+x=10000
+fee=0
+money = rep(10000,51)
+for (i in 2:51) {
+  if(forecast2[i]>0&forecast2[i-1]<0){
+    x = x*test2$Price[i+1]/test2$Price[i]*0.999
+    fee = fee +x*test2$Price[i+1]/test2$Price[i]*0.001
+  }
+  else if(forecast2[i]>0&forecast2[i-1]>0){
+    x = x*test2$Price[i+1]/test2$Price[i]
+  }
+  else if(forecast2[i]<0&forecast2[i-1]>0){
+    x = x*0.999
+    fee = fee +x*0.001
+  }
+  money[i]=x
+}
+
+
+coeftable[1,2]=money[51]
+coeftable[2,2]=fee
+
+
+
+dimnames(coeftable) <- list(c("Money","Fee"),
+c("ARIMA(2,0,1)","ARIMA(5,0,4)"))
+
+kable(coeftable,digits=2)
+```
+
+The result shows that the two model still can't outperform the yearly prediction. And if we try monthly price, our data size will shrink to about 70, which is too small to fit ARIMA models, so we stop here.
+
+## Diagnosis
+
+We use the ARIMA(3,0,1) with trend for daily price, which performs best in our investment, to do model diagnosis.
+
+```{r}
+plot(larima301$residuals~decimal_date(train$Date),type="l")
+```
+
+Firstly, we check the residuals. The plot shows no obvious patterns in the residuals, and the residuals are roughly symmetrically distributed on both sides of 0, so we move forward to check the homoscedasticity.
+
+```{r}
+acf(larima301$residuals, main = "ARIMA(3,0,1) with xreg = Date Autocorelation Plot")
+```
+All the lags except lag 19 can be considered close to 0.[12] We can say the residuals are homoscedastic.
+
+
+```{r}
+qqnorm(larima301$residuals, main = "ARIMA(3,0,1) with xreg = Date Q Q Plot")
+qqline(larima301$residuals)
+
+```
+
+It seems long-tailed and the may not meet the normality assumption, some of the forecast errors may be due to this.
+
+
+## Conclusion
+
+We analyzed the price of ETH and find that there exists an upward trend, and the seasonal changes are not obvious. We try ARIMA(p,0,q), ARIMA(p,1,q), and ARIMA(p,0,q) with trend term, and use them to predict the price changes. However, the performance of our models is not good enough in our investment stimulation. The ARIMA(3,0,1) with trend term performs best in our investment, but we found the residuals are long-tailed. And based on the result of this project, instead of high-frequency trading, we could invest in ETH and wait for a long time, using the trend to profit.
+
+## Reference 
+
+[1] Wikipedia. https://en.wikipedia.org/wiki/Ethereum
+
+[2] Wikipedia. https://en.wikipedia.org/wiki/Cryptocurrency
+
+[3] Examples of the supporters of ETH. https://www.fool.com/investing/2021/12/31/why-ethereum-will-beat-bitcoin-in-2022/
+
+[4] Examples of the supporters of ETH. https://www.cnbctv18.com/cryptocurrency/explained-why-is-ether-outperforming-bitcoin-will-the-trend-continue-11677842.htm
+
+[5] We use the previous project to learn how to make the html output look nice. https://ionides.github.io/531w21/midterm_project/project02/project.html
+
+[6] We use the following previous projects to learn how to write a report and do time series analysis. We learned the format of them, the analysis of the results they got, and some coding skills they used.
+
+https://ionides.github.io/531w18/midterm_project/project41/Midterm_Project.html
+
+https://ionides.github.io/531w21/midterm_project/project01/project.html
+
+https://ionides.github.io/531w21/midterm_project/project02/project.html
+
+https://ionides.github.io/531w21/midterm_project/project10/project.html
+
+[7] Analysis of Time Series lecture notes. All the models and methods we used can be found in the lecture notes. And some of the codes can be found in the lecture notes, too. https://ionides.github.io/531w22/
+
+[8] Wikipedia. https://en.wikipedia.org/wiki/Wilks%27_theorem
+
+[9] The data can be found here. https://www.investing.com/crypto/ethereum/historical-data
+
+[10] We use the transaction fee rate of OKX. https://www.okx.com/
+
+[11] We used the method learned from this website to do the forecast. https://otexts.com/fpp2/forecasting-on-training-and-test-sets.html
+
+[12] We use the previous homework when doing the analysis. https://ionides.github.io/531w22/
+
+[13] We've discussed with Professor Ionides.
+
