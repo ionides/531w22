@@ -1,0 +1,575 @@
+---
+title: "Stats 531, W22, Midterm Project"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 5
+    code_folding: hide
+    theme: united
+    highlight: pygments
+---
+
+
+\newcommand\prob{\mathbb{P}}
+\newcommand\E{\mathbb{E}}
+\newcommand\var{\mathrm{Var}}
+\newcommand\cov{\mathrm{Cov}}
+\newcommand\cos{\mathrm{cos}}
+\newcommand\sin{\mathrm{sin}}
+
+-----------
+
+```{r, echo=FALSE, results='hide', message=FALSE, warning=FALSE}
+# ref: https://bookdown.org/yihui/rmarkdown-cookbook/hide-one.html
+# load R packages
+library(tidyverse)
+library(zoo)
+library(weathermetrics)
+library(ggpubr)
+library(base)
+library(astsa)
+library(forecast)
+library(mice)
+library(knitr)
+library(ggpubr)
+theme_set(theme_pubr())
+```
+
+
+## Introduction 
+
+It's necessary to predict the transactions for a sale store to promote its success in the business field. Thus, we are focusing on the store sales data from Corporación Favorita, a large Ecuadorian-based grocery retailer, and will use time-series model to forecast the future transactions and sales for this store. More specifically, we will start by checking if there are any seasonal variations in the transactions data, and figuring out how to model it [1].
+
+
+## Exploratory Data Analysis 
+
+The sales data here contains three main variables: "date", "store number", which identifies the store at which the products are sold, as well as the "transactions", which is the number of transactions in each day corresponding to the date. Besides, there are some other minor data files provided containing the holiday types on each day, daily oil price etc., which can assist the analysis in the further steps. 
+
+Now, we set about the time-series plot for all stores.
+
+```{r, fig.width=22,fig.height=7, message=FALSE, warning=FALSE, fig.cap=cap_fig1}
+# read in the data set
+transactions = read.csv("transactions.csv") 
+holidays_events = read.csv("holidays_events.csv") 
+oil = read.csv("oil.csv")
+
+# dimension
+trans_dim = dim(transactions)
+holiday_dim = dim(holidays_events)
+oil_dim = dim(oil)
+
+# check whether there are NAs 
+trans_NA_count = sapply(transactions, function(x) sum(is.na(x)))
+holiday_NA_count = sapply(holidays_events, function(x) sum(is.na(x)))
+oil_NA_count = sapply(oil, function(x) sum(is.na(x)))
+
+# convert date from character to datetime type; convert store_nbr from integer to character
+transactions = transactions %>% mutate(date = as.POSIXct(date), store_nbr = as.character(store_nbr))
+holidays_events = holidays_events %>% mutate(date = as.POSIXct(date))
+oil = oil %>% mutate(date = as.POSIXct(date))
+
+######################### Time plots #########################
+
+cap_fig1 = paste(
+  "**Figure 1.** *Transactions of 54 grocery stores over time.*",
+   "Plot A shows the number of transactions by day; Plot B shows the number of trandactions in 2013; Plot C shows the average transactions by month."
+)
+
+# Time plot for different stores (by days)
+plot_all1 = transactions %>% ggplot() + 
+  geom_line(aes(x = date, y = transactions, color = store_nbr))  +
+  theme_bw() + labs(x = "Store", y = "Transactions", color='Store Number')
+
+# Zoom-in time plot for different stores (by days)
+plot_all2 = transactions %>% 
+  group_by(store_nbr) %>% top_n(150, row_number()) %>% 
+  ggplot() + 
+  geom_line(aes(x = date, y = transactions, color = store_nbr))  + 
+  labs(x = "Date in 2013", y = "Transactions", color='Store Number') + 
+  theme_bw() 
+
+# Time plot for different stores (by months)
+transactions_month = transactions %>% 
+  mutate(year_month = as.yearmon(date, "%Y %m")) %>% 
+  group_by(store_nbr, year_month) %>%
+  summarize(avg_transactions = mean(transactions)) %>% ungroup()
+
+plot_all3 = transactions_month %>% ggplot + 
+  geom_line(aes(x =  year_month, y = avg_transactions, color = store_nbr))  +
+  theme_bw()  +
+  labs(x = "Month Year", y = "Monthly Average Transactions", color='Store Number')
+
+ggarrange(plot_all1, plot_all2, plot_all3,
+                    labels = c("A", "B", "C"),
+                    ncol = 3, nrow = 1, common.legend = TRUE, legend="right")
+```
+
+From the general time series plot for all 54 stores, we can see that there is a oscillation behavior and seasonal trend existing for each of the store. Furthermore, the peaks of the oscillations for all stores are approximately the same at the end of each year (December), which may due to the preparation for the large gathering holidays happening at that time, for example, the Christmas eve. It's also worth noticing that the periods are all about one year for all 54 stores. Thus, based on the these similar data behaviors for all 54 stores, it's reasonable to just pick one store for the further analysis.
+
+Here, we decide to pick store 39 as our analysis target since it has the most data points (1678). And after some simply primary selections, it seems like the store 39 is also the best one regarding the completeness of showing the behaviors and characteristics for the transactions in stores.
+
+```{r, results='hide', message=FALSE, warning=FALSE, fig.cap=cap_fig2}
+trans_subset = transactions %>% filter(store_nbr == "39")
+
+# Number of observations for each store
+num_obs = transactions %>% count(store_nbr)
+num_obs = num_obs[order(-num_obs$n), ]   
+
+# Check missing dates
+time.check= data.frame(date = seq(as.Date('2013-01-02'),as.Date('2017-08-15'),by='day'))
+missing_dates = time.check %>% left_join(trans_subset, by = "date") %>% filter(is.na(store_nbr)) %>% .$date
+missing_dates = as.character(missing_dates)
+
+######################### Time plots #########################
+
+cap_fig2 = paste(
+  "**Figure 2.** *Transactions of storesq 39 over time.*",
+   "The blue line is the trend estimated by Loess smoothing. Grey region indicates the corresponding 95% confidence intervel."
+)
+
+# Time plot for store 39 (by days)
+# trans_subset %>% ggplot(aes(x = date, y = transactions, color = store_nbr)) + geom_line()  +
+#   geom_smooth(method='loess', color = "blue") +
+#   theme_bw() + labs(color='store number')
+
+# Time plot for store 39 (by months)
+# transactions_month_sub = trans_subset %>% mutate(year_month = as.yearmon(date, "%Y %m")) %>% group_by(store_nbr, year_month) %>%
+#   summarize(avg_transactions = mean(transactions)) %>% ungroup()
+
+# transactions_month_sub %>% ggplot(aes(x =  year_month, y = avg_transactions, color = store_nbr)) + geom_line()  +
+#   geom_smooth(method='loess', color = "blue") +
+#   theme_bw() + labs(x = "Month Year", y = "monthly average transactions", color='store number') 
+
+# Zoom-in Time plot for store 39 (by days)
+trans_subset[1:150,] %>% ggplot(aes(x = date, y = transactions, color = store_nbr)) + geom_line()  +
+  geom_smooth(method='loess', color = "blue") +
+  theme_bw() + labs(x = "Date in 2013", y = "Transactions", color='Store Number') 
+```
+
+Now, we take a look at the number of transactions in each month for store 39 in 2013. We can tell that the period here is approximately 7 days as there are 4 peaks in each month (30 days), which corresponds to what is shown in the ACF(Auto-correlation function) plot for transactions below [Figure 3]: there is an obvious seasonal trend shown here with the lag of 7.
+
+```{r, fig.cap=cap_fig3}
+# Plot the sample autocorrelation function
+cap_fig3 = paste(
+  "**Figure 3.** *Auto-correlation of grocery store sales data.*",
+   "The accpetance region is constructed by the dashed line."
+)
+
+acf(trans_subset$transactions, main = "ACF: Grocery Transactions") 
+```
+
+To find the accurate period using another method to support more about the findings of seasonal trend, we can also plot the spectral density function to assist the analysis.
+
+## Spectrum Analysis
+
+We start looking at the data transformed to the Fourier basis in the frequency domain, since transforming data to its frequency components can decorrelate the data and statistical assumptions about independence may apply to them [2]. As an inconsistent estimator of spectrum, the periodogram gives us a perspective of spectrum density function. 
+
+The plot [Figure 4] below shows us an unsmoothed periodogram, where the shape of line is transformed into $log(10)$ for clarity but with the original scale of values in y-axis. The red dashed line tells us that the peak of unsmoothed periodogram appears at around frequency of 0.144 that corresponds to the period of 7 days.
+
+```{r, fig.cap=cap_fig4}
+cap_fig4 = paste(
+  "**Figure 4.** *Unsmoothed periodogram of grocery store sales data.*",
+   ""
+)
+
+# Unsmoothed Spectrum
+# Code from the lecture notes and previous midterm project
+raw_spec = spectrum(trans_subset %>% .$transactions, main="Unsmoothed periodogram", plot = FALSE)
+sales_spec = tibble(freq = raw_spec$freq, spec = raw_spec$spec)
+max_omega = sales_spec$freq[which.max(sales_spec$spec)]
+
+sales_spec %>%
+  ggplot(aes(x = freq, y = spec)) + 
+  geom_line() + 
+  scale_x_continuous(name = "Frequency (unit: cycle/day)") + 
+  scale_y_continuous(name = "Spectrum",
+                     trans = "log10") +
+  ggtitle("Unsmoothed periodogram") + 
+  theme_bw() +
+  geom_vline(xintercept = max_omega,
+             colour = "tomato3",
+             linetype = "dashed") +
+  geom_text(aes(x = max_omega,
+                label = sprintf("%.3f", max_omega),
+                y = 0.05),
+            colour = "darkred")
+```
+
+Then we estimate the spectral density function using two different estimators: smoothed periodogram, and fitting an AR(p) model with p selected by Akaike information criterion (AIC). The two plots below [Figure 7] show us two smoothed periodograms which both obtains their peaks around frequency of 0.144 corresponding to the period of 7 days. The results of periodogram not only coincide with the period observed in the time series plot above (Figure 2 the first 150 data), but also they meet our intuitions that the grocery shoppings usually have the period of one week.
+
+```{r, fig.cap=cap_fig5, fig.width=14,fig.height=5}
+cap_fig5 = paste(
+  "**Figure 5.** *Smoothed Periodogram of grocery store sales data.*",
+   "Plot A is the smoothed periodogram from the modified Daniell smoothers; Plot B is the smoothed periodogram by AIC. "
+)
+
+## Smoothed spectrum
+# Code from the lecture notes and previous midterm project
+smoothed_spec = spectrum(trans_subset %>% .$transactions,
+                       spans = c(11,11),
+                       plot = FALSE)
+sales_smoothed_spec = tibble(freq = smoothed_spec$freq,
+                             spec = smoothed_spec$spec)
+max_omega_smoothed = sales_smoothed_spec$freq[which.max(sales_smoothed_spec$spec)]
+
+SP1 = sales_smoothed_spec %>%
+  ggplot(aes(x = freq, y = spec)) + 
+  geom_line() + 
+  scale_x_continuous(name = "Frequency (unit: cycle/day)") + 
+  scale_y_continuous(name = "Spectrum",
+                     trans = "log10") +
+  ggtitle("Smoothed periodogram") + 
+  theme_bw() +
+  geom_hline(yintercept = max(sales_smoothed_spec$spec),
+             colour = "darkred",
+             linetype = "dashed") + 
+  geom_vline(xintercept = max_omega_smoothed,
+             colour = "tomato3",
+             linetype = "dashed") +
+  geom_text(aes(x = max_omega_smoothed,
+                label = sprintf("%.3f", max_omega_smoothed),
+                y=0.05),
+            colour = "darkred")
+
+## Spectrum via AR model
+# Code from the lecture notes and previous hw 
+spec_ar = spectrum(trans_subset %>% .$transactions,
+                   method = "ar",
+                   plot = FALSE)
+sales_AR = tibble(freq = spec_ar$freq, spec = spec_ar$spec)
+max_ar = sales_AR$freq[which.max(sales_AR$spec)]
+
+SP2 = sales_AR %>%
+  ggplot(aes(x = freq, y = spec)) + 
+  geom_line() + 
+  scale_x_continuous(name = "Frequency (unit: cycle/day)") + 
+  scale_y_continuous(name = "Spectrum",
+                     trans = "log10") +
+  ggtitle("Smoothed Periodogram by AIC") + 
+  theme_bw() +
+  geom_hline(yintercept = max(sales_AR$spec),
+             colour = "darkred",
+             linetype = "dashed") + 
+  geom_vline(xintercept = max_ar,
+             colour = "tomato3",
+             linetype = "dashed") +
+  geom_text(aes(x = max_ar,
+                label = sprintf("%.3f", max_ar),
+                y = 0.05),
+            colour = "darkred")
+
+ggarrange(SP1, SP2, labels = c("A", "B"), ncol = 2, nrow = 1)
+```
+## Decomposition
+
+The high frequency might be considered "noise" and low frequency may be trend in the store sales data, In order to extract the transaction cycles, we may apply a band pass filter to filter the mid-ranged frequency.
+
+### Trend + Noise + Cycles
+
+We first apply a smoothing technique called Loess to smooth the raw data [3], where we may adjust the degree of smoothing to extract low frequencies as well as high frequencies, and the cycles are the remaining mid-ranged frequencies after omitting the high and low frequencies. The plot below [Figure 6] shows us a general trend by extracting the low frequencies, where the transactions increased from 2013 to 2014 and then decreased after 2014. More importantly, it also shows the transaction cycles of around 1 year from a grand and yearly perspective, which meets our intuition that the store transactions act similarly at the same date in each year under no special circumstances like pandemic.
+
+```{r, fig.cap=cap_fig6, fig.width=10,fig.height=7}
+# Code from the lecture notes and previous midterm project
+cap_fig6 = paste(
+  "**Figure 6.** *Decomposition of grocery store transactions.*",
+   "The plots are raw data, trend, noise, and circle."
+)
+
+num_day_per_year = trans_subset %>% mutate(year = lubridate::year(date)) %>% count(year)
+
+Transactions = trans_subset %>% .$transactions
+date2013 = seq(from = 2013,length = 363 , by = 1 / 363)
+date2014 = seq(from = 2014,length = 363 , by = 1 / 363)
+date2015 = seq(from = 2015,length = 363 , by = 1 / 363)
+date2016 = seq(from = 2016,length = 363 , by = 1 / 363)
+date2017 = seq(from = 2017,length = 226 , by = 1 / 226)
+date = c(date2013, date2014, date2015, date2016, date2017)
+
+`Sales low` = ts(loess(Transactions ~ date, span = 0.5)$fitted,
+            start = 2013, 
+            frequency = 363)
+`Sales high` = ts(Transactions - loess(Transactions ~ date, span = 0.1)$fitted,
+           start = 2013,
+           frequency = 363)
+`Sales cycles` = Transactions - `Sales high` - `Sales low`
+plot(ts.union(Transactions, `Sales low`, `Sales high`, `Sales cycles`),
+     main = "Decomposition of transactions as trend + noise + cycles")
+```
+
+### Spectrum response function
+
+As the ratio of the periodogram of the smoothed and unsmoothed time series, the frequency response of the smoother Loess may tell us the potential transaction cycles when it's around the 1. The plot below [Figure 7] shows the two end points of interval where the frequency response is larger than 0.5, which corresponds to the cycle of period between 123 days to 434 days. The cycle of 1 year observed in the plot above [Figure 6] falls in this period interval, which proves the validity of the cycles extracted in the mid-ranged frequencies.
+
+```{r, fig.cap=cap_fig7}
+`Sales low` = ts(loess(Transactions ~ date, span = 0.5)$fitted)
+`Sales high` = ts(Transactions - loess(Transactions ~ date, span = 0.1)$fitted)
+`Sales cycles` = Transactions - `Sales high` - `Sales low`
+
+# Code from the lecture notes and previous midterm project
+spec_union = spectrum(ts.union(Transactions, `Sales cycles`), plot = FALSE)
+cap_fig7 = paste(
+  "**Figure 7.** *Spectrum response ratio.*",
+  "The ratio are obtained by dividing the smoothed spectrum by the spectrum of unsmoothed data."
+)
+spec_rps = tibble(freq = spec_union$freq,
+       ratio = spec_union$spec[,2]/spec_union$spec[,1])
+
+xlim = spec_rps %>%
+  filter(ratio > 0.5) %>%
+  summarize(mini = min(freq), maxi = max(freq)) %>%
+  unlist()
+
+spec_rps %>%
+  ggplot(aes(x = freq, y = ratio)) +
+  geom_line()+
+  scale_x_continuous(name = "Frequency (unit: cycle/day)") + 
+  scale_y_continuous(name = "Spectrum Ratio(scaled by log10)",
+                     trans = "log10") +
+  geom_hline(yintercept = 0.5,
+             col = "tomato3",
+             lty = "dashed") +
+  geom_hline(yintercept = max(spec_rps$ratio),
+             col = "tomato3",
+             lty = "dashed") +
+  geom_vline(xintercept = xlim,
+             col = "tomato3",
+             lty = "dashed") + 
+  geom_text(aes(x = xlim[1],
+                label = sprintf("%.4f", xlim[1]),
+                y = 1e-14),
+            colour = "darkred") +
+  geom_text(aes(x = xlim[2],
+                label = sprintf("%.4f", xlim[2]),
+                y = 1e-15),
+            colour = "darkred") + 
+  theme_bw()
+```
+## Model Selection
+
+We consider fitting the signal plus colored noise model and taking into account the seasonality. We first present the model of our final choice. Then, we discuss the model selection process. We follow the notations of the lecture notes [4] and specify our final model below:
+
+$$\phi(B)\Phi(B^{7})\left[(1 - B^7)(Y_n-Z_n\beta_1-H_n\beta_2)-\mu\right] = \psi(B)\Psi(B^{7})\epsilon_n$$
+where
+$$
+\begin{aligned}
+ \phi(B) \ &= \ 1 -  1.0776B - 0.6425B^2 + 0.7299B^3 \\
+ \psi(B) \ &= \ 1 - 0.5059B - 1.0257B^2 + 0.2221B^3 + 0.3101B^4  \\
+ \Phi(B^7) \ &= \ 1 - 0.1035B^7 \\
+ \Psi(B^7) \ &= \ 1 - 0.7213B^7 \\
+ \beta_1 \ &= \ 0.0301\\
+ \beta_2 \ &= \ 17.1173\\
+ \epsilon_n &\overset{i.i.d.}\sim \mathcal{N}(0,\,\sigma^{2})\
+\end{aligned}
+$$
+Here, $B$ is the lag operator, $\{\epsilon_n\}$ is a white noise process, $\mu$ is the trend parameter, $Z_n$ represents the oil price on day n with corresponding coefficient $\beta_1$, and $H_n$ is the total number of holiday types on day n with corresponding coefficient $\beta_2$. $\phi(x)$, $\psi(x)$ are the monthly polynomials, and $\Phi(x)$, $\Psi(x)$ are the seasonal polynomials.
+
+We use the Akaike information criterion (AIC) as the criterion for model selection. AIC is given by $AIC = -2 \times \ell(\theta^*) + 2D$ where $\theta^*$ is the maximum value of the likelihood function for the model, and $D$ represents the number of estimated parameters in the model. Models with lower AIC values are usually preferred over models with higher AIC values. Based on what have discussed in class, AIC may have weak statistical properties when being viewed as a hypothesis test but it is still useful for us to narrow down models with reasonable predictive performances. 
+
+As a first step, we fit the ARMA($p$, $q$) model as the base model for comparison. We fit multiple ARMA models with different combinations of $p$, $q$ and display the results in the table below. Since ARMA(2, 3) is a relatively simple model with a low AIC value, we choose it as the base model. 
+
+```{r}
+aic_table1 = function(data, P, Q){
+  table = matrix(NA, (P + 1), (Q + 1) )
+  for(p in 0:P){
+    for(q in 0:Q){
+      table[p+1, q+1] = Arima(data,
+                              order = c(p, 0, q)
+      )$aic
+    }
+  }
+  dimnames(table) = list(paste("AR", 0:P),
+                         paste("MA", 0:Q) )
+  table
+}
+knitr::kable(aic_table1(trans_subset$transactions, 4, 5)) 
+```
+
+Next, we consider the more advanced model, the signal plus SARIMA$(p, d, q)(P, D, Q)_{\text{period}}$ noise model. Since we do not observe apparent monotonic trend over time, we only include oil price and daily holiday counts for the signal part but do not include the dates. One thing to notice is that we observe missing values of the oil price, so we impute the missing values by classification and regression trees (this is implemented by the "cart" method from the R function `mice()`) [[Ref](https://www.rdocumentation.org/packages/mice/versions/3.13.0/topics/mice.impute.cart)] [5]. 
+For the number of holiday types, we only include the holidays that are not transferred to other days. 
+
+Based on the spectral analysis, we identify a period of about one week, so we set the period of the model to be 7. In addition, for simplicity and to avoid too much instability, we want to fit a relatively simple model, so we set both $P$ and $Q$ to be 1. To decide a value for $D$, we first set $D$ to be 0 and pick the one with the most competitive (i.e,. lowest) AIC value. We do not present the detailed results here but we find that the coefficient of an AR component for the seasonal polynomial is very close to 1, so based on lecture discussions, we consider applying a difference operation to the data and set $D$ to be 1. To decide proper values for $p$ and $q$, we compare the AIC values summarized in the table below: 
+
+```{r, message=FALSE, warning=FALSE, include = FALSE}
+# Holiday as one signal
+df_combined_holiday = trans_subset %>% left_join(holidays_events, by = "date") %>% mutate(type_new = ifelse(transferred == "True", NA, type)) %>% 
+  group_by(date) %>% summarize(num_holiday = sum(!is.na(type_new)))
+df_signal1 = trans_subset %>% left_join(df_combined_holiday, by = "date")
+
+# Oil price as the other signal
+# Interpolate missing values for oil
+df_combined_oil = trans_subset %>% left_join(oil, by = "date") %>% mutate(date = as.character(date))
+var_unchange = c("transactions")
+data_unchange=subset(df_combined_oil,select=var_unchange)
+data_to_change=df_combined_oil %>% select(-var_unchange)
+tempData=mice(data_to_change,m=5,meth="cart",seed=500)
+data5=complete(tempData,5)
+df_signal2=bind_cols(data_unchange, data5)
+
+# Combine the two factors
+xreg <- cbind(holiday_count = df_signal1$num_holiday,
+              dcoilwtico = df_signal2$dcoilwtico)
+```
+
+```{r}
+aic_table2 = function(data, covariate, P, Q, d, D){
+  table = matrix(NA, (P + 1), (Q + 1) )
+  for(p in 0:P){
+    for(q in 0:Q){
+      table[p+1, q+1] = Arima(data,
+                              order = c(p, d, q),
+                              seasonal = list(order = c(1, D, 1),
+                                              period = 7),
+                              xreg = covariate
+      )$aic
+    }
+  }
+  dimnames(table) = list(paste("AR", 0:P),
+                         paste("MA", 0:Q) )
+  table
+}
+
+knitr::kable(aic_table2(trans_subset$transactions, xreg, 4, 5, 0, 1))
+```
+
+By comparing the AIC values from the ARMA($p$, $q$) models and the signal plus colored noise models, we find that the signal plus colored noise models have better overall performance. This means that considering the seasonality and the trend of this time series has an effect in reducing the AIC values and increasing the predictive power. From the AIC table of the signal plus colored noise model, we see that the model with $p$ = 3 and $q$ = 4 gives us the lowest AIC. Therefore, we consider the the signal plus SARIMA$(3, 0, 4)(1, 1, 1)_{7}$ noise model as a competitive candidate. 
+
+### Likelihood Ratio Test
+
+```{r, message=FALSE, warning=FALSE}
+# ARMA(2,3)
+Arma23 = Arima(trans_subset$transactions, order = c(2, 0, 3))
+# signal plus SARIMA(3,0,4)(1,1,1) with a period of 7
+Sarima34111 = Arima(trans_subset$transactions, order = c(3, 0, 4),
+                    seasonal = list(order = c(1, 1, 1),
+                                    period = 7), xreg = xreg)
+```
+
+From the model selection, we select the ARMA(2,3) model as the based model and the signal plus SARIMA$(3, 0, 4)(1, 1, 1)_{7}$ noise model as a competitive candidate. Here, we apply the Wilks’s theorem to perform a likelihood ratio test to compare these two models. [6] According to the Wilks’s theorem, we have that $$\Lambda = 2(\ell^1 - \ell^0) \approx \chi^2_{D^1 - D^0}$$
+where $\approx$ means ”is approximately distributed as”; $\ell^1$ and $\ell^0$ are the maximum likelihood for the candidate model and the base model respectively; $D^1$ and $D^0$ are the number of parameters estimated for the candidate model and the base model respectively, so in this case, $D^1 - D^0 = 13 - 7 = 6$. We have that the 95\% cutoff for a chi-squared distribution with 6 degree of freedom is `r qchisq(0.95,df=6)` and $\Lambda$ is `r 2*(as.numeric(logLik(Sarima34111)) - as.numeric(logLik(Arma23)))`. Hence, since $\Lambda$ is much larger than the 95\% cutoff, we reject the ARMA(2,3) model at the 5\% significance level. Therefore, we choose the signal plus SARIMA$(3, 0, 4)(1, 1, 1)_{7}$ model as the model of our final choice.
+
+## Diagnostics
+
+### Fitted Values
+
+```{r, fig.cap=cap_fig8}
+# Code from previous midterm project
+cap_fig8 = paste(
+  "**Figure 8.** *Fitted value(Red) vs Observed Transactions(Black).*",
+  ""
+)
+
+trans_subset %>%
+  ggplot() +
+  geom_line(aes(x = date, y = transactions)) +
+  geom_line(aes(x = date, y = fitted(Sarima34111)),
+            col = "tomato3") +
+  labs(x = "Date", y = "Transactions") + 
+  theme_bw()
+```
+
+The red line shown above [Figure 8] represents the prediction result of transactions by our selected model (the signal plus SARIMA$(3, 0, 4)(1, 1, 1)_{7}$ noise model), while the black line represents the actual transactions in store 39. From the plot, we can easily compare a series of values by fitting the model and that in real, and find that overall, they actually match pretty well with each other. That is, the predicted values are very close to the actual values, which means the our selection of model performs well for this data set (store 39). While the peak values are not exactly the same here, the model is acceptable since the error should be allowed for the model. 
+
+### Causality and Invertibility
+
+```{r, fig.cap=cap_fig9}
+# Code from previous midterm project
+cap_fig9 = paste(
+  "**Figure 9.** *Inverse AR roots and inverse MA roots displayed in a complex plane.*",
+  ""
+)
+
+plot(Sarima34111, type = "both")
+```
+
+By looking at the plot for roots of the AR and MA polynomials, we can see all the inverse AR roots are within the unit circle, which implies that all the absolute values of AR roots are larger than 1, thus, the fitted model is causal. Additionally, all the values except for one point for inverse MA roots are within the unit circle, which means all the absolute values of MA roots are larger than 1 except for one point. To further check for the invertibility of our fitted model, we use R to print out the values of roots (as shown below) and find that it's actually 1.000764, which is greater than 1. Thus, the fitted model is invertible.
+
+```{r}
+AR_root = append(polyroot(c(1,-Sarima34111$coef["ar1"], -Sarima34111$coef["ar2"], -Sarima34111$coef["ar3"])), "-")
+AR = c("AR1", "AR2", "AR3", "-")
+MA = c("MA1", "MA2", "MA3", "MA4")
+MA_root = polyroot(c(1,Sarima34111$coef["ma1"], Sarima34111$coef["ma2"], Sarima34111$coef["ma3"], Sarima34111$coef["ma4"]))
+knitr::kable(data.frame(AR, AR_root, MA, MA_root))
+```
+
+### Residual and Normality Analysis
+
+```{r, message=FALSE, warning=FALSE, fig.cap=cap_fig10}
+# Code from previous midterm project
+cap_fig10 = paste(
+  "**Figure 10.** *Residuals of the final model.*",
+  ""
+)
+## Residual plot
+tibble(Date = trans_subset, Residual = Sarima34111$residuals) %>%
+  ggplot(aes(x = date, y = Residual)) +
+  geom_line() +
+  xlab("Date") +
+  ylab("Residuals") +
+  geom_hline(yintercept = 0,
+             col = "tomato3") + 
+  theme_bw()
+```
+
+```{r, message=FALSE, warning=FALSE, fig.cap=cap_fig11}
+# Code from previous midterm project
+cap_fig11 = paste(
+  "**Figure 11.** *Residuals Autocorrelation function of the final model.*",
+  ""
+)
+# Autocorrelation function of the final model
+Acf_plot = acf(Sarima34111$residuals, main = "Residuals Autocorrelation")
+```
+
+From the residual plot, we can find that the residuals have mean 0, they are uncorrelated according to the ACF plot [Figure 11], and the homoscedasticity is also met. Although the residuals are generally large at the time of the end of each year, this may just due to the particularity of the quality of the data set (since it's the transactions for grocery purchases, which may be affected by some specific events or holidays), thus our model is a little bit off when predicting. However, nothing strikes here overall, and the assumptions regarding the constant variance are checked.
+
+```{r, message=FALSE, warning=FALSE, fig.cap=cap_fig12}
+# Code from previous midterm project
+cap_fig12 = paste(
+  "**Figure 12.** *QQ-plot for the residuals of the final model.*",
+  ""
+)
+qqnorm(Sarima34111$residuals, main = "QQ-Plot: Residuals")
+qqline(Sarima34111$residuals)
+```
+
+By looking at the QQ plot, we can see that the majority of points are falling on the line, so the normality can be met in this case.
+
+Thus, the assumptions are checked.
+
+## Conclusion
+
+As an important goal of grocery retailer, the transactions determine the revenue of the stores. This analysis first check the business cycles of transactions through transforming the raw data to its frequency components, where the business cycle is one week without Loess smoothing and around one year under Loess smoothing. These two business cycles correspond to the micro and macro business cycles respectively, and they meet the people's intuitions including: (1) the workdays and weekend go with the period of one week; (2) transactions at the same time in each year should perform similarly, under the influences of festivals and so forth.
+
+Then the analysis makes use of the signal plus colored noise model to predict the transactions in terms of potential factors including oil price and number of holiday types and SARIMA errors. While there may be other external factors of store transactions, this time series model fits the store sales data well and meets people's intuitions.
+
+
+## References
+
+[1] Ionides, E. (2022). Midterm Project for STATS/DATASCI 531, US Candy Production Data in previous midterm projects from 2021. Available at: https://github.com/ionides/531w21/midterm_project
+
+[2] Ionides, E. (2022). Notes for STATS/DATASCI 531, Chapter 7: Introduction to time series analysis in the frequency domain. Available at: https://ionides.github.io/531w22/
+
+[3] Ionides, E. (2022). Notes for STATS/DATASCI 531, Chapter 8: Smoothing in the time and frequency domains. Available at: https://ionides.github.io/531w22/
+
+[4] Ionides, E. (2022). Notes for STATS/DATASCI 531, Chapter 6: SExtending the ARMA model: Seasonality, integration and trend. Available at: https://ionides.github.io/531w22/
+
+[5] Description of mice.impute.cart( ) function, available at: https://www.rdocumentation.org/packages/mice/versions/3.13.0/topics/mice.impute.cart
+
+[6] Ionides, E. (2022). Notes for STATS/DATASCI 531, Chapter 5: Parameter estimation and model identification for ARMA models, Page 18-20. Available at: https://ionides.github.io/531w22/
+
+## Source
+
+[1] The overall structure of this project refers to the previous midterm project of "Candy Production Data". Specifically, we learned how to perform a reasonable time series analysis step by step from the previous project, as well as some plotting skills, like using the ggplot to get the smoothed periodogram for spectrum analysis with the maximum frequency indicated. Although the whole structure follows the similar pattern with the past project, we do adjust the specific sections to accommodate it to our analysis.
+
+[5] The function is designed to imputes univariate missing data using classification and regression trees, with the main arguments of:
+ - y, Vector to be imputed
+ - ry, Logical vector of length length(y) indicating the the subset         y[ry] of elements in y to which the imputation model is             fitted.
+ - x, Numeric design matrix with length(y) rows with predictors for        y. 
+...
+
+**Special Notice**: the number with '[ ]' in the text of this project refers to the corresponding reference number.
+
+
+
+

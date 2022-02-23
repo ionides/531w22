@@ -1,0 +1,434 @@
+---
+title: "Average Temperature Change of Los Angeles and Mexico city"
+output:
+  html_document:
+    df_print: paged
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+#### Feburary 21, 2022
+```{r, include=FALSE}
+library(dplyr)
+library(ggplot2)
+```
+### 1 Background
+Global warming is a trending topic nowadays. It has observable impacts on the environment, animals, and human lives. Glacier shrinks and sea level increases; ice of lakes begins to melt earlier; heat waves worsen and become deadly. According to NASA, the "Intergovernmental Panel on Climate Change (IPCC), which includes more than 1,300 scientists from the United States and other countries, forecasts a temperature rise of 2.5 to 10 degrees Fahrenheit over the next century." $[1]$. To throw further light on the topic, we decided to conduct an analysis of monthly and annual temperatures for two of the biggest cities in South America, Mexico city and Los Angeles between the mid-$19^{th}$ century and $2013$. The main objectives are to question the existence of any upper trend in the temperature levels for these 2 cities, finding any temperature cycles occurring and modeling the data using `ARMA` model.
+
+The data set is acquired from data.world.com $[2]$. It consists of most average temperatures of months from 1849/1/1 to 2013/9/1 for major cities. 
+
+### 2 Data Exploration For Monthly Data
+
+#### 2.1 Los Angeles 
+
+#### 2.1.1 Data Processing for Los Angeles data
+
+First, we read the Los Angeles data and then plot it.
+
+```{r, echo=TRUE, include=FALSE}
+temp <- read.csv("GlobalLandTemperatures_GlobalLandTemperaturesByMajorCity.csv", header=TRUE)
+city <- temp$City
+na_city <- temp %>% group_by(City) %>% summarize(NA_City = sum(is.na(AverageTemperature)))
+```
+```{r, echo=FALSE}
+la <- temp[temp$City == 'Los Angeles', ]
+la_temp <- temp[temp$City == 'Los Angeles', ]$AverageTemperature
+t <- as.Date(la$dt, '%Y-%m-%d')
+t_50 <- t[1577:1977]
+la_50 <- la$AverageTemperature[c(1577:1977)]
+plot(la$AverageTemperature~t, xlab="Year", ylab="Average Monthly Temperature", main="Los Angeles Temperature", type='l')
+plot(la$AverageTemperature[c(1577:1977)]~t[1577:1977], xlab="Year", ylab="Average Monthly Temperature", main="Los Angeles Temperature", type='l')
+
+cat("mean temperature in Los Angeles for the last 30 years ", mean(la_50))
+cat("lowest temperature in Los Angeles for the last 30 years ", min(la_50))
+cat("highest temperature in Los Angeles for the last 30 years ", max(la_50))
+```
+
+In order to demonstrate the overview of the data better, we chose the data from most recent 30 years. It is clear that the average monthly temperature varies from 5 degrees to 30 degrees Celsius. From the above result, it is clear that the average monthly temperature is fluctuated among the mean value of the average temperature, which is 16.2392 degrees Celsius. The maximum value of the average temperature in past 30 years is 27.336, and the minimum average temperature is 6.636. We could also get these basic information of data from the plot. However, we cannot find the obvious trend in the plot, which persuade us to assume this is a mean stationary data. 
+
+
+#### 2.1.2 Frequency Domain Analysis for Los Angeles data
+
+From the above figure, we can find that the average temperature in Los Angeles in past 30 years has the characteristics of periodic behavior with the peaks for every year $[3]$. The time period for each peak is about 12 months, because the average temperature will cycled between every 12 months. So we decided to exploring the data by frequency domain analysis. Firstly, we need to check the periods of the data. In order to better verify the result, we use the both "Smooth Periodogram" method and "Spectrum estimated via AR model picked by AIC" to estimate the periods. Below are the result of the plot, frequency and period for our analysis $[4]$. 
+
+```{r, echo=FALSE}
+unsmooth <- spectrum(la$AverageTemperature, spans = c(5,5), main = "Smoothened periodogram", plot=TRUE)
+ar_fitted <- spectrum(la$AverageTemperature, method="ar", main="Spectrum estimated via AR model picked by AIC", plot=TRUE)
+```
+
+From the above plots, we can see the dominant frequency for both methods just below 0.1. Now, we find the exact dominant frequencies for both methods and calculate the respective periods using the formula of $T = \dfrac{1}{f}$ $[4]$. 
+
+```{r, include=TRUE}
+cat("dominant frequency for smoothing method is ", round(unsmooth$freq[which.max(unsmooth$spec)], 4))
+cat("dominant frequency for AR method is ", round(ar_fitted$freq[which.max(ar_fitted$spec)], 4))
+cat("dominant period for smoothing method is ", round(1/unsmooth$freq[which.max(unsmooth$spec)], 3))
+cat("dominant period for AR method is ", round(1/ar_fitted$freq[which.max(ar_fitted$spec)], 3))
+```
+
+|           |Smoothing      |AR-fitted      |
+|-----------|---------------|---------------|
+| Frequency | 0.0835        | 0.0832        |
+| period    | 11.976        | 12.024        |
+
+From the spectrum density plots, we could find both methods have similar frequency when the spectrum get the first peak value, which is also demonstrated by calculating the exact frequency for smoothed (0.0835) and AR-fitted (0.0832) methods. Because the frequency is similar for both these two methods, we are confident in this spectrum data analysis. Besides, we also calculated the periods for them, which is 11.976 and 12.024 respectively. These are also consistent with the background information (the temperature will cycle in 12 months, which we mentioned above). 
+
+#### 2.2 Mexico city
+
+
+```{r, echo=FALSE, include=FALSE}
+mex <- temp[temp$City == 'Mexico', ]
+mex_temp <- temp[temp$City == 'Mexico', ]$AverageTemperature
+t <- as.Date(mex$dt, '%Y-%m-%d')
+t_50 <- t[(length(mex_temp)-400):length(mex_temp)]
+mex_50 <- mex$AverageTemperature[c((length(mex_temp)-400):length(mex_temp))]
+plot(mex$AverageTemperature~t, xlab="Year", ylab="Average Monthly Temperature", main="Mexico city Temperature", type='l')
+plot(mex$AverageTemperature[c((length(mex_temp)-400):length(mex_temp))]~t[(length(mex_temp)-400):length(mex_temp)], xlab="Year", ylab="Average Monthly Temperature", main="Mexico city Temperature", type='l')
+```
+
+#### 2.2.1 Frequency Domain Analysis for Mexico city data
+
+We do the similar spectral density analysis for Mexico city.
+
+```{r, echo=FALSE}
+unsmooth <- spectrum(mex$AverageTemperature, spans = c(5,5), main = "Smoothened periodogram", plot=TRUE)
+ar_fitted <- spectrum(mex$AverageTemperature, method="ar", main="Spectrum estimated via AR model picked by AIC", plot=TRUE)
+```
+
+We spot almost same dominant frequency for Mexico city data. Let's see what exactly it is.
+
+```{r, include=TRUE}
+cat("dominant frequency for smoothing method is ", round(unsmooth$freq[which.max(unsmooth$spec)], 4))
+cat("dominant frequency for AR method is ", round(ar_fitted$freq[which.max(ar_fitted$spec)], 4))
+cat("dominant period for smoothing method is ", round(1/unsmooth$freq[which.max(unsmooth$spec)], 3))
+cat("dominant period for AR method is ", round(1/ar_fitted$freq[which.max(ar_fitted$spec)], 3))
+```
+
+|           |Smoothing      |AR-fitted      |
+|-----------|---------------|---------------|
+| Frequency | 0.0833        | 0.0832        |
+| period    | 12.000        | 12.024        |
+
+We get almost same results which was expected. In the next section, we want to find if there is any linear trend. After finding that, we will process our data (depending on existence of the trend) and fit `ARMA` model to our dataset. We will do these steps for both cities and then compare the results. 
+
+### 3 Trend Analysis, Spectral Density Analysis and ARMA fitting for annual Los Angeles temperatures
+
+For trend analysis, we will extract the annual data (which is the averages of temperatures for each year) and use it.
+
+#### 3.1 Trend Analysis for annual Los Angeles temperatures
+
+Let's extract the annual data for Los Angeles and plot it.
+
+```{r, echo=FALSE}
+dat = read.csv(file="GlobalLandTemperatures_GlobalLandTemperaturesByMajorCity.csv", header = TRUE)
+los_start = 131847
+los_finish = 133823
+dat_los = dat[los_start:los_finish,]
+los_Time = as.Date(dat_los$dt)
+los_temp = as.numeric(dat_los$AverageTemperature)
+yearly_frames = floor((los_finish - los_start)/12)
+annual_los = rep(0, yearly_frames)
+annual_los_time = los_Time[seq(from=1, to = length(los_Time)-12, by = 12)]
+for(i in 0:(yearly_frames-1)){  
+    annual_los[i+1] = mean(los_temp[round(12*i + 1):round(12*i+12)])
+}
+plot(annual_los_time, annual_los,type = "l", xlab="year", ylab="annual temperature", main="Los Angeles annual temperature")
+```
+
+Now, we want to answer the question of `is the data trended?`
+
+To find it out, we will apply the linear regression model to the data and then make a statistical significance test on the coefficient of the `index`. Here `index` is the artificially created time component. Here is the summary of the linear fit $[5]$:
+
+```{r, echo=FALSE}
+losAngelos_data = data.frame(temperature = annual_los, date = annual_los_time, index = 1:yearly_frames)
+LR_model = lm(temperature ~ index, data = losAngelos_data)
+summary(LR_model)
+
+```
+
+Here is the $99\%$ confidence interval:
+
+```{r, echo=FALSE}
+LR_summary_data = summary(LR_model)
+cat("For 99% Confidence interval of the coefficient, lower bound is ", 
+    round(LR_summary_data$coefficients[2,1] + qnorm(0.005)*LR_summary_data$coefficients[2,2],4), 
+    "  and upper bound is ", round(LR_summary_data$coefficients[2,1] + qnorm(0.995)*LR_summary_data$coefficients[2,2],4))
+```
+
+Since $0$ is out of $99\%$ confidence interval, we confirm that there is a linear trend. Before further analysis, we first detrend the data $[6]$. This step is crucial for `ARMA` model fitting since one of our assumptions for the `ARMA` model is the mean stationary data. However, for the dataset with a positive trend, mean stationary criteria is not satisfied.
+
+```{r, echo=TRUE}
+detrended_annual_los = annual_los - predict(LR_model, losAngelos_data) # (annual data) - (linear fit of annual data)
+```
+
+#### 3.2 Spectral Density Analysis for annual Los Angeles temperatures
+
+We are going to use smoothing method for spectral density estimation $[4]$.
+
+```{r, echo=FALSE}
+estimated_los = spectrum(detrended_annual_los, spans = c(5,5), main = "Spectrum estimated via smoothing method")
+```
+
+As we can see from the graph, the first major frequency is around `0.1` (first peak) and second major frequency is around `2.7` (second peak). We will spot those peaks and find their respective periods. 
+
+```{r, echo=FALSE}
+cat("first major period is ", 
+round(1/estimated_los$freq[which.max(estimated_los$spec[10: length(estimated_los$spec)]) + 9], 3))
+cat("first major period is ", 
+round(1/estimated_los$freq[which.max(estimated_los$spec[30: length(estimated_los$spec)]) + 29], 3))
+```
+
+So, first major frequency is `10.588` and second major frequency is `3.75`. The reason could be a cyclic behavior in our solar system.
+
+Now we fit the `ARMA` model to our detrended dataset.
+
+#### 3.3 ARMA fitting for annual Los Angeles temperatures
+
+For ARMA fitting, we create an AIC table and then choose the model with the least AIC value. Here is the mathematical formulation of ARMA model and AIC table.
+
+$\phi(B)\left(Y_{n}-\mu\right)=\psi(B) \epsilon_{n}$ with parameters $\theta=\left(\phi_{1: p}, \psi_{1: q}, \mu, \sigma^{2}\right)$
+
+$$
+\begin{aligned}
+\mu &=\mathbb{E}\left[Y_{n}\right] \\
+\phi(x) &=1-\phi_{1} x-\cdots-\phi_{p} x^{p} \\ 
+\psi(x) &=1+\psi_{1} x+\cdots+\psi_{q} x^{q} \\
+\epsilon_{n} & \sim N\left[0, \sigma^{2}\right]
+\end{aligned}
+$$
+Finding the most accurate ARMA model is really important for this data analysis, we can use the Akaike information criteria (AIC) values, where AIC was derived as an approach to minimizing prediction error $[4]$. Models with lower AIC generally have lower prediction error, which means the fitness of the model we selected is better. Solely using AIC can lead to a mistake on choosing models, but it is often useful. Therefore, we need to calculate the AIC value for each model with different p and q values. Below is the result of the AIC estimation for the p range from 0 to 4, and q range from 0 to 5.
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+require(knitr)
+aic_table = function(data,P,Q) {
+  table = matrix(NA, (P+1), (Q+1))
+  for (p in 0:P) {
+    for (q in 0:Q) {
+      table[p+1,q+1] = arima(data, order=c(p,0,q))$aic
+    }
+  }
+  dimnames(table) = list(paste("AR", 0:P, sep=""),paste("MA", 0:Q, sep=""))
+  table
+}
+aic_table <- aic_table(detrended_annual_los,4,5)
+kable(aic_table,digits=2)
+```
+
+From the above table, we could find the most models have the AIC around 220, but the ARMA(1,1) has the lowest AIC value, which is 216.64. Therefore, we decided to use the ARMA(1,1) to fit our yearly temperature data. 
+
+```{r, echo=FALSE}
+final_model_1 <- arima(detrended_annual_los, order = c(1,0,1), method = "ML")
+round(final_model_1$coef,4)
+```
+
+After fitting the data with the ARMA(1,1), the model could be written as below: 
+$$
+\begin{aligned}
+\phi(B)\left(Y_{n}-0.0179\right)=\psi(B) \epsilon_{n}\\
+\end{aligned}
+$$
+
+$$
+\begin{aligned}
+\phi(x) &=1 - 0.9091x \\
+\psi(x) &=1 - 0.7410x \\
+\end{aligned}
+$$
+
+Besides, we also need to calculate the roots of the AR and MA polynomials, which could help us check the causality and the invertibility of the models.
+
+
+#### 3.4 Diagnosis of the ARMA model for annual Los Angeles temperatures
+
+Let's start by checking for causality and invertibility.
+
+```{r, echo=FALSE}
+final_model_1 <- arima(detrended_annual_los, order = c(1,0,1), method = "ML")
+coeffs = final_model_1$coef
+roots_AR <- polyroot(c(1,-coeffs["ar1"]))
+cat("Absolute value of AR polynomial roots are: ", abs(roots_AR))
+roots_MA <- polyroot(c(1,coeffs["ma1"]))
+cat("\nAbsolute value of MA polynomial roots are: ", abs(roots_MA))
+```
+
+The absolute value of AR root for the model is 1.099 and the MA root for the model is 1.35. Because they are both larger than 1 (outside the unit circle), the model meets the requirements of causality and intertibility. Therefore, the model ARMA(1, 1) is reliable to us.
+
+Now, we check our assumptions for residuals of our model. those assumptions are:
+
+1) They should be distributed normally
+    
+2) They should be a white noise ($\gamma(h) = 0$ for $h \neq 0$). No autocorrelation.
+
+For normality check we plot qq plots.
+
+```{r, echo=FALSE}
+plot(final_model_1$residuals, ylab="residuals", main="Residuals of ARMA(1,1) model")
+```
+
+From the plot above, we could find that the mean of the residual is around 0, the line is fluctuated between mean value. Besides, we could also find the variance of the residuals do not change as the times going up. These means our residual has the mean value of 0 and the equal variance as time increasing. Then we also need to check for the normality of the residual. 
+
+```{r, echo=FALSE, include=FALSE}
+shapiro.test(final_model_1$residuals) # For Normality check
+```
+
+```{r, echo=FALSE}
+# For Normality check by visual
+qqnorm(final_model_1$residuals)
+qqline(final_model_1$residuals)
+```
+
+From the QQ plot for the residual, although there exist some points stand out the line at the end of both data, we could find almost all of the other data is standing in the solid black line. Therefore, we can conclude that the error also meets the assumption of normality.
+
+For checking the white noise assumption, we plot the `acf` plot of residuals.
+
+```{r, echo=FALSE}
+acf(final_model_1$residuals, main="acf plot of residuals") # For white noise assumption check
+```
+
+From the plot, it is reasonable to say that residuals are white noise.
+
+### 4 Trend Analysis, Spectral Density Analysis and ARMA fitting for annual Mexico city temperatures
+
+#### 4.1 Trend Analysis for annual Mexico city temperatures
+
+Let's extract the annual data for Mexico city and plot it.
+
+```{r, echo=FALSE}
+mexico_start = 147848
+mexico_finish = 149992
+dat_mex = dat[mexico_start:mexico_finish,]
+mex_Time = as.Date(dat_mex$dt)
+mex_temp = as.numeric(dat_mex$AverageTemperature)
+yearly_frames_mex = floor((mexico_finish - mexico_start)/12)
+annual_mex = rep(0, yearly_frames_mex)
+annual_mex_time = mex_Time[seq(from=1, to = length(mex_Time)-12, by = 12)]
+for(i in 0:(yearly_frames_mex-1)){  
+    annual_mex[i+1] = mean(mex_temp[round(12*i + 1):round(12*i+12)])
+}
+plot(annual_mex_time, annual_mex,type = "l", xlab="year", ylab = "average temperature", main = "Mexico city annual mean temperature")
+```
+
+Now, we follow the similar steps (as in 3.1) for finding the trend (if there is any). Here is the $99\%$ confidence interval:
+
+```{r, echo=FALSE, include=FALSE}
+mexico_data = data.frame(temperature = annual_mex, date = annual_mex_time, index = 1:yearly_frames_mex)
+LR_model_mex = lm(temperature ~ index, data = mexico_data)
+summary(LR_model_mex)
+```
+
+```{r, echo=FALSE}
+LR_summary_data_mex = summary(LR_model_mex)
+cat("For 99% Confidence interval of the coefficient, lower bound:", 
+    round(LR_summary_data_mex$coefficients[2,1] + qnorm(0.005)*LR_summary_data_mex$coefficients[2,2],4), 
+    "and upper bound:", round(LR_summary_data_mex$coefficients[2,1] + qnorm(0.995)*LR_summary_data_mex$coefficients[2,2],4))
+```
+
+As we have seen for Los Angeles, there is also and upper trend for annual temperatures in Mexico city (since $0$ is out of $99\%$ confidence interval of `index`). Consequently, we are going to use the detrended data for the rest of our analysis.
+
+```{r, echo=TRUE}
+detrended_annual_mex = annual_mex - predict(LR_model_mex, mexico_data)
+```
+
+#### 4.2 Spectral Density Analysis for annual Mexico city temperatures
+
+We use the same method (smoothing method) for spectral density estimation.
+
+```{r, echo=FALSE, include=FALSE}
+estimated_mex = spectrum(detrended_annual_mex, spans = c(5,5), main = "Spectrum estimated via AR model picked by AIC")
+```
+
+As we can see, there are again 2 similar dominant frequencies as we spotted in Los Angeles data. Let's find what exactly they are.
+
+```{r, echo=FALSE}
+cat("first major period is ", 
+    round(1/estimated_mex$freq[which.max(estimated_mex$spec[13: length(estimated_mex$spec)]) + 12], 3))
+cat("first major period is ", 
+    round(1/estimated_mex$freq[which.max(estimated_mex$spec[27: length(estimated_mex$spec)]) + 26], 3))
+```
+
+So, first major frequency is `10.588` and second major frequency is `3.913`. First major periods are same for both cities and second major frequencies are close to each other. We will further talk about this in comparisons section (section 5).
+
+#### 4.3 ARMA fitting for annual Mexico city temperatures
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE, include=FALSE}
+require(knitr)
+aic_table = function(data,P,Q) {
+  table = matrix(NA, (P+1), (Q+1))
+  for (p in 0:P) {
+    for (q in 0:Q) {
+      table[p+1,q+1] = arima(data, order=c(p,0,q))$aic
+    }
+  }
+  dimnames(table) = list(paste("AR", 0:P, sep=""),paste("MA", 0:Q, sep=""))
+  table
+}
+aic_table <- aic_table(detrended_annual_mex,4,5)
+kable(aic_table,digits=2)
+```
+
+We are going to use `ARIMA(3,0,2)` which has a reasonably small AIC value.
+
+```{r}
+final_model_2 <- arima(detrended_annual_mex, order = c(3,0,2), method = "ML")
+round(final_model_2$coef,4)
+```
+
+#### 4.4 Diagnosis of the ARMA model for annual Mexico city temperatures
+
+Again we start by checking for causality and invertibility of the model.
+
+```{r, echo=FALSE}
+coeffs = final_model_2$coef
+roots_AR <- polyroot(c(1, -coeffs["ar1"], -coeffs["ar2"], -coeffs["ar3"]))
+cat("Absolute value of AR polynomial roots are: ", abs(roots_AR))
+roots_MA <- polyroot(c(1,coeffs["ma1"], coeffs["ma2"]))
+cat("\nAbsolute value of MA polynomial roots are: ", abs(roots_MA))
+```
+
+Since all roots are out of unit circle, the model is invertible and causal.
+
+Let's continue with the normality check of residuals using qq-plots
+
+```{r, echo=FALSE, include=FALSE}
+shapiro.test(final_model_2$residuals)
+```
+
+```{r, echo=FALSE, include=TRUE}
+qqnorm(final_model_2$residuals)
+qqline(final_model_2$residuals)
+```
+
+Also qq-plot confirms the normality of residuals.
+
+Lastly, here is the `acf` plot for white noise assumption check.
+
+```{r, echo=FALSE}
+acf(final_model_2$residuals, main="act plot of residuals for Mexico city")
+```
+
+### 5 Conclusion
+
+In conclusion, we found that the results of analysis for average temperature is same for Los Angeles and Mexico. For both of these cities, we find there exists the global warming trend as time goes on. We also found that annual temperatures for both cities have the dominant period of 10.58 years. The reason could be they are geographically close to each other. Finally, we discovered the ARMA(1, 1) to be suitable to fit the detrended data for Los Angeles and the ARMA(3, 2) to be suitable to fit the detrended data for Mexico city.
+
+
+
+
+
+## Rererences
+
+$[1]$ - Online source: https://climate.nasa.gov/resources/global-warming-vs-climate-change/
+
+$[2]$ - Online source: https://data.world/data-society/global-climate-change-data/workspace/file?filename=GlobalLandTemperatures%2FGlobalLandTemperaturesByMajorCity.csv
+
+$[3]$ - Online source (Solution for previous homework): https://ionides.github.io/531w21/hw03/sol03.html
+
+$[4]$ - Lecture notes for Stats 531: https://ionides.github.io/531w22/
+
+$[5]$ - Online source: https://projects.itrcweb.org/gsmc-1/Content/GW%20Stats/5%20Methods%20in%20indiv%20Topics/5%205%20Trend%20Tests.htm
+
+$[6]$ - Online source: https://www.statology.org/detrend-data/
+
+
+
+
+

@@ -1,0 +1,669 @@
+---
+title: " Statistical Modeling and Analysis of California Wildfires Time Series"
+date: "2/6/2022-2/21/2022"
+output: html_document
+---
+
+
+```{r setup, include=FALSE, warning=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+library(tidyr) 
+library(mFilter)
+```
+
+### Introduction
+
+In this report, we explore and analyze the number of wildfires occurring in California over the last 120 years. California experiences wildfires every year. Wildfires are severe incidents that may cause serious damage or loss of property, land, and human life. Having a statistical model that describes the evolution of wildfire numbers over time helps us to understand the trends and thus potentially be better prepared for future events. 
+
+In this study, we explore a California wildfires dataset and count the wildfire alarms that occurred each month. We investigate seasonality of wildfires using analytical tools in a frequency domain. We find evidence that wildfires occur approximately with 12 and 6 month periods, with a 12 month seasonality being more prevalent. The number of fires also increases over time (years), almost linearly. Based on data exploration, we proceed with building the following time series models: seasonal autoregressive-moving average (SARMA) as well as  seasonal integrated autoregressive-moving average model (SARIMA), including both detrending and seasonal treatments. We use a square root transformation of the number of fires to make the time series more suitable for analysis. We find model parameters that ensure chosen models are stationary, causal and invertible. Moreover, we conduct model diagnostic tests to check that assumptions about white noise processes in SAR(I)MA are valid. As a result, we obtain two models that fit the time series sufficiently well. Both use a period of 12 months: 1) $\text{SARIMA} (2,0,2)\times(4,1,0)_{12}$ for transformed data, and 2) $\text{SARMA} (2,2)\times(4,0)_{12}$ for detrended and transformed data. The diagnostic tests show that model 1) fits the data better than model 2), as its autocorrelation function (ACF) of the model residuals has no evidence of lag dependency. Finally, there are a number of limitations the current analysis presents, related to data processing and modeling. These limitations can be addressed in future studies.
+
+### Methods
+
+We aim to build a model for a California wildfires dataset. A common approach in time series analysis is to fit data with the autoregressive-moving average (ARMA) model and its extensions [1,2]. For computations, we use the R-language and its inbuilt 'arima' functionality [3]. We provide a theoretical summary next [4].
+
+#### Theoretical background
+
+We consider a collection of jointly defined random variables $Y_1,Y_2,\dots,Y_N$, briefly $Y_{1:N}$. Recall from ([2],Ch.2]) that the autocovariance function for the random variables $Y_{1:N}$ is: $$\gamma_{m,n}=E[(Y_m-\mu_m)(Y_n-\mu_n)]$$
+with mean function $\mu_n=E[Y_n]$. Also, we say that a time series model is weakly stationary if it is both mean stationary ($\mu_m = \mu$) and covariance stationary ($\gamma_{n,m}=\gamma_{n,n+h}=\gamma_h$ for all $m,n$), ([2] Chs.2,3).
+
+We consider an ARMA model, which is a linear process as it describes $Y_n$ as a linear function of white noise ${\epsilon_n}$. We are interested in stationary ARMA models that can fit the detrended time series ([1], Ch.2).
+
+The ARMA model can be described as follows ([2], Ch.1): $$\phi(B) (Y_n-\mu) = \psi(B) \epsilon_n$$
+with autoregressive (AR) polynomial of order $p$:
+$$\phi(x)= 1-\phi_1 x -\phi_2 x^2 -\dots -\phi_p x^p$$
+and moving average (MA) polynomial of order $q$:
+$$\psi(x)= 1+\psi_1 x -\psi_2 x^2 -\dots -\psi_q x^q$$
+applied to the backshift (lag) operator $B$ such that $B Y_n = Y_{n-1}$. Here $\mu$ is a mean of the general stationary ARMA(p,q) and residuals ${\epsilon_n}$ are white noise processes (i.i.d. with mean 0 and variance $\sigma^2$, [2] Ch.3).
+
+Recall that the ARMA(p,q) model is causal if polynomial roots of $\phi(x)=0$ (for AR(p)) are outside the unit circle in the complex plane. The ARMA(p,q) model is invertible if polynomial roots of $\psi(x)=0$ (for MA(q)) are also outside the unit circle in the complex plane. Moreover, the roots of AR(p) and MA(q) should not be similar, otherwise the model can be simplified by canceling them in $MA(\infty)$ representation. See [2]Ch.4 for more details.
+
+There are useful extensions of ARMA models ([2],Ch.6). To transform non-stationary data to stationary, we can use integrated autoregressive moving average model ARIMA(p,d,q). It uses the difference operator $(1-B)^d Y_n$ to detrend, i.e. make data more stationary. It is suggested to use $d=1$.
+ $$\phi(B)\big[ (1-B)^d Y_n-\mu \big] = \psi(B) \, \epsilon_n$$
+
+To incorporate a large time scale (seasonality) one can use a $\text{SARMA} (p,q)\times(P,Q)_s$ model where $s$ indicates seasonal time period. The model can be written as ([2] Ch.6) : 
+$$\phi(B)\Phi(B^{s})\big[Y_n-\mu\big] = \psi(B)\Psi(B^{s}) \epsilon_n$$
+where $\Phi(B),\Psi(B)$ are polynomials of order P,Q, respectively, that operate on a seasonal time scale.
+
+There is also a general model that combines both above: $\text{SARIMA}(p,d,q)\times(P,D,Q)_s$ with seasonal difference operator of order $D$. Causality and invertibility of these models are checked similarly to ARMA(p,q).
+
+
+#### Model selection approach
+
+
+For our analysis, we transform and detrend data before fitting the (S)ARMA model. Detrending of the data is required for the stationary models. Transformation is helpful to diminish data heteroscedasticity and thus make variance more homogeneous [5]. To fit a SARIMA model, detrending is not needed because the model uses differencing which substitutes the need for detrending (see [1], p.58, example 2.8).
+
+To find data seasonality, the Fourier Transform of the time series into the frequency domain is helpful. It allows us to construct the spectrum density function to identify the most important frequency modes (with highest spectral peaks) ([2], Ch.7-8).
+
+The specific ARMA(p,q) model for a stationary process (detrended time series) can be selected based on minimum Akaike information criterion (AIC) value ([2]Ch.4). Note that if AIC variability is small, e.g. less than 10%, then this criterion is not informative and can be ignored. Note that we also can guide a model selection based on the following desirable properties: simplicity, causality, and invertibility. Usually, both approaches are combined. 
+
+Finally, we conduct model diagnostics using residuals, ACF, and QQ-plots to test whether the model assumptions (e.g. white noise process) are appropriate.
+
+
+### Data Exploration and Pre-Processing
+
+We study a California Wildfires dataset that has 21,318 rows representing occurrences of wildfires in California and 18 columns, collected from 1878 to 2020, see [6] and Appendix A. We consider data from 1900-2020. We take into consideration only the following features: year ("YEAR_") and a date of alarm notice ("ALARM_DATE"). We drop rows in which alarm dates are missing or have obvious typos.
+
+```{r, echo=F, echo=FALSE, results=FALSE}
+#Read data
+fires_original <- read.csv("California_Fire_Perimeters_(all).csv")
+```
+```{r, echo=F, results=FALSE}
+fires_original$ALARM_DATE = as.Date(fires_original$ALARM_DATE) # Convert alarm date to date type
+fires <- fires_original %>% drop_na(ALARM_DATE) # dropped observations with NA for date because we will not know when these fires occurred
+fires <- fires[order(fires$ALARM_DATE),]
+#summary(fires$ALARM_DATE) # We see 2 values of year are 0219 and 2106 -> delete these observations
+```
+```{r, echo=F, results=FALSE}
+fires = fires[-1,]
+n<-dim(fires)[1]
+fires<-fires[1:(n-1),]
+#summary(fires$ALARM_DATE)
+```
+```{r, echo=FALSE, results=FALSE}
+fires = fires[fires$YEAR_ > 1899.999,] # Look at data from 1900 to 2020
+fires = fires[fires$YEAR_ < 2020.111,] # Look at data from 1900 to 2020, ?
+#summary(fires$YEAR_)
+```
+
+By counting a number of alarms each month we obtain the number of fires occurring each month. We populated missing months with zero values.
+```{r, warning=FALSE, echo=FALSE, results=FALSE, message=FALSE}
+#Count for fires alarms
+library(data.table)
+library(zoo)
+dt <- as.data.table(fires)
+
+#yearly
+year_dt <- dt[, .N, by=.(year(ALARM_DATE))]
+year_dt <- year_dt[year <= 2020.111]
+#tail(year_dt)
+
+#monthly
+dt <- dt[, .N, by=.(year(ALARM_DATE), month(ALARM_DATE))] 
+dt <- dt[year <= 2020.111] 
+#tail(dt)
+```
+```{r, echo=FALSE, results=FALSE, warning=FALSE, message=FALSE}
+counts <- as.data.frame(dt)
+year_count <- as.data.frame(year_dt)
+#head(year_count)
+counts$Date <- as.yearmon(paste(counts$year, counts$month), "%Y %m")
+#head(counts)
+
+library(dplyr)
+Sys.setlocale("LC_TIME", "English")
+# first, define a dataframe with each month from January 2015 to December 2018
+counts_new <- data.frame(year = format(seq(as.Date("1900/1/1"),
+                                       as.Date("2020/12/31"), by = "month"),
+                                   format = "%Y"), month = format(seq(as.Date("1900/1/1"),
+                                       as.Date("2020/12/31"), by = "month"),
+                                   format = "%m"))
+counts_new = transform(counts_new,  month= as.integer(month))
+counts_new = transform(counts_new,  year= as.integer(year))
+#counts_new = transform(counts_new, N = as.integer(N))
+
+ts <- counts %>%
+    select(month, year, N) %>%
+    right_join(counts_new, by = c("month", "year")) %>%
+    select(month, year, N)
+ts = mutate_all(ts, ~replace_na(., 0))
+ts["date"] = as.yearmon(paste(ts$year, ts$month), "%Y %m")
+ts <- ts[order(ts$date),]
+#ts
+```
+We create plots showing the number of wildfires occurring each month and each year from 1900 to 2020. We can see that there does appear to be some cyclical nature to the data, with higher numbers of wildfires in recent years. Also, there is possibly of an outlier in the monthly plot around 2010.
+
+```{r, echo=F, results=T} 
+#, fig.width=12,fig.height=4,out.width="4in"}
+par(mfrow=c(1,2))
+plot(N~date,data=ts,type="l", ylab = "Number of wildfires", ylim=c(0,600),
+     main="Total number per month")
+
+plot(N~year,data=year_count,type="l", ylab = "Number of wildfires", ylim=c(0,600),
+     main="Total number per year")
+```
+
+### Explore trends and residuals
+
+The monthly and annual series plots of fires numbers show clear evidence of positive trends. We estimate trends using Loess smoothing with span 0.5 ([2], Ch8, slide 14). Hereafter, we work with monthly data. 
+
+```{r, echo=F } 
+#,fig.width=12,fig.height=4,out.width="4in"}
+#par(mfrow=c(1,2))
+
+#monthly
+num_fires_1 = ts$N
+date_1 = seq(from = 1900,length = length(num_fires_1) , by = 1 / 12)
+N_loess = loess(num_fires_1 ~ date_1, span = 0.5)
+plot(date_1,num_fires_1,type="l",main='Loess smoothing of monthly data',xlab='Month',ylab="Number of wildfires") #,ylim=c(0,600))
+lines(N_loess$x,N_loess$fitted,type="l",col="red",lwd=2.0)
+
+#yearly
+num_fires_2 = year_count$N
+date_2 = seq(from = 1900,length = length(num_fires_2) )#, by = 1 / 12)
+N_loess2 = loess(num_fires_2 ~ date_2, span = 0.5)
+plot(date_2,num_fires_2,type="l",main='Loess smoothing of annual data',xlab='Year',ylab="Number of wildfires",ylim=c(0,600),xlim=c(1900,2020))
+lines(N_loess2$x,N_loess2$fitted,type="l",col="red",lwd=2.0)
+```
+
+By plotting the detrended monthly number of fires (residual between data and Loess fit), we can see that data has clear heteroscedasticity - the variance increases over time. We perform a square root transformation on our data to make the variance more homogeneous. 
+
+
+```{r, echo=F} 
+#, fig.width=12,fig.height=4,out.width="4in"}
+#par(mfrow=c(1,2))
+plot(N_loess$residuals, type='l', main='Loess detrended',ylab= 'Residual')
+N_loess_sqrt = loess(num_fires_1^0.5 ~ date_1, span = 0.5)
+plot(N_loess_sqrt$residuals, type='l', main= 'Loess detrended, transformed',ylab='Residual')
+```
+
+
+See Appendix B for both linear regression fit and the Hodrick-Prescott (HP) filter followed by detrending of the monthly data. All three detrending methods used square root transformation to improve variance homogeneity. Visually, the HP filter looks more random. However, we will see in the ARMA modeling section that for our data specifcially, the detrending by Loess works better compared to the HP filter and linear fit.  
+
+We are also interested in the first difference operator $(1-B)Y_n = Y_n - Y_{n-1}$, ([1], p.58), as conceptually it is similar to linear detrending [2]. The differencing option is inbuilt in SARIMA to detrend data. We plot the first difference applied to the square root transformed number of wildfires ([1], p.58). Comparing this plot to detrending plots done by linear regression, Loess, and HP, we can see that differencing results in a more uniform variance. It may suggest to use a SARIMA model for fitting.
+
+
+```{r, echo=F}
+plot(diff(ts$N^0.5), type='l',ylab = 'Differencing', main='First difference of transformed data')
+```
+
+
+### Explore Data in the Frequency Domain
+
+We start by plotting the spectral density estimator [7]. We plot the spans-based and AIC/AR-based smoothing of the spectrum together ([2] Ch.8). Then, we search for possible seasonality by exploring the highest spectrum peaks.
+
+```{r, echo=F}
+prgram = spectrum(ts$N, spans=c(10,5,10), plot = FALSE)
+aic_ar = spectrum(ts$N, method='ar',plot=FALSE)
+plot(prgram$freq, prgram$spec, type = "l", log = "y", ylab = "spectrum", xlab = "frequency (1/month)", lty=1,ylim=c(10,100000))
+lines(aic_ar$freq, aic_ar$spec, lty=2)
+legend("topright", c("Smoothed periodogram", "Estimated via AR model picked by AIC"), lty = 1:2, bty = "n")
+title("Spectrum for monthly fires number")
+```
+
+```{r echo=F, results=FALSE}
+#find peak using AIC smoothed spectrum
+cat(paste('The first peak is at max (AIC-based) spectrum',round(max(aic_ar$spec[0:500]),3),', at frequency',round(aic_ar$freq[which.max(aic_ar$spec[0:500])],3),'or',round(1/(aic_ar$freq[which.max(aic_ar$spec)] * 12),3),'years period.'))
+```
+
+```{r echo=F, results=FALSE}
+#Second AIC peak
+cat(paste('Th second spectrum peak',round(max(aic_ar$spec[160:500],3)),'is at frequency',round(aic_ar$freq[160 + which.max(aic_ar$spec[160:500])],3),'or',round(1/(aic_ar$freq[160 + which.max(aic_ar$spec[160:500])]),3),'months period.'))
+```
+
+From this plot, we find that there are two main periods of the number of wildfires: around 1 year and around 6 months. See Appendix C for spectrum decomposition and mid-range frequency identification. It shows that 6 and 12 months are indeed within a mid-range band which is approximately 8-32 months. We also explore spectrum of annual number of fires and find no evidence of seasonality (Appendix A).
+
+
+### Modeling
+
+In this section we present two models: SARMA and SARIMA for fitting monthly data of the number of wildfires in California. 
+
+#### SARMA modeling
+
+First, we conduct a study of selecting stationary ARMA models based on minimum AIC criteria (see Appendix D). Our results suggest we use the stationary, causal, and invertible ARMA (2,1) model for monthly data, but it reveals lag autocovariance for residuals at period 12.
+
+Second, we continue our search looking at annual data and applying a similar AIC search (see Appendix D). For model fitting, we detrend and transform annual data as well. We found that a stationary AR(4) model for annual data is causal, invertible, and has almost no evidence of residual autocovariance.
+
+Finally, the previous two steps suggest we should combine a monthly ARMA(2,1) and annual AR(4) into one SARMA model. We start with $\text{SARMA} (2,1)\times(4,0)_{12}$ and get some convergency issues. Thus, we try $\text{SARMA} (2,2)\times(4,0)_{12}$ and it works relatively well, as shown in the following summary and plots.
+
+In addition, we try three different detrending methods: linear regression, Hodrick-Prescott (HP) filter, and Loess. The HP filter detrending yields unit MA roots, and thus is not a good choice. The linear detrending gives ACF with some extra autocovariance lags. The Loess detrending gives the best results, though there is a bit of ACF dependency at lag 30; this can be a result of detrending, transforming data, or data processing.
+
+```{r, echo=T}
+#loess
+detrended_transfomed = N_loess_sqrt$residuals
+
+#fit
+fire_sarma = arima(detrended_transfomed,order=c(2,0,2),
+                   seasonal=list(order=c(4,0,0),period=12))
+print(fire_sarma)
+```
+```{r, echo=F}
+#check roots of ARMA part of the model
+ar_roots <- polyroot(c(1,-coef(fire_sarma)[c("ar1","ar2")]))
+ma_roots <- polyroot(c(1,coef(fire_sarma)[c("ma1","ma2")]))
+cat('AR roots:',round(Mod(ar_roots),2),'\n')
+cat('MA roots:',round(Mod(ma_roots),2),'\n')
+
+#check roots of SARMA part of the model
+sar_roots <- polyroot(c(1,-coef(fire_sarma)[c("sar1","sar2","sar3","sar4")]))
+cat('SAR roots:',round(Mod(sar_roots),2),'\n')
+
+```
+We conduct the model diagnostics by plotting residuals and the QQ-plot. They show a presence of an outlier. Overall, the ACF plot and diagnostics confirm that residuals can be considered as a white noise process, thus making the use of SARMA modeling valid.
+
+```{r, echo=F} 
+#, fig.width=12,fig.height=4,out.width="4in"}
+#par(mfrow=c(1,3))
+#ACF
+acf(fire_sarma$residuals, main='ACF of SARMA monthly residuals')
+
+par(mfrow=c(1,2))
+# Residual
+plot(fire_sarma$residuals,type='o',pch=19)
+abline(h=0)
+# QQ-plot
+qqnorm(fire_sarma$residuals)
+qqline(fire_sarma$residuals)
+
+```
+
+
+#### SARIMA Model
+
+In the trends exploration section, we showed that the first difference operator works better for our data than detrending, as it better eliminates heteroscedasticity. Therefore, it is a natural choice to try fit monthly data with a stationary SARIMA model. Note that we don't need to detrend data for such modeling, though the square root transformation is still valid and helpful.
+
+
+We aim to obtain a stationary model that is causal and invertible, has i.i.d. residuals (no significant autocovariance in the residuals ACF), and is relatively simple. By trial and error (Appendix E), we find the following model: $\text{SARIMA} (2,0,2)\times(4,1,0)_{12}$ with a seasonal period of 12 years and first difference applied to the seasonal (year) scale of data: $D=1$ while monthly $d=0$. This model has AR, MA, and SAR roots outside of the unit circle. Thus, the model is stationary, causal, and invertible. 
+
+```{r echo=T}
+#transfrom data
+temp.use = (ts$N)^0.5
+#fit
+fires_sarima = arima(temp.use,order=c(2,0,2),seasonal=list(order=c(4,1,0),
+                                                           period=12))
+print(fires_sarima)
+```
+
+```{r echo=F}
+#check roots of arma part of the model
+AR_roots <- polyroot(c(1,-coef(fires_sarima)[c("ar1","ar2")]))
+MA_roots <- polyroot(c(1,coef(fires_sarima)[c("ma1","ma2")]))
+cat('AR roots:',round(Mod(AR_roots),2),'\n')
+cat('MA roots:',round(Mod(MA_roots),2),'\n')
+
+#check roots of Sarma part of the model
+SAR_roots <- polyroot(c(1,-coef(fires_sarima)[c("sar1","sar2","sar3","sar4")]))
+#SMA_roots <- polyroot(c(1,coef(fires_sarima)[c("ma1","ma2")]))
+cat('SAR roots:',round(Mod(SAR_roots),2),'\n')
+#cat('MA roots:',round(Mod(MA_roots),2))
+```
+
+Then we proceed with the model diagnostics. The autocovariance function of residuals shows no evidence of significant autocovariance, thus residuals are i.i.d. The residual and QQ-plots suggest that the SARIMA residuals are indeed Gaussian white noise.
+
+
+```{r, echo=F} 
+#, fig.width=12,fig.height=4,out.width="4in"}
+#par(mfrow=c(1,3))
+#ACF
+acf(fires_sarima$residuals,main='ACF of SARIMA residuals')
+
+par(mfrow=c(1,2))
+# Residual
+plot(fires_sarima$residuals,type='o',pch=19)
+abline(h=0)
+# QQ-plot
+qqnorm(fires_sarima$residuals)
+qqline(fires_sarima$residuals)
+```
+
+Note that this model has the same AR and MA exponents p=q=2 and P=4,Q=0, as in the previous section for SARMA fitting. The outcome of the SARIMA is better than that of the SARMA model because the ACF has less autocovariance.
+
+
+### Conclusion
+
+In the current report, we present analysis of wildfires occurring in California in 1900-2020. We took a publicly available data on fire alarm dates and aggregated it into the number of fires per month. The time series we obtained has a couple of key features. It has seasonality at 12 months that was confirmed by our spectrum investigation in the frequency domain. Our time series also has non-uniform variance of fluctuations growing over years and shows a nearly linearly increasing trend. To work with such time series we transformed and detrended the data. Thus, it is possible to fit it into stationary ARMA models that assumes that residuals are a white noise process. We conducted a model selection partially based on minimum AIC criteria, as well as aiming for a causal and invertible model that ensures no autocovariance of residuals. We found two models that fit our data well: 1) $\text{SARMA} (2,2)\times(4,0)$ with a period of 12 months, which fits detrended data and 2) $\text{SARIMA} (2,0,2)\times(4,1,0)$ also with a period of 12 months, which fits the data before detrending, as it has an inbuilt first difference operator having a similar effect. Overall, we see that the second model gives a better fit. 
+
+There are limitations to the presented study: 
+
+- The preprocessing stage of wildfires alarm dates could result in unrealistic properties of the dataset.
+
+- We fit our data with the ARMA-based models which provide statistical inference, but not forecasting.
+
+- We consider only one time series. In general, it would be interesting to compare the wildfires number time series with another time series such as California or global temperature trends to answer some possible questions about association between climate change and wildfire occurrences.
+
+- We also do not take into account the size of the fires. Some fires included in our study could be very small and insignificant, but they are considered the same as the huge, dangerous fires. 
+
+- Data collection in 1900, when our dataset begins, may not have been as good as today, meaning that there could be some inconsistencies in our dataset. In recent years, more fires may be recorded because of better data collection; some wildfires from the early years included in our dataset may not be included in the data.
+ 
+These limitations raise interesting questions to be addressed in future studies.
+
+
+### Reference
+
+ [1] R.H.Shumway and D.S.Stoffer, "Time series analysis and its applications: with R examples", 4th edition, Springer Nature, 2017, DOI 10.1007/978-3-319-52452-8
+
+ [2] E. Ionides, "Time series analysis", STATS/DATASCI 531 Course, University of Michigan, Winter 2022, https://github.com/ionides/531w22
+ 
+ [3] RDocumentation, arima: ARIMA Modeling of Time Series, https://www.rdocumentation.org/packages/stats/versions/3.6.2/topics/arima
+ 
+ [4] V. F., Homework report #3, STATS/DATASCI 531 Course, University of Michigan, Winter 2022
+
+ [5] E. Ionides, on discussion during professor's office hour. 2/17/2022.
+ 
+ [6] dataset sources: "https://gis.data.ca.gov/datasets/e3802d2abf8741a187e73a9db49d68fe_0/explore?location=37.357681%2C-118.992700%2C6.00 , https://cvw.cac.cornell.edu/PyDataSci1/wildfires"
+ 
+ [7] examples of plotting two spectrum together: "https://lbelzile.github.io/timeseRies/spectral-estimation-in-r.html"
+
+
+### Appendix
+
+#### A. Spectrum for Data Aggregated by Year
+
+The dataset summary is the following:
+
+```{r, echo=F, echo=FALSE}
+print(summary(fires_original))
+```
+
+```{r, echo=F}
+#spectrum(year_count$N, main="Unsmoothed periodogram of annual fires number")
+```
+
+We construct smoothed spectrum density functions for annual number of wildfires using periodogram and AIC-based methods.
+
+```{r, echo=F}
+prgram_y = spectrum(year_count$N,spans=c(10,10,10), plot = FALSE)
+aic_ar_y = spectrum(year_count$N, method='ar',plot=FALSE)
+plot(prgram_y$freq, prgram_y$spec, type = "l", log = "y", ylab = "spectrum",
+     xlab = "frequency (1/year)", lty=1,ylim=c(1000,20000))
+lines(aic_ar_y$freq, aic_ar_y$spec, lty=2)
+legend("topright", c("Smoothed periodogram", "Estimated via AR model picked by AIC"), lty = 1:2, bty = "n")
+title("Spectrum for annual fire number")
+```
+
+Next we find frequencies with the maximum spectrum.
+
+```{r, echo=F}
+#find argument for the first peak
+cat(paste('Max annual spectrum by unparametric method',round(max(prgram_y$spec),3),'is at frequency',round(prgram_y$freq[which.max(prgram_y$spec)],4),'or',round(1/(prgram_y$freq[which.max(prgram_y$spec)]),3),'years period.'))
+#print(paste('Max annual spectrum by AIC',round(max(aic_ar_y$spec),3),'is at frequency',round(aic_ar_y$freq[which.max(aic_ar_y$spec)],4),'or',round(1/(aic_ar_y$freq[which.max(aic_ar_y$spec)]),3),'years period.'))
+```
+We can notice from the spectrum plot that the maximum is achieved at zero frequency, which is related to the trend mode. Therefore, we do not assume any seasonality for annual data.
+
+
+#### B. Detrending by linear regression or the Hodrick-Prescott filter
+
+Consider a linear regression fit of monthly fire data, transformed by square root. We plot the residual that is a linear detrending with transformation.
+
+```{r, echo=T} 
+#linear regression
+mod = lm(N^0.5~date, data = ts)
+
+plot(resid(mod),ylab = 'Residual', main='Linearly Detrended, Transformed')
+```
+
+We also can use the Hodrick-Prescott (HP) filter to extract the trend of the monthly data ([2], Ch.9). For given observations ${y^*_{1:N}}$, the HP filter is the time series ${s^*_{1:N}}$ constructed as
+\begin{equation}
+ {s^*_{1:N}} =  argmin_{s_{1:N}}
+  \left\{
+    \sum^{N}_{n=1}\big({y^*_n}-s_{n}\big)^2 + \lambda\sum^{N-1}_{n=2}\big(s_{n+1}-2s_{n}+s_{n-1}\big)^2
+  \right\}.
+\end{equation}
+
+The next plot shows the resulting HP filtered number of fires per month and the square root transformed data. It can be seen that the variance becomes more uniform over time when data is transformed as expected.
+
+```{r, echo-F} 
+#, fig.width=12,fig.height=4,out.width="4in"}
+#par(mfrow=c(1,2))
+
+hp <- hpfilter(ts$N, freq=100,type="lambda",drift=F)$cycle
+#plot(ts$date,hp,type="l",xlab="Year",ylab="HP residuals", main="HP Filter Detrended")
+
+# square root transformation of data
+temp.use = (ts$N)^0.5
+
+# filter
+ts_sqrtN_hp <- hpfilter(temp.use, freq=100,type="lambda",drift=F)$cycle
+plot(ts$date,ts_sqrtN_hp,type='l',xlab="Year",ylab="HP residuals", main="HP Filter Detrended, Transformed")
+```
+
+
+#### C. Decomposition
+
+To further investigate cycles we proceed with frequency decomposition by looking at the trend, noise and cycle decomposition for monthly fire numbers ([2] Ch8, slide18). Note that here we do not consider data transformation but rather investigate the original time series of a number of wildfires.
+
+```{r echo=F}
+num_fires = ts$N
+date = seq(from = 1900,length = length(num_fires) , by = 1 / 12) #year
+
+fires_low = ts(loess(num_fires ~ date, span = 0.5)$fitted,
+            start = 1900, 
+            frequency = 12)
+fires_high = ts(num_fires - loess(num_fires ~ date, span = 0.1)$fitted,
+           start = 1900,
+           frequency = 12)
+fire_cycles = num_fires - fires_high - fires_low
+plot(ts.union(num_fires, fires_low, fires_high, fire_cycles),
+     main = "Decomposition of wildfire numbers as trend + noise + cycles")
+```
+
+To find a band of mid-range frequencies, we plot a frequency response between cyclic number of fires and the original time series.
+
+
+```{r echo=F}
+#Ref: from Lecture code for ch8, slide19
+#frequency is 1/year or 1/month?
+spec_cycle <- spectrum(ts.union(num_fires,fire_cycles), spans=c(3,3), plot=FALSE)
+freq_response_cycle <- spec_cycle$spec[,2]/spec_cycle$spec[,1]
+plot(spec_cycle$freq,freq_response_cycle, type="l",log="y",  ylab="spectrum ratio", xlab="frequency (1/month)", xlim=c(0,1), ylim=c(5e-9,1.1), main="frequency response (dashed line at 1.0)")
+ abline(h=1,lty="dashed",col="red")
+ 
+cut_fraction <- 0.5
+hi <- freq_response_cycle>cut_fraction
+hi_range <- range(seq_along(hi)[hi])
+l_frac <-(freq_response_cycle[hi_range[1]]-cut_fraction)/(freq_response_cycle[hi_range[1]]-freq_response_cycle[hi_range[1]-1])
+r_frac <-(freq_response_cycle[hi_range[2]]-cut_fraction)/(freq_response_cycle[hi_range[2]]-freq_response_cycle[hi_range[2]+1])
+l_interp <- spec_cycle$freq[hi_range[1]] * (1-l_frac) +  spec_cycle$freq[hi_range[1]-1] * l_frac
+r_interp <- spec_cycle$freq[hi_range[2]] * r_frac +  spec_cycle$freq[hi_range[2]+1] * (1-r_frac)
+
+abline(h=1,lty="dashed",col="blue")
+abline(v=c(l_interp,r_interp),lty="dashed",col="blue") 
+abline(h=cut_fraction,lty="dashed",col="blue")
+```
+
+```{r}
+#Ref: from Lecture code for ch8, slide19
+knitr::kable(matrix(c(l_interp,r_interp),nrow=1,dimnames=list("frequency range, region for ratio greater than 0.5",c("low","hi"))), digits=3)
+```
+
+The analysis shows that mid-range frequencies are between 0.031 and 0.123 (1/0.03=32.25 and 1/0.123=8.13 months, respectively). The previously found periods of 12 and 6 months are within this band.
+
+#### D: AIC search for stationary ARMA fit
+
+##### Monthly data
+
+For stationary ARMA modeling we consider monthly number of wildfires, transformed and detrended by Loess smoothing. We fit multiple ARMA(p,q) models with various values of p and q and calculate the Akaike information criteria (AIC) values (see [2] Ch.5).
+
+```{r, echo = FALSE, warning=FALSE}
+#define a function [2], Ch.5
+aic.table <- function(data, P, Q){
+  table <- matrix(NA, (P+1), (Q+1))
+  for(p in 0:P){
+    for(q in 0:Q){
+       table[p+1, q+1] <- arima(data, order = c(p, 0, q), method="ML")$aic
+    }
+  }
+  dimnames(table) <- list(paste("<b> AR", 0:P, "</b>", sep = ""), paste("MA", 0:Q, sep = ""))
+  table
+}
+
+#loess residuals for monthly data
+detrended_transfomed = N_loess_sqrt$residuals
+
+#compute
+temp.aic <- aic.table(detrended_transfomed, 5, 5)
+knitr::kable(temp.aic, digits = 2)
+```
+
+
+```{r}
+print(paste('ARMA AIC variability is',round((max(temp.aic) - min(temp.aic))*100/max(temp.aic),0),'%'))
+min(temp.aic)
+```
+
+We find that AIC variability is within 30%, so the difference is not negligible. The table shows that ARMA(2,5) has the lowest AIC 4359.884. 
+
+We notice that AICs for ARMA(p,q) with p=2, q=0,..5 are relatively small and can be investigated further for causality and invertibility. We found that ARMA(2,1) and AR(2) have roots outside the unit circle. The ARMA(2,1) has a smaller AIC value and thus is preferable.
+
+```{r, echo = FALSE, warning=FALSE}
+#Run arma models with small AICs for transformed detrended data:
+arma25 <- arima(detrended_transfomed, order = c(2,0,5), method="ML")
+arma24 <- arima(detrended_transfomed, order = c(2,0,4), method="ML")
+arma23 <- arima(detrended_transfomed, order = c(2,0,3), method="ML")
+arma22 <- arima(detrended_transfomed, order = c(2,0,2), method="ML")
+arma21 <- arima(detrended_transfomed, order = c(2,0,1), method="ML")
+arma20 <- arima(detrended_transfomed, order = c(2,0,0), method="ML")
+
+#Compute and print roots 
+ar.root25 <- polyroot(c(1,-coef(arma25)[c("ar1","ar2")]))
+ma.root25 <- polyroot(c(1,coef(arma25)[c("ma1","ma2","ma3","ma4","ma5")]))
+cat('arma25 roots for AR ',round(Mod(ar.root25),2),' and MA',round(Mod(ma.root25),2),'\n')
+
+ar.root24 <- polyroot(c(1,-coef(arma24)[c("ar1","ar2")]))
+ma.root24 <- polyroot(c(1,coef(arma24)[c("ma1","ma2","ma3","ma4")]))
+cat('arma24 roots for AR ',round(Mod(ar.root24),2),' and MA',round(Mod(ma.root24),2),'\n')
+
+ar.root23 <- polyroot(c(1,-coef(arma23)[c("ar1","ar2")]))
+ma.root23 <- polyroot(c(1,coef(arma23)[c("ma1","ma2","ma3")]))
+cat('arma24 roots for AR ',round(Mod(ar.root23),2),' and MA',round(Mod(ma.root23),2),'\n')
+
+ar.root22 <- polyroot(c(1,-coef(arma22)[c("ar1","ar2")]))
+ma.root22 <- polyroot(c(1,coef(arma22)[c("ma1","ma2")]))
+cat('arma22 roots for AR ',round(Mod(ar.root22),2),' and MA',round(Mod(ma.root22),2),'\n')
+
+ar.root21 <- polyroot(c(1,-coef(arma21)[c("ar1","ar2")]))
+ma.root21 <- polyroot(c(1,coef(arma21)[c("ma1")]))
+cat('arma21 roots for AR ',round(Mod(ar.root21),2),' and MA',round(Mod(ma.root21),2),'\n')
+
+ar.root20 <- polyroot(c(1,-coef(arma20)[c("ar1","ar2")]))
+cat('arma20 roots for AR ',round(Mod(ar.root20),2))
+```
+We plot the ACF for the ARMA(2,1) monthly residual. We can see there is evidence of autocovariance at lag 12 months that is not taken by this simple model.
+
+```{r, echo=F}
+#ACF
+acf(arma21$residuals,main='ACF of ARMA(2,1) monthly residuals')
+```
+
+
+
+##### Annual data
+
+We check the AIC values for ARMA computed on annual data using Loess detrending of transformed data. The Loess AIC is related to ARMA(4,4). The variability of AIC within this table is smaller than 10%, thus AIC is not a helpful criterion here.
+
+```{r, echo = FALSE, warning=FALSE}
+#define a function [2], Ch.5
+aic.table <- function(data, P, Q){
+  table <- matrix(NA, (P+1), (Q+1))
+  for(p in 0:P){
+    for(q in 0:Q){
+       table[p+1, q+1] <- arima(data, order = c(p, 0, q), method="ML")$aic
+    }
+  }
+  dimnames(table) <- list(paste("<b> AR", 0:P, "</b>", sep = ""), paste("MA", 0:Q, sep = ""))
+  table
+}
+
+#loess residuals for annual(!) data (detrended transformed)
+N_loess_sqrt2 = loess(num_fires_2^0.5 ~ date_2, span = 0.5)
+detrended_transfomed2 = N_loess_sqrt2$residuals
+
+#compute
+temp.aic2 <- aic.table(detrended_transfomed2, 5, 5)
+knitr::kable(temp.aic2, digits = 2)
+```
+
+
+```{r}
+print(paste('annual ARMA AIC variability is',round((max(temp.aic2) - min(temp.aic2))*100/max(temp.aic2),0),'%'))
+min(temp.aic2)
+```
+
+We continue with manual model choice, looking for a stationary, causal, and invertible ARMA(p,q) model for p=4, q=2,..4. We can see that AR(4) and AR(4,1) are both suitable models for fitting annual data as they are causal and invertible. The AR(4) has smaller AIC and thus can be used for further investigation.
+
+```{r, echo = FALSE, warning=FALSE}
+#Run arma models with small AICs for transformed detrended data:
+arma44 <- arima(detrended_transfomed2, order = c(4,0,4), method="ML")
+arma43 <- arima(detrended_transfomed2, order = c(4,0,3), method="ML")
+arma42 <- arima(detrended_transfomed2, order = c(4,0,2), method="ML")
+arma41 <- arima(detrended_transfomed2, order = c(4,0,1), method="ML")
+arma40 <- arima(detrended_transfomed2, order = c(4,0,0), method="ML")
+
+#Compute and print roots 
+ar.root44 <- polyroot(c(1,-coef(arma44)[c("ar1","ar2","ar3","ar4")]))
+ma.root44 <- polyroot(c(1,coef(arma44)[c("ma1","ma2","ma3","ma4")]))
+cat('arma44 roots for AR ',round(Mod(ar.root44),2),' and MA',round(Mod(ma.root44),2),'\n')
+
+ar.root43 <- polyroot(c(1,-coef(arma43)[c("ar1","ar2","ar3","ar4")]))
+ma.root43 <- polyroot(c(1,coef(arma43)[c("ma1","ma2","ma3")]))
+cat('arma43 roots for AR ',round(Mod(ar.root43),2),' and MA',round(Mod(ma.root43),2),'\n')
+
+ar.root42 <- polyroot(c(1,-coef(arma42)[c("ar1","ar2","ar3","ar4")]))
+ma.root42 <- polyroot(c(1,coef(arma42)[c("ma1","ma2")]))
+cat('arma42 roots for AR ',round(Mod(ar.root42),2),' and MA',round(Mod(ma.root42),2),'\n')
+
+ar.root41 <- polyroot(c(1,-coef(arma41)[c("ar1","ar2","ar3","ar4")]))
+ma.root41 <- polyroot(c(1,coef(arma41)[c("ma1")]))
+cat('arma41 roots for AR ',round(Mod(ar.root41),2),' and MA',round(Mod(ma.root41),2),'\n')
+
+ar.root40 <- polyroot(c(1,-coef(arma40)[c("ar1","ar2","ar3","ar4")]))
+cat('arma40 roots for AR ',round(Mod(ar.root40),2))
+
+```
+
+We plot the ACF of the AR(4) model residuals for annual data. We can see that it is a good model with little autocovariance at lag 10, which is negligible.
+
+```{r, echo=F}
+#ACF
+acf(arma40$residuals,main='ACF of AR(4) annual residuals')
+```
+
+#### E: Trial and error with SARIMA
+
+We consider different p,q,P,Q for fitting a transformed number of fires per month. The selection criteria are: roots should be outside the unit circle, ACF should not be lag dependent (no points outside the confidence interval), the residual between fit and data should be more or less homogeneous, no problem with convergence.
+
+
+```{r echo=T}
+#transfrom data
+temp.use = (ts$N)^0.5
+#fit
+fires_sarima_test = arima(temp.use,order=c(2,0,2),
+                     seasonal=list(order=c(3,1,0),period=12),
+)
+print(fires_sarima)
+
+#check roots of arma part of the model
+AR_roots <- polyroot(c(1,-coef(fires_sarima_test)[c("ar1","ar2")]))
+MA_roots <- polyroot(c(1,coef(fires_sarima_test)[c("ma1","ma2")]))
+cat('AR roots:',round(Mod(AR_roots),2),'\n')
+cat('MA roots:',round(Mod(MA_roots),2),'\n')
+
+#check roots of Sarma part of the model
+SAR_roots <- polyroot(c(1,-coef(fires_sarima_test)[c("sar1","sar2","sar3")]))
+cat('SAR roots:',round(Mod(SAR_roots),2),'\n')
+
+
+```
+
+```{r, echo=F} 
+#, fig.width=12,fig.height=4,out.width="4in"}
+par(mfrow=c(1,3))
+#ACF
+acf(fires_sarima_test$residuals,main='ACF of SARIMA residuals')
+# Residual
+plot(fires_sarima_test$residuals,type='o',pch=19)
+abline(h=0)
+# QQ-plot
+qqnorm(fires_sarima_test$residuals)
+qqline(fires_sarima_test$residuals)
+
+```

@@ -1,0 +1,233 @@
+---
+title: "Analysis on CO2 Emission from Natural Gas Electric Power Generation in United States"
+date: "2022/2/17"
+output:
+  rmarkdown::html_document:
+    toc: TRUE
+    toc_float:
+      collapsed: True
+      smooth_scroll: True
+    theme: flatly
+    highlight: tango
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(warning=FALSE, message=FALSE)
+```
+
+```{r, warning=FALSE, message=FALSE, include = FALSE}
+library(zoo)
+library(dplyr)
+library(ggplot2)
+library(tseries)
+library(forecast)
+library(urca)
+library(astsa)
+```
+
+# Introduction
+
+Coal electric power generation occupies a dominant position in the power generation sector, yet coal has a very great harm to the environment. According to U.S. Energy Information Administration [[1]](#ref1), in 2020, the electricity generated from burned coal resulted in 0.78 billion metric tons of carbon dioxide emission, which accounted for 56% of the CO2 emissions associated with electricity generation. With the increasingly serious environmental problems, the use of clean energy is being advocated all over the world, especially in technologically advanced developed countries. As one of the clean energy sources, natural gas has been widely used in recent years which can reduce harmful chemicals such as sulfur dioxide and carbon dioxide. In addition, using natural gas as an energy source can reduce the consumption of coal and oil and fundamentally improve environmental quality. It is reported that to generate the same amount of electricity, substituting coal with natural gas reduces the CO2 emissions by 40% on average. [[2]](#ref2) This paper intends to study the trends and seasonal fluctuations of CO2 emissions from natural gas electric power generation over the past few decades.
+
+The data for this project was obtained from the U.S. Energy Information Administration, including monthly carbon dioxide emissions from natural gas consumption for electric power from January 1973 to December 2019. [[3]](#ref3)
+
+# Exploratory Data Analysis
+
+```{r}
+emissionCO2 <- read.csv("ELECTRI_CO2_MER_T11_06.csv")
+# str(emissionCO2)
+emissionCO2$date <- as.Date(as.yearmon(as.character(emissionCO2$YYYYMM), "%Y%m"))
+
+natural_gas <- emissionCO2[grepl("Natural Gas", emissionCO2$Description),]
+# natural_gas %>% filter(is.na(date))
+natural_gas_use <- natural_gas[, c(7, 3)]
+natural_gas_use <- na.omit(natural_gas_use) # each year has a 13th month which is the sum value
+natural_gas_use$Value <- as.numeric(natural_gas_use$Value)
+natural_gas_use <- natural_gas_use %>% 
+  filter(date < "2020-01-01")
+
+natural_gas_ts <- ts(natural_gas_use$Value, start = c(1973,1), frequency = 12)
+```
+
+## Data Visualization
+
+Carbon dioxide emissions from natural gas electric power generation have been increasing.
+
+```{r}
+ggplot(natural_gas_use, aes(x = date, y = Value))+
+  geom_line()+
+  labs(x = "Month",
+       y="Emissions (Million Metric Tons)",
+       title="CO2 emissions from natural gas consumption in the electric power sector")+
+  geom_smooth(method = "lm", formula = y ~ x, se = F)+
+  theme_classic()
+```
+
+## Stationary
+
+### ACF and PACF Plot
+
+The ACF plot shows a clear pattern of change with a period of about 12.
+
+```{r}
+tsdisplay(natural_gas_ts)
+```
+
+### ADF Test
+
+The value of the t-statistic is greater than the critical value of t at any of the significant levels. The p-value for ADF test is 0.09 which is larger than 0.05, which implies that it fails to reject the null hypothesis that the time series is stationary. The ACF and PACF of the residuals show that the residuals are still correlated with the sequence.
+
+```{r}
+df_origin = ur.df(natural_gas_ts, type = c("trend"), selectlags = "AIC")
+summary(df_origin)
+plot(df_origin)
+
+adf.test(natural_gas_ts)
+```
+
+## Spectrum
+
+We can get the periods of our data by looking at the peaks of the smoothed periodogram. There are several local maximal in the frequency domain. The first is $\omega_1 = 0.083$, whose corresponding period is $1 / 0.083 \approx 12$ months. This indicates that a periodic variation of a cycle of around 1 year. The next peak lies near $\omega_2 = 0.167$, with a shorter period of $1/0.167\approx 6$ months.
+
+``` {r}
+s1 <- spectrum(natural_gas_use$Value, span=c(10,20,10), main="Smoothed Periodogram");
+local_maxima <- which(diff(sign(diff(s1$spec)))==-2) + 1;
+abline(v=s1$freq[local_maxima[1:2]], col="red", lty=2)
+```
+``` {r, echo=FALSE}
+print(paste("Local Maxima:", format(s1$freq[local_maxima[1]], digits=3)));
+print(paste("Local Maxima:", format(s1$freq[local_maxima[2]], digits=3)));
+```
+
+## Seasonality
+
+There is a long-term upward trend of natural gas CO2 emissions with seasonal variations of 12-month cycle length. Observing the random effects of the series, it can be found that the residuals are basically stable after extracting the long-term trend and seasonal effects. Also, the seasonal trend shows that the electricity generated during summer is much higher than winter, which agrees with our common sense on the change of electricity consumption across months in a year.
+
+```{r}
+dc<-decompose(natural_gas_ts)
+plot(dc)
+```
+
+```{r}
+season <- dc$figure
+plot(season,type = "b",xaxt = "n", xlab = "", main = "Seasonal Trend")
+```
+
+# Modeling
+
+In this part, we try to find out the best model. Base on the analysis above,  we select SARIMA $(p, d, q) \times(P, D, Q)_{12}$ model. The general form can be written as
+$$
+\phi(B) \Phi\left(B^{12}\right)\left((1-B)^{d}\left(1-B^{12}\right)^{D} Y_{n}-\mu\right)=\psi(B) \Psi\left(B^{12}\right) \epsilon_{n}
+$$
+where $\epsilon_{n}$ is a white noise process, the intercept $\mu$ is the mean of the differenced process $\left\{(1-B)^{d}\left(1-B^{12}\right)^{D} Y_{n}\right\} .$
+$$
+\begin{gathered}
+\phi(x)=1-\phi_{1} x-\cdots-\phi_{p} x^{p} \\
+\psi(x)=1+\psi_{1} x+\cdots+\psi_{q} x^{q} \\
+\Phi(x)=1-\Phi_{1} x-\cdots-\Phi_{P} x^{P} \\
+\Psi(x)=1+\Psi_{1} x+\cdots+\Psi_{Q} x^{Q}
+\end{gathered}
+$$
+
+## Sequence Smoothing
+
+To fit a model, we first need to transform the time series to be stationary. The top plot in the figure below is the original series, which shows trend plus increasing variance. The original data are then differenced to remove trend, which is displayed in the middle plot. It is clear the there is still persistence in the seasons (i.e., $tsdiff1_t ≈ tsdiff1_{t-12}$), so that a twelfth-order difference is applied and plotted in the bottom one. It can be seen that the trend and seasonality of the series are smoothed when we perform a first-order twelve-step difference on the original data. The transformed data appears to be stationary and we are now ready to fit a model.
+
+```{r}
+ts_diff1 <- diff(natural_gas_ts)
+ts_diff1_12 <- diff(ts_diff1, 12)
+plot(cbind(natural_gas_ts, ts_diff1, ts_diff1_12), main="")
+```
+
+## Model Selection
+
+### Hyperparameters Configuring 
+
+The ACF and PACF of the transformed data are shown below. For seasonsal component, it appears that at the seasons, the ACF is cutting off a lag 1s (s = 12), whereas the PACF is tailing off at lags 1s, 2s, 3s, 4s, ... . These results implies an $SMA(1)$, P = 0, Q = 1, in the season (s = 12). For non-seasonsal component, inspecting the ACF and PACF at the lower lags, it appears as though both are tailing off, which suggests an $ARMA(1, 1)$ within the seasons, p = q = 1. Therefore, $ARIMA(1, 1, 1) × (0, 1, 1)_{12}$ seems to be a better choice.
+
+```{r}
+acf_diff <- acf2(series = ts_diff1_12)
+```
+
+### Fitting SARIMA model
+
+We use `auto.arima()` function to select the model automatically, and the result is the same with that of the previous part.
+
+```{r}
+yhat = auto.arima(natural_gas_ts, ic = "aic")  
+summary(yhat)
+```
+
+```{r}
+model1 = arima(natural_gas_ts, include.mean=TRUE, order = c(1,1,1), 
+              seasonal = list(order = c(0, 1, 1), period = 12))
+model1
+```
+
+# Diagnostics
+
+## Fitted value
+
+The figure below shows the original time series and the SARIMA fitted value. It seems that the model fitted quite well. It captures the trends and peaks of the series, and can explain the majority of the underlying structure.
+
+```{r}
+ggplot(natural_gas_use, aes(x = date, y = Value, col = "Original data"))+
+  geom_line(lwd = 0.7)+
+  geom_line(aes(y = fitted(model1), col = "Fitted value"), lwd = 0.7)+
+  scale_color_manual(name = "Series", 
+                     values = c("Original data" = "black", "Fitted value" = "red3"))+
+  labs(x = "Month",
+       y="Emissions (Million Metric Tons)",
+       title="SARIMA Fitted")+
+  theme_classic()+
+  theme(plot.title = element_text(hjust=0.5))
+```
+
+## Residual Analysis
+
+The p-value of Ljung-Box test is larger than 0.05, which indicates we fail to reject the null hypothesis, which indicates that the residual sequence is white noise and the fluctuation of the residual series has no statistically significant regularity. The plot of the standardized residual is basically stationary. The normal Q-Q plot of the residuals shows that the assumption of normality is reasonable, with the exception of the possible outliers. Thus, we can conclude that our model fits well that it can help us understand the original time series data, and can be used to make predictions about the future series.
+
+```{r}
+tsdiag(model1)
+Box.test(model1$residuals,type = "Ljung-Box")
+qqnorm(model1$residuals)
+qqline(model1$residuals)
+```
+
+# Prediction
+
+We use this model to predict CO2 emissions in 2020, and the results are shown in the figure below. The blue line is the prediction result of the model, the black line is the actual result in 2020, the darker gray area is 95% confidence interval, and the lighter gray area is 80% confidence interval. It can be seen that the actual results basically fall within the 95% confidence interval, indicating that the prediction effect of the model is good.
+
+```{r}
+natural_gas_use_future <- natural_gas[, c(7, 3)]
+natural_gas_use_future <- na.omit(natural_gas_use_future) # each year has a 13th month which is the sum value
+natural_gas_use_future$Value <- as.numeric(natural_gas_use_future$Value)
+natural_gas_use_future <- natural_gas_use_future %>% 
+  filter(date >= "2020-01-01" & date < "2021-01-01")
+
+natural_gas_ts_future <- ts(natural_gas_use_future$Value, start = c(2020,1), frequency = 12)
+plot(model1 %>% forecast(h=12),include=80)
+lines(natural_gas_ts_future,col='black')
+```
+
+# Conclusion
+
+We analyzed carbon dioxide emissions from natural gas consumption for electric power from January 1973 to December 2019. The CO2 emissions shows obvious seasonality, and the increasing trend is statistically significant. We use SARIMA model to model monthly carbon dioxide emissions from natural gas consumption for electric power. The final model is $ARIMA(1,1,1)\times (0,1,1)_{12}$:
+$$
+(1 - 0.6981 B) (1 - B) (1 - B^{12}) Y_n = (1 - 0.7B^{12}) (1 - 0.9670 B) \epsilon_{n}
+$$
+The residual test result is white noise, and the prediction result of the model in 2020 is less different from the actual data. The model successfully models carbon emissions.
+
+# References
+
+<span id="ref1">[1]</span> Background Knowledge: How much carbon dioxide is produced per kilowatthour of U.S. electricity generation, U.S. Energy Information Administration, <https://www.world-nuclear.org/information-library/energy-and-the-environment/carbon-dioxide-emissions-from-electricity.aspx>
+
+<span id="ref2">[2]</span> Background Knowledge: Carbon Dioxide Emissions From Electricity, World Nuclear Association, <https://www.world-nuclear.org/information-library/energy-and-the-environment/carbon-dioxide-emissions-from-electricity.aspx>
+
+<span id="ref3">[3]</span> Data Source: Electricity industry CO2 emissions, U.S. Energy Information Administration, <https://www.eia.gov/totalenergy/data/browser/index.php?tbl=T11.06#/?f=A>.
+
+<span id="ref4">[4]</span> Hyperparameters Configuring: R. Shumway and D. Stoffer *Time Series Analysis and its Applications*, 4th edition, 2017: pp151-154.
+
+<span id="ref5">[5]</span> STATS 531 Previous Midterm Projects 2020 & 2021. <https://ionides.github.io/531w20/midterm_project/>, <https://ionides.github.io/531w21/midterm_project/>

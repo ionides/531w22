@@ -1,0 +1,322 @@
+---
+title: "Avocado Market Volatility"
+author: "Blinded"
+date: "21 February 2022"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(ggplot2)
+library(plyr)
+library(dplyr)
+library(broom)
+library(car)
+library(knitr)
+library(stats)
+library(lubridate)
+library(scales)
+library(tidyverse)
+library(knitr)
+```
+
+```{r, echo=FALSE, include = FALSE}
+
+
+avocado = read.csv("avocado-updated-2020.csv") %>%
+  filter(geography == "Total U.S.", type == "conventional") %>%
+  mutate(date = as.Date(date),
+         price_diff = c(NA, diff(average_price, diff = 1)),
+         vol_scaled = total_volume/(10^7),
+         revenue = average_price*total_volume)
+```
+
+```{r, echo = FALSE, include = FALSE}
+val <- avocado$average_price
+date <- as.Date(avocado$date)
+```
+
+## Introduction
+
+Avocados seem to be ubiquitous in American dining, communicating classy, yet affordable taste. A common joke about a millennial is that they cannot afford a house because they have spent all their money on avocado toast. Because of their popularity in North American tastes, demand has surged in the past few years, leading to clearing of land for resource-intensive farming. Avocados recently have been linked to deforestation in South America, which leads to many ecological problems, such as a reduction in the habitat of Monarch butterflies, a species already struggling due to a loss of milkweed.^[Burnett, Victoria. “Avocados Imperil Monarch Butterflies' Winter Home in Mexico.” The New York Times, The New York Times, 17 Nov. 2016.]
+
+Our dataset comes from Kaggle, and was compiled by Timofei Kornev.^[https://www.kaggle.com/timmate/avocado-prices-2020] It contains data from the Haas Avocado Board on avocado prices from January of 2015 to May of 2020. There was an original data set compiled from January 2015-May 2018 on Kaggle. While the data contain information on 54 avocado markets across the nation, because 80\% of avocados consumed in the U.S. are imported solely from Mexico,^[https://www.nytimes.com/2022/02/15/business/us-mexico-avocado-ban.html?searchResultPosition=1] a national market is a more appropriate population of interest.
+
+This study will investigate any trend in avocado prices over time and how total volume sold potentially is related to retail prices. Specifically, we aim to answer the following questions:
+
+1. Are there seasonal patterns in the prices and what information can we infer from those patterns? 
+2. If there exists such relationship, can we isolate the cause and effects within the relationship? In other words, is the change in prices a consequence of change in quantities or the other way around?
+3. Is there a model that adequately captures the trend and relationship between avocado prices and quantities? 
+
+## Exploratory Data Analysis
+
+The data set contains 14 different variables describing weekly Haas avocado sales, both regional and national for conventional and organic avocados. The variables that are immediately relevant to this analysis are: date, national price and total number of avocados sold for conventional avocados.  
+
+The observation dates range from 2015-01-04 to 2020-11-29, which cover approximately 6 years. The average price per avocado centers around \$1.09, while the total volume has an average of about 38.2 million avocados.  
+
+```{r echo = FALSE, include=FALSE}
+summary(avocado[,c("date", "average_price", "vol_scaled")])
+```
+
+From initial observations of the time plots ^[ code from https://stackoverflow.com/questions/49489367/how-to-extract-month-and-day-from-date-in-r-and-convert-it-as-a-date-type and https://stackoverflow.com/questions/49489367/how-to-extract-month-and-day-from-date-in-r-and-convert-it-as-a-date-type] in Figures 1 and 2, the avocado average prices see a drop in the first month or so and then reach a peak around July and August every year except for 2015. The total volume shows an opposite trend—every year the volume peaks in the first month and starts decreasing mid-year. It seems that the volume has an overall increasing trend from year to year.  
+
+The preliminary plots hint at a potential negative relationship between average prices and total volume. When prices are low, volume tends to be high, and vice versa. This correlation agrees with the Law of Demand in economics, which describes an inverse relationship between price and quantity holding all other factors constant. It is unclear, however, whether the price is reacting to quantity changes or the quantity is reacting to changes in avocado prices. One of the goals of our study is to answer this question with more sophisticated time series modeling.
+
+```{r, echo = FALSE}
+avocado$MonthDay <- format(as.Date(avocado$date), "%m-%d")
+avocado %>% mutate(Day = MonthDay, year=factor(year)) %>%
+  ggplot(aes(x=Day, y=average_price, col=year, group=year)) +
+  geom_line() +
+  scale_x_discrete(breaks=seq(1,365, 7)) +
+  ggtitle("Figure 1: Yearly Avocado Prices") +
+  labs(y="Average Price", x="Time")
+```
+
+```{r echo = FALSE}
+# ggplot(avocado, aes(date, average_price, color = as.factor(year))) +
+#   geom_line(show.legend = FALSE) + xlab("Date") + ylab("Average Avocado Price") +
+#   scale_x_date(date_labels = "%Y", date_breaks = "1 year") +
+#   ggtitle("Figure 1: Time Plot of Average Avocado Prices")
+ggplot(avocado, aes(date, vol_scaled, color = as.factor(year))) +
+  geom_line(show.legend = FALSE) + xlab("Date") + ylab("Total Volume (10 million)") +
+  scale_x_date(date_labels = "%Y", date_breaks = "1 year") +
+   ggtitle("Figure 2: Time Plot of Total Sales Volume")
+```
+
+Revenue is the product of price and quantity. Figure 3 shows the avocado revenue from 2015 to 2020. Overall, we observe an increasing trend in revenue throughout the years. Each year has similar patterns as well, in which the revenue peaks mid-year and drops towards the end of the year. The plot shows a combination of price trends and quantity trends. An interesting note is that both prices and quantities are low in the last couple months of each year, leading to the relatively low revenues.
+
+```{r echo = FALSE}
+ggplot(avocado, aes(date, revenue, color = as.factor(year))) +
+  geom_line(show.legend = FALSE) + xlab("Date") + ylab("Revenue") +
+  scale_x_date(date_labels = "%Y", date_breaks = "1 year") + 
+  ggtitle("Figure 3: Time Plot of Revenue")
+```
+
+### Frequency Analysis
+```{r, echo = FALSE}
+val <- avocado$average_price
+date <- as.Date(avocado$date)
+```
+
+In this section, we are interested in analyzing the frequency of avocado prices over time^[Lecture notes - Chapter 7: Introduction to time series analysis in the frequency domain, slides, 22-28].
+The spectral density of avocado prices can be plotted as below:
+
+
+```{r, echo = FALSE}
+s <- spectrum(val,spans = c(2, 5, 2),plot=FALSE)
+plot(s$freq,s$spec,type="l",log="y",
+ylab="Spectrum", xlab="Frequency",
+main="Smoothed Periodogram")
+```
+
+
+We adopt the default periodogram smoother in R to smooth the periodogram of avocado prices, as is shown in the above figure. The dominate frequency is calculated as 0.003125, which suggests a period of $1/frequency=320$. The original time period is 1 week, and there are approximately 52 weeks in a year. The period should be $\frac{320}{52}=6.15$ years, which is very large, indicating that there is no apparent period in this data. This is probably due to the reason that we only have data in 6 years, which is not enough for investigating periodic trend.
+
+For a more complete frequency analysis of the data, see the Appendix.
+
+
+## Determining Model Specifications
+
+Our question of interest requires the inclusion of a covariate for the total volume of avocados sold in a week. We propose the following model:
+
+$$ \phi B(P_n)=\beta_0+\beta_1 V_n +\psi(B)\{\epsilon_n\} $$ where $\{\epsilon_n\}$ are the Gaussian errors for the ARMA polynomial, $\psi(B), \phi(B)$ are the AR and MA polynomials and $V_n$ indicate volume sold at time $n$.
+Our data have the limitation of $n=6$ years, and weekly observations within those years, so we chose not to include a seasonal component to the ARMA process.
+
+We use the Akaike Information Criterion (AIC) to perform model selection. The AIC has the advantage of being computationally quick, but can sometimes prefer larger models than statistically significant as it is not based on any distributional theory. 
+
+```{r, echo = FALSE}
+aic_table <- function(data, covariate, P, Q) {
+  table <- matrix(NA,(P+1),(Q+1))
+  for(p in 0:P) {
+    for(q in 0:Q) {
+      table[p+1,q+1] <- arima(data, xreg = covariate, order=c(p,0,q))$aic
+    }
+  }
+  dimnames(table) <- list(paste("AR",0:P, sep=""),
+                          paste("MA",0:Q, sep=""))
+  table
+  }
+(aic_table = aic_table(avocado$average_price, (avocado$vol_scaled), 4, 5))
+```
+```{r echo = FALSE}
+arma_model = function(p,q) {
+  mod = arima(avocado$average_price, xreg = avocado$vol_scaled, order=c(p,0,q))
+  return(mod)
+}
+```
+
+```{r, echo = FALSE}
+arma00 = arma_model(0,0)
+arma15 = arma_model(1,5)
+arma30 = arma_model(3,0)
+arma31 = arma_model(3,1)
+arma21 = arma_model(2,1)
+arma24 = arma_model(2,4)
+arma25 = arma_model(2,5)
+```
+
+We can see from Table \ref{T1} that ARMA(2,4) has the lowest AIC value, with ARMA(1,5) as a close second. Because we know that AIC tends to favor larger models, and model parsimony should be a consideration in model selection, we also selected ARMA(3,0), ARMA(2,1) and ARMA(1,4) as candidates.
+
+However, when examining the roots of the ARMA polynomials the only causal, invertible model is ARMA(3,0) or AR(3). Because this model has the desired properties for checking assumptions, we continue to work with this model.
+
+```{r,echo = FALSE, include = FALSE}
+abs(polyroot(c(1,-coef(arma15)[c("ar1","ma1", "ma2", "ma3","ma4","ma5")])))
+#one coefficient inside the unit circle.
+
+abs(polyroot(c(1,-coef(arma30)[c("ar1","ar2", "ar3")])))
+#causal, invertible
+
+abs(polyroot(c(1,-coef(arma21)[c("ar1","ar2", "ma1")])))
+#two coefficients inside unit circle.
+
+abs(polyroot(c(1,-coef(arma24)[c("ar1","ar2", "ma1", "ma2", "ma3","ma4")])))
+#one coefficient inside unit circle.
+```
+
+### Hypothesis Testing for Model Selection
+
+We can then evaluate the selected model with a formal hypothesis testing. We performed a z-test for the coefficient^[Ch.6 Lecture Slides p. 23] and a likelihood ratio test the nested models^[Ch.5 Lecture Slides p. 19]. The tested hypothesis that the coefficient for total volume is significant, or in context, the total sales volume has a significant relationship with average prices of avocados.
+The null hypothesis is $H_0: \beta = 0$ and the alternative hypothesis is $H_1: \beta \neq 0$, where $\beta$ is the true coefficient for total volumes.
+
+For the z-test, the test statistic is $z = \frac{\hat\beta}{s.e(\hat\beta)} \approx \frac{-0.9573}{.0040} = -24.036$. This is a quite extreme z-test statistic, and the resulting p-value is approximately 0.
+
+```{r echo = FALSE, include=FALSE}
+beta_hat = arma30$coef[5] %>% as.numeric
+print(paste0("z-test statistic: ", round((z = beta_hat / 0.0040),3)))
+print(paste0("p-value: ", round(2*pnorm(z), 3)))
+```
+
+The likelihood ratio test yielded similar results. The $\chi^2$ test statistic for this test is $2(\ell_1 - \ell_0) \approx 2(565.02-411.75) = 306.54$, which is much larger than the critical value of 3.84 with 1 degree of freedom.
+
+```{r echo = FALSE, include=FALSE}
+arma00 = arima(avocado$average_price, order = c(3,0,0))
+print(paste0("LRT statistic: ", round((chi = 2*(arma30$loglik-arma00$loglik)),3)))
+print(paste0("Critical Value: ", round(qchisq(0.95,df=1),3)))
+print(paste0("p-value: ", 1-pchisq(chi,1)))
+```
+
+The two tests both provide strong evidence against the null hypothesis and suggest that the total volume coefficient is indeed significant at the 0.01 level.  
+
+
+### Cross-Spectrum and Coherency
+
+When checking to see if a covariate can explain some of the variation in prices, it is often hard to tell the direction of causation, and to see if there might be some underlying confounding variable present. Here we use the cross-covariance function and the coherency to detect a causal relationship.
+
+The cross correlation function of a bivariate time series model with total volume sold $X_n$ and average avocado price $Y_n$ is\footnote{Ch.9 Lecture Slides p. 16}
+$$\gamma_{XY}(h) = Cov(X_{n+h}, Y_n)$$
+Graphing sample correlation between the two vectors ${x_n}$ and ${y_n}$ against lag $h$, we observe some interesting patterns (Figure 4). The sample correlations are mostly positive around negative lags ($h<0$), though they are not significant. The correlations become  negative at greater positive lag values and the correlations are outside of the confidence interval (blue dashed lines) and therefore are significant. In other words, we can say that "X lags Y"^[https://online.stat.psu.edu/stat510/lesson/8/8.2]. The high retail quantities of avocados 5 weeks ago will significantly and negatively affect the average price today, but the price today will not affect sales volume 5 weeks later. The cross correlation plot suggests that the quantity increases are a consequence of past price drops; or similarly, the quantity decreases are a consequence of past price increases. Prices are not as affected by past changes in quantity.
+
+```{r echo = FALSE}
+ccf_object = ccf(avocado$vol_scaled, avocado$average_price, plot = FALSE)
+upperCI = qnorm((1 + 0.95)/2)/sqrt(ccf_object$n.used)
+lowerCI = -qnorm((1 + 0.95)/2)/sqrt(ccf_object$n.used)
+```
+
+```{r echo = FALSE}
+ccf_dt = data.frame(lag = ccf_object$lag, corr = ccf_object$acf)
+ggplot(ccf_dt, aes(lag, corr, fill = (lag > 0))) + geom_col() + theme_classic() +
+  geom_hline(yintercept = c(lowerCI, upperCI), linetype = "dashed", color = "blue") +
+  geom_hline(yintercept = 0, color = "dark grey") + 
+  xlab("Lag") + ylab("Sample Cross Correlation") +
+  ggtitle("Figure 4: Cross Correlation Function")
+```
+
+```{r echo=FALSE}
+s = spectrum(cbind(avocado$average_price, avocado$vol_scaled),spans=c(3,5,3), plot=F)
+plot(s,plot.type="coherency",main="Coherency Plot of AR(3)")
+abline(h=.5, col="red")
+```
+
+We checked the coherency plot of our model. A coherency plot measures whether a large amplitude at frequency $\omega$ for volume is associated with a large amplitude at frequency $\omega$ for average price. The coherency plot above indicates that we have a large magnitude squared coherence in general. A large portion of our plotted values are above $\rho_{XY}(\omega)=.5$. While .5 is a rule of thumb, it does indicate that there is a significant relationship between average price and volume. Looking at the 95\% confidence interval of the coherence, there are peaks in coherence with high certainty particularly for $\omega \approx .15, .24, .33, .4$. This is just further evidence of an association between our two variables.
+
+### Model Diagnostics
+
+After performing model selection, we plotted observed average prices and predicted average prices. From the below graph, we see that much of the variation of average avocado prices is explained by our model.
+
+```{r include=TRUE, echo=FALSE}
+ts.plot(avocado$average_price, main="Observed and Predicted Prices", xlab="Time", ylab="Avocado Prices")
+MA_fit <- avocado$average_price - resid(arma30)
+points(MA_fit, type = "l", col = 2, lty = 1)
+```
+
+
+We also checked to see if the assumptions that we placed on $\{\epsilon_n\}$ were valid.
+
+A quantile-normal plot of the residuals indicates that the residuals are fairly normal, with slightly heavier tails. However, this is fairly acceptable; we don't have evidence of left or right skewed residuals.
+
+```{r, echo = FALSE, warning=FALSE}
+r = data.frame(year = avocado$date, resid = resid(arma30))
+
+ggplot(r, aes(sample = resid)) +
+  stat_qq_line(linetype = "dashed", color = "dark gray") +
+  geom_qq(size = 1, alpha = 0.8) + ggtitle("QQ-Plot of AR(3) Residuals")
+```
+
+A plot of the residuals of our model indicate that we have fairly random residuals, indicating that the constant variance assumption of the $\{\epsilon_n\}$ has been met. One might make an argument that there is evidence for increasing variance, specifically after 2015. However, if we examine the initial time series plot of the data, we note that 2015 had very little variation in prices, with more variation in later years. This could simply be a reflection of the increasing consumption of avocados in the U.S. around that time. We considered applying a variance stabilizing transformation to the average price, but decided against such measures in favor of a simpler model.
+
+```{r, echo = FALSE}
+ggplot(r, aes(year, resid)) + geom_point() +
+  geom_smooth(se = FALSE, method = "loess") +
+  xlab("Date") + ylab("Residuals") + ggtitle("Residual Plot of AR(3)")
+```
+
+The auto-correlation plot shows no apparent evidence of autocorrelation in the residuals. Overall the lags have autocorrelations within the blue dashed line, which represent the change variation under the null hypothesis if the residuals are in fact iid. Since all the values are within the confidence interval around 0, there is no evidence against this null hypothesis.
+
+```{r echo=FALSE}
+acf(resid(arma30), lag.max=100, main = "ACF Plot of AR(3) Residauls")
+```
+
+## Conclusion
+
+In conclusion, we chose AR(3) to model the relationship between avocado prices and volume, and hopefully understand some of the volatility of the market.
+
+Our final model is:$$Y_n= \beta_0+\beta_1 Y_{n-1} +\beta_2 Y_{n-2}+\beta_3 Y_{n-3} +\beta_4 V_n+\epsilon_n$$ where
+
+`r kable(arma30$coef, style="latex")`
+
+From the coherency analysis that we performed, we were able to argue for a connection in volatility of prices with volume sold, and we found that prices prices now affect future volume sold. One of the challenges of this dataset is the lack of long-term data. In an ideal world, we would be able to detect some type of seasonality in the prices (growing season and import season), but with only 6 years of data, searching for seasonality in this dataset was basically a non-starter. 
+
+One of the advantages of the data though is the density of observations, and the wide variety of data on different regional markets in the U.S. Further analysis could be done to see if avocado prices in places that traditionally produce avocados (such as California) are different from places that traditionally receive shipments of avocados, such as Detroit, to see if there truly is a national market for avocados. There would need to be price adjustment for cost of living, as well as for inflation, but it is likely a question relevant to consumer interests.
+
+Finally, we noted that a variance-stabilizing transformation might result in a slightly more random residual plot. We chose to omit such a transformation in favor of model parsimony, but future work could analyze the differences between our model and a model that utilizes such a transformation.
+
+### Appendix
+
+Here we go into a more in-depth frequency analysis.
+
+Below is the unsmoothed periodogram.
+
+```{r, echo = FALSE}
+unsmoothed <- spectrum(val, main = "Unsmoothed periodogram")
+```
+
+
+
+We also fit an $AR(p)$ model with $p$ selected by AIC. The plot is shown in figure. Using this way to estimate the spectrum, it turns out that the period goes to infinity, also indicating there is no apparent seasonal behavior in the data.
+
+```{r, echo = FALSE}
+estimated <- spectrum(val, method = "ar", main = "Spectrum estimated via AR model picked by AIC")
+freq_estimated <- estimated$freq[which.max(estimated$spec)]
+#cat("dominate frequency: ", freq_estimated, "period: ", 1 / freq_estimated, "\n")
+```
+
+
+
+The Loess computes a linear regression using only neighboring times, thus can use to estimate the trend of data. The fitted trend of the data as well as its frequency response are plotted in below figures.^[Lecture notes - Chapter 8: Smoothing in the time and frequency domains, 13-16]
+
+```{r, echo = FALSE}
+avo_loess <- loess(val~as.numeric(date), span=0.2)
+plot(date, val, type="l")
+lines(avo_loess$x, avo_loess$fitted, type="l", col="red")
+```
+```{r, echo = FALSE}
+loess_ts <- spectrum(ts(avo_loess$fitted), plot=FALSE)
+plot(loess_ts$freq, loess_ts$spec/unsmoothed$spec, type="l", log="y", ylab="frequency ratio", xlab="frequency", main="frequency response (red lines at 0.8 and 1.2)")
+abline(h=c(0.8, 1.2), col="red")
+# spectrum(ts.union(u1, u2))
+```
+
+
+From the frequency response plot, it can be observed that it is a low pass filter. The low frequencies are preserved, and high frequencies are dumped out.

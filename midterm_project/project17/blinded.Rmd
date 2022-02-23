@@ -1,0 +1,356 @@
+---
+title: "Time Series Analysis of Average Monthly PM2.5 in Detroit, Michigan"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    theme: spacelab
+---
+
+```{r, message=FALSE, warning=FALSE, echo=FALSE}
+library(tidyverse)
+library(forecast)
+library(tseries)
+
+for (i in 2:24){
+  if (i == 2){
+    df <- read.csv("data/ad_viz_plotval_data (2).csv",header=TRUE)
+  }
+  else{
+    n <- paste("data/ad_viz_plotval_data (", i, ").csv", sep="")
+    df <- rbind(df, read.csv(n,header=TRUE))
+  }
+}
+
+df <- df %>% separate(col = Date, into = c("M", "D", "Y"), sep = "/") %>%
+  group_by(Y, M) %>%
+  summarise(PM2.5 = mean(Daily.Mean.PM2.5.Concentration))
+df <- df[order(as.Date(paste(df$M, "01", df$Y, sep = "/"), format="%m/%d/%Y")),]
+data <- ts(df$PM2.5, start = c(2000,1), frequency = 12)
+
+```
+
+# Introduction
+
+Particulate matter are particles of solids and liquids in the air that are able to be inhaled. These particles are also known as particle pollution and are indicators of air pollution. PM2.5 refers to particulate matter that is 2.5 microns or smaller in diameter. These particles generally come from pollutants that harm the environment from sources like industrial buildings, powerplants, and vehicles. [1] Those who inhale PM2.5 are at great risk for many health complications, such as respiratory irritation and airway corrosion. These complications have the potential to be deadly. [2] Reducing the amount of PM2.5 in the air is important for public health, especially during a pandemic of a respiratory illness, as well as for the health of the environment. 
+
+In our study, we are looking into the PM2.5 level in the Detroit, Michigan area over the the span of 22 years (from 2000-2022). Detroit is a large city with an even larger overall metropolitan area that is known as the birthplace of the automotive industry and still to this day contains many potential sources of PM2.5. The EPA claims that the PM2.5 concentration in the United States has been following a downward trend in this time. [3] We will investigate if this trend is the same for Detroit, attempt to fit a model to this data to best determine the overall trend of the data, and find the frequency pattern for this data.
+
+With this analysis, we aim to answer the following questions:
+
+- Whether or not PM 2.5 data in Detroit area contain seasonal variation and can thus be fitted by a SARIMA Model?
+- Is there a consistent frequency pattern in PM 2.5 data in Detroit area from 2000 to 2022?
+
+There have been other midterm projects for this course that have addressed PM2.5 trends in other locations. [4, 5] While those projects also looked at PM2.5, none used data from the United States. Additionally, we didn't use these previous projects to guide our analysis, but we will comment on the differences and similarities between our findings and the findings of those other projects.
+
+
+# Data Exploration
+
+## Data Preparation
+
+For our analysis, we are using data from the EPA, specifically measurements from all of the air quality monitoring sites in the Detroit area from 2000 to 2022. [6] We averaged the daily PM2.5 measurement from all of the monitoring sites each month to obtain the dataset that we are using. After doing this, we have 266 observations, each being the average PM2.5 measurement for that month.
+
+```{r, echo=FALSE}
+plot(data, ylab="Average Monthly PM2.5")
+```
+
+The plot above shows the time series of average monthly PM2.5 level in Detroit. The trend of the data appears to be showing a decline since the year 2000, meaning that PM2.5 levels in Detroit have gotten lower over time. Though from 2010 to 2020, PM2.5 levels do not appears to continue to decline. So, overall, this trend is consistent with the overall trend of PM2.5 in the United States that the EPA reported. [3]
+
+## Decomposition Plots
+
+```{r, echo=FALSE}
+pmcomp <- decompose(data)
+plot(pmcomp)
+```
+
+The decomposition plots above show a declining trend, as we previously observed. The seasonal plot indicates potential for seasonality. [7] 
+
+
+# Model selection and analysis
+In this section, we want to find a time series model to fit the PM2.5 data, and make a prediction of monthly average PM2.5 levels in the following months.
+
+```{r, echo=FALSE}
+acf(data, main="ACF Plot of PM2.5 Levels")
+```
+
+The ACF plot of monthly average PM2.5 plot also shows unstationary of the time series data. In order to make the data look more stationary for ARMA model fitting, we transform
+the data $y_{1:N}$ to $z_{2:N}$, where $y$ is the original monthly average PM2.5, and $z$ is the first difference of monthly average PM2.5. [8]
+
+We calculate the first difference as the following:
+$$
+z_n = \Delta y_n = y_n - y_{n-1}, n\in \{2,\cdots, N\}
+$$
+
+## First difference
+```{r, echo=F}
+# first difference
+diff_data = diff(data)
+plot(diff_data, ylab="First Difference PM2.5", 
+     main="Time Series Plot of the First Difference of PM2.5 Levels")
+acf(diff_data, main="ACF Plot of the First Difference of PM2.5 Levels")
+```
+
+Both the time series plot and ACF plot show that the first difference data is stationary. Comparing with previous time series plot and ACF plot without first difference, data after first difference show more stationary than before.
+
+## ARIMA model
+We would fit a ARIMA($p,d,q$) model with $d=1$ using backshift operator $B$ as
+the following [8]:
+$$
+  \phi(B)[(1-B)^dY_n-\mu] = \psi(B)\epsilon_n
+$$
+where
+$$
+\begin{aligned}
+  \mu &= \mathbb{E}[X_n] \\
+  \phi(x) &= 1-\phi_1x-\phi_2x^2-\cdots-\phi_px^p \\
+  \psi(x) &= 1+\psi_1x+\psi_2x^2+\cdots+\psi_qx^q \\
+  \epsilon_n &\overset{\mathrm{iid}}{\sim}\mathcal{N}(\mu,\sigma^2) 
+\end{aligned}
+$$
+
+To figure out the best $p$ and $q$ for first difference monthly average PM2.5 levels at Detroit area, we fit several ARIMA($p,1,q$) models for a range of $p$ and $q$, ranging from 0 to 3.
+
+We use Akaike information criteria (AIC) as the standard for ARIMA model selection. AIC is derived as an approach to minimizing prediction error to make best model selection. The model with lowest AIC score is preferred. The formula of AIC is given by
+
+$$
+AIC = -2\times\ell(\theta^*)+2D
+$$
+
+where $\ell(\theta^*)$ is the maximum log likelihood, and $D$ is the number of parameters.
+
+```{r, echo=F, warning=F}
+aic_table = function(data, P, Q){
+  table = matrix(NA, P+1, Q+1)
+  for (p in 0:P){
+    for (q in 0:Q){
+      table[p+1, q+1] = Arima(data, order=c(p, 1, q))$aic
+    }
+  }
+  dimnames(table) = list(paste("AR", 0:P, sep=""), paste("MA", 0:Q, sep=""))
+  table
+}
+air_aic_table = aic_table(data, 3, 3)
+knitr::kable(air_aic_table, digits=2)
+```
+
+Based on the AIC table of ARIMA models above, the best performed model with lowest AIC score is ARIMA(2, 1, 3) model. The AIC score for ARIMA(2, 1, 3) is 1183.44.
+
+```{r, echo=FALSE}
+arima213 = Arima(data, order=c(2, 1, 3))
+arima213
+```
+
+
+## SARIMA model
+
+Since we are using monthly average as the data points, seasonal effect could not be ignored. Monthly seasonal ARIMA model may have a better fit. Similar to ARIMA model, SARIMA is a special case of ARIMA, where the AR, MA are factored into monthly polynomial in $B$ and seasonal polynomials in $B^k$, where $k$ is the period, along with updated differenced process$(1-B)^d(1-B^k)^DY_n$. 
+The general SARIMA$(p,d,q)\times(P,D,Q)_{12}$ model for monthly data has the
+following form [9]:
+$$
+\phi(B)\Phi(B^{12})[(1-B)^d(1-B^{12})^DY_n-\mu] = \psi(B)\Psi(B^{12})\epsilon_n
+$$
+where
+$$
+\begin{aligned}
+  \mu &= \mathbb{E}[X_n] \\
+  \phi(x) &= 1-\phi_1x-\phi_2x^2-\cdots-\phi_px^p \\
+  \psi(x) &= 1+\psi_1x+\psi_2x^2+\cdots+\psi_qx^q \\
+  \Phi(x) &= 1-\Phi_1x-\Phi_2x^2-\cdots-\Phi_px^P \\
+  \Psi(x) &= 1+\Psi_1x+\Psi_2x^2+\cdots+\Psi_qx^Q \\
+  \epsilon_n &\overset{\mathrm{iid}}{\sim}\mathcal{N}(\mu,\sigma^2) 
+\end{aligned}
+$$
+
+Similar to finding the optimal $p$ and $q$ for ARIMA model, we will fit several SARIMA models based on ARIMA(2,1,3) for a range of $P$ and $Q$, ranging from 0 to 2. We also use AIC as the standard to select the optimal model.
+
+```{r, echo=F, warning=F}
+seasonal_aic_table = function(data, P, Q){
+  table = matrix(NA, P+1, Q+1)
+  for (p in 0:P){
+    for (q in 0:Q){
+      table[p+1, q+1] = Arima(data, order=c(2, 1, 3), 
+                              seasonal=list(order=c(p, 0, q), period=12))$aic
+    }
+  }
+  dimnames(table) = list(paste("SAR", 0:P, sep=""), paste("SMA", 0:Q, sep=""))
+  table
+}
+sair_aic_table = seasonal_aic_table(data, 2, 2)
+knitr::kable(sair_aic_table, digits=2)
+```
+
+Based on the AIC table of seasonal ARIMA model above, the best performed model with lowest AIC score is 1181.245, where seasonal AR=1, seasonal MA=1. Hence, our optimal SARIMA model is SARIMA$(2,1,3)\times(1,0,1)_{12}$
+
+```{r, echo=FALSE}
+sarima213101 = Arima(data, order=c(2, 1, 3), 
+                     seasonal=list(order=c(1,0,1), period=12))
+sarima213101
+```
+
+The AIC score for the optimal ARIMA model is 1183.44, and the one for the optimal SARIMA model is 1181.24. The difference between AIC score is not much so we actually may not tell the difference between two models. We need further test to tell whether two models are different. We adopt a likelihood ratio tests for nested hypothesis [10]:
+
+$$
+\begin{aligned}
+H^{<0>}:\theta\in\Theta^{<0>} &= (\mu,\sigma^2,\phi_{1:2},\psi_{1:3}) \\
+H^{<1>}:\theta\in\Theta^{<1>} &= (\mu,\sigma^2,\phi_{1:2},\psi_{1:3},\Phi_1,\Psi_1) \\
+\ell^{<1>}-\ell^{<0>} & \approx \frac{1}{2}\chi^2_{D^{<1>}-D^{<0>}}
+\end{aligned}
+$$
+
+where 
+
+$$
+\begin{aligned}
+\ell^{<0>} &= \sup_{\theta\in\Theta^{<0>}}\ell(\theta) \\
+\ell^{<1>} &= \sup_{\theta\in\Theta^{<1>}}\ell(\theta) 
+\end{aligned}
+$$
+And $D$ is the dimension for each hypothesis.
+
+```{r}
+diff_log = sarima213101$loglik - arima213$loglik
+diff_chisq = 0.5*qchisq(0.95, df=3)
+print(diff_log>diff_chisq)
+```
+
+
+
+
+The difference between log-likelihood values is 3.114, while the cutoff value for half of the chisquare at confidence level 0.05 is 3.907. Hence, we conclude that there is no significant difference between ARIMA model and SARIMA model. Since we fit less parameters in ARIMA model, we preferred ARIMA(2,1,3) as our optimal model for monthly average PM2.5 levels.
+
+## Diagnostics
+
+We make a comparison between the raw data of PM2.5 level (black line) and the fitted values using ARIMA(2,1,3) model (red line). [11] It shows that the fitted values have the same trend as the raw data, but with smaller volatility. The residual plot shows that residuals are roughly symmetry about 0, in accordance with the zero mean assumption.
+
+```{r, echo=FALSE}
+par(mfrow=c(1,2))
+plot(data, main="Raw Data vs Fitted Values", ylab="PM2.5")
+lines(arima213$fitted, col="red")
+plot(arima213$residuals, ylab="Residuals", main="Residuals of ARIMA(2,1,3)")
+abline(h=0, col="red")
+```
+
+The ACF plot of residuals of ARIMA(2, 1, 3) model shows that the $\epsilon_n$ follows our assumption of white noise since all lags are fallen between the dashed lines. The qqplot of residuals of ARIMA(2, 1, 3) model shows a little heavier tail than the normal, given most points are falling around the qqline. In general, we agree that the residuals of ARIMA(2, 1, 3) follows the mean zero normal distributed assumption.
+
+```{r, echo=FALSE}
+par(mfrow=c(1,2))
+acf(arima213$residuals, main="ACF of ARIMA(2,1,3) Residuals")
+qqnorm(arima213$residuals)
+qqline(arima213$residuals)
+```
+
+## Prediction
+We make some future prediction of monthly average PM2.5 levels at Detroit area based on the ARIMA(2,1,3) model we built. [12]
+
+```{r, echo=FALSE, warning=FALSE}
+predarima = forecast(arima213, level=c(95), ylab="PM2.5 level")
+plot(predarima)
+```
+
+We can tell that the trend of PM2.5 levels are fluctuated in the range from 9 to 12. The fluctuation has a period of 6 months. However, the range of 95% confidence interval of the prediction value is large (ranging from 5 to 17) and we cannot explain why the wide range CI based on our analysis so far.
+
+
+# Frequency Pattern Analysis
+
+We are interested in finding the frequency pattern of PM 2.5 in Detroit area. 
+
+## Fourier Analysis
+
+First, we use Fourier analysis to find the frequency domain throughout 2000-2022 in general. 
+
+```{r echo=FALSE}
+s_r = spec.ar(data, plot=FALSE)  # parametric estimation based on AR model
+s_p = spectrum(data, spans = c(10,10), plot=FALSE)  # nonparametric  
+plot(s_r$freq, s_r$spec, type = "l", log = "y", ylab = "spectrum", xlab = "frequency", 
+    bty = "l")
+lines(s_p$freq, s_p$spec, lty = 2)
+legend("topright", c("parametric", "nonparametric"), lty = 1:2, bty = "n")
+```
+
+In Fourier analysis, raw data are converted into frequency domain by the formula $$\lambda(\omega)=\int_{-\infty}^\infty \gamma(x)e^{-2\pi i\omega x}dx$$
+where $\lambda(\omega)$ is the Fourier transform [13] of the autocorrelation function $\gamma(h)$ (of an AR model in this case). [14] For the periodogram shown above [15], the parametric periodogram is built by parametric estimation based on AR model chosen by AIC criteria. [16] The non-parametric periodogram is built by manually chosen parameter. In both periodograms, there are three main peaks occur at around frequency = 2, frequency = 4 and frequency = 6. 
+
+```{r echo=FALSE}
+print(paste("Maximum spectrum in the parametric periodogram at frequency", s_r$freq[which.max(s_r$spec)]))
+print(paste("Maximum spectrum in the non-parametric periodogram at frequency", s_p$freq[which.max(s_p$spec)]))
+```
+
+The maximum spectrum in the parametric periodogram occurs at frequency = 2.02, and the maximum spectrum in the non-parametric periodogram occurs at frequency = 4.044. That is to say, the main period indicated by parametric periodogram for PM 2.5 data in Detroit area is about half a month, and the main period indicated by parametric periodogram for PM 2.5 data in Detroit area is about one fourth of a month.\
+However, the difference between these three peaks (at around 2, 4, 6) are not significantly large, so we can't conclude which one of these three frequencies is the main frequency pattern throughout the data. Also, we can observe from the raw data plot that the variances are different for data before and after 2010. Hence, we suspect that the frequency patterns are also different for data before and after 2010.
+
+## Wavelet Analysis
+
+Fourier analysis assumes that the frequency throughout the entire time interval of the data is constant, whereas that's certainly not the case for the PM2.5 data in Detroit area from 2000 to 2022. To examine the different frequency patterns before and after 2010, we will introduce wavelet analysis. Wavelet utilizes the formula $$\lambda(a,\tau)=\frac{1}{\sqrt{a}}\int_{\infty}^\infty \gamma(x)\psi(\frac{x-\tau}{a})dt $$ for different choice of wave functions $\psi(x)$, where $a$ is the scale controlling the stretch extension of the wave function and $\tau$ is the translation parameter controlling the movement of the wave function in the scope of time. [17] The wave function we use [18] is $$\psi(x)=\pi^{-\frac{1}{4}}e^{i\omega x}e^{-\frac{-x^2}{2}}$$ 
+Instead of converting raw data into the frequency domain, wavelet transformation converts data into the frequency and time domains, such that we can analyze the frequency patterns within the scope of time. 
+
+```{r include=FALSE}
+library(WaveletComp)
+my.w <- analyze.wavelet(df, "PM2.5",
+                        loess.span = 1,
+                        dt = 1, 
+                        dj = 1/250,
+                        lowerPeriod = 1/16,
+                        upperPeriod = 128,
+                        make.pval = TRUE, n.sim = 10)
+```
+
+```{r echo=FALSE}
+wt.image(my.w, n.levels = 250,legend.params = list(lab = "wavelet power levels"),
+         spec.time.axis = list(at = seq(1, 265, by = 12),labels = seq(2000, 2022)))
+
+```
+
+From the heatmap [18] shown above, before 2010, there are some significant period patterns (with high wavelet power level and color of red) ranging from 6 months to 3 months (1/6 to 1/3 in frequency domain). Most of these patterns vanish after 2010 and the only consistent period pattern throughout 2000 to 2022 is the period pattern of 6 months (1/6 in frequency domain). That is, we can conclude from wavelet analysis that the main consistent pattern for PM 2.5 data in Detroit area from 2000 to 2022 has a frequency of 1.6 or a period of 6 months. This conclusion doesn't agree with the three main frequency patterns (having a period of 1/2, 1/4, and 1/6 respectively) we observe in Fourier analysis. 
+
+# Discussion
+
+Comparing our analysis to the 2021 midterm projects using PM2.5 data, both of those projects also did not find significant seasonality and the best model in both of those reports were without seasonality. Additionally, the Beijing PM2.5 project also dealt with decreasing PM2.5 levels over a period of many years. In the Beijing PM2.5 analysis, they found a 1 year period for their data. [4] In the Delhi PM2.5 analysis, they found a period of .77 to 1 year. [5] This is different than both of the potential periods that we found in this analysis. So, according to our results, Detroit's PM2.5 frequency pattern differs from that in Beijing and Delhi.
+
+# Conclusion
+
+The average monthly PM2.5 level in the Detroit area has been decreasing from 2000 to 2022, which follows the national trend. We found the best model for monthly average PM2.5 levels in Detroit to be an ARIMA(2, 1, 3) model after comparing with a SARIMA(2, 1, 3) and finding no meaningful difference between the two. This leads us to conclude that there is no meaningful seasonality in our Detroit PM2.5 data. 
+
+From the ARIMA(2, 1, 3) output, we find that the final formula for this model is:
+
+$$
+  \phi(B)[(1-B)Y_n-\mu] = \psi(B)\epsilon_n
+$$
+where
+$$
+\begin{aligned}
+  \mu &= -0.01576 \\
+  \phi(x) &= 1-0.9979x+0.9996x^2 \\
+  \psi(x) &= 1-1.8808x+1.8794x^2-0.8707x^3 \\
+  \epsilon_n &\overset{\mathrm{iid}}{\sim}\mathcal{N}(0,4.802) 
+\end{aligned}
+$$
+
+
+To determine the frequency pattern of our data, we first used Fourier analysis and found that this method indicated a period of roughly 6 months for our data. Then, we performed wavelet analysis to further investigate frequency pattern and found that, from 2000 to 2022, our data has a period of 6 months.
+
+# Sources
+
+1. https://www.epa.gov/pm-pollution/particulate-matter-pm-basics
+2. https://www.ncbi.nlm.nih.gov/pmc/articles/PMC4740125/
+3. https://www.epa.gov/air-trends/particulate-matter-pm25-trends
+4.  Previous midterm project on PM2.5 https://ionides.github.io/531w21/midterm_project/project14/project.html
+5. Previous midterm project on PM2.5 https://ionides.github.io/531w21/midterm_project/project12/project.html
+6.  Data: https://www.epa.gov/outdoor-air-quality-data/download-daily-data (The data compilation process was detailed in the introduction section)
+7. https://rpubs.com/davoodastaraky/TSA1
+8. STATS 531 Lecture Notes, Chapter 6, P11
+9. STATS 531 Lecture Notes, Chapter 6, P15
+10. Lecture Notes, Chapter 5 Parameter estimation and model identification for
+ARMA models, Likelihood ratio tests for nested hypotheses, P18
+11. Stats531, W21, Midterm Project, . US Candy Production Data,
+https://ionides.github.io/531w21/midterm_project/project02/project.html
+12. W. Wang and Y. Guo, "Air Pollution PM2.5 Data Analysis in Los Angeles Long
+Beach with Seasonal ARIMA Model," 2009 International Conference on Energy and
+Environment Technology, 2009, pp. 7-10, doi: 10.1109/ICEET.2009.468.
+13. STATS 531 Lecture Slides, Chapter 7, P10
+14. STATS 531 Lecture Slides, Chapter 4, P5
+15. Spectral estimation in R https://lbelzile.github.io/timeseRies/spectral-estimation-in-r.html#smoothing-and-seasonally-adjusted-values
+16. STATS 531 Lecture Slides, Chapter 5, P21
+17. K. Wirsing (2020). Wavelet Theory. Ch.5 Continuous wavelet. https://www.intechopen.com/chapters/74096
+18. WaveletComp 1.1:A guided tour through the R package. https://cran.r-project.org/web/packages/WaveletComp
+19. Previous midterm projects (used for reference on what this project generally should look like) https://ionides.github.io/531w21/midterm_project/
+20. Detrending in Time Series in R. https://koalatea.io/r-detrending-time-series/ 

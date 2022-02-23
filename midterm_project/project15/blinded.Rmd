@@ -1,0 +1,384 @@
+---
+title: "Ice Sheet Extent in the Bering Sea"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo=FALSE,message=FALSE)
+library(tidyverse)
+library(knitr)
+library(TSA)
+```
+
+
+## Introduction
+
+Ice sheets in the Northern Hemisphere have become of interest to the scientific community due to their influence on the global climate [1]. Ice sheets are large bodies of constantly-moving ice that are found in cold areas with heavy snow accumulation [1]. It has been hypothesized by climate scientists that despite the seasonal changes in ice due to snow accumulation and the loss of sea ice to the ocean, the volume of these ice sheets could be a useful measure for the extent of climate change. 
+
+The impacts of sea ice loss are being felt by communities and their economies around the world. One region in particular feeling these impacts is that near the Bering Sea, where sea ice levels are the lowest they have been in the last 5,500 years [2]. This threatens the livelihood of coastal communities, where home destruction due to rising sea levels and ecosystem destruction due to a lack of winter sea ice have both been observed in recent years [3]. In the following analysis, we study the seasonality and trends of sea ice in the Bering Sea from January 2006 to the present by fitting a series of models.
+
+## Data
+
+We use data from the Multisensor Analyzed Sea Ice Extent project hosted by the National Snow and Ice Data Center [4]. The data contain the area, in square kilometers, of ice sheets in different regions in the Northern Hemisphere. For this project, we utilize data from January 1st, 2006 up to February 2nd, 2022.  
+
+```{r readdata}
+df <- read_csv("ice_sheet_clean.csv")
+df$Frequency = rep("Daily", nrow(df))
+df2 <- df %>% select(c("Bering_Sea", "date", "year", "month", "day", "Frequency"))
+```
+
+```{r create yearly monthly avg}
+yearly <- df2 %>% group_by(year) %>% summarise(Bering_Sea = mean(Bering_Sea), Date = min(date)) %>% filter(year != 2022)
+yearly$Frequency <- rep("Yearly", nrow(yearly))
+monthly <- df2 %>% group_by(year, month) %>% summarise(Bering_Sea = mean(Bering_Sea), Date = min(date))
+monthly$Frequency = rep("Monthly", nrow(monthly))
+```
+
+```{r create full data}
+df2$Date = df2$date
+dfFull = df2 %>% select(c(Date, Bering_Sea, Frequency)) %>% bind_rows(monthly) %>% bind_rows(yearly)
+```
+
+```{r plot time}
+ggplot(dfFull) + geom_line(aes(x = Date, y = Bering_Sea, color = Frequency), size = 1) +
+  ggtitle("Bering Sea Ice Daily Measure, Monthly and Yearly Averages") +
+  ylab("Bering Sea Ice Area (square km)") +
+  theme_bw() 
+```
+
+**Figure 1:** Daily measure of sea ice in the Bering Sea region, as well as moving monthly and yearly averages of sea ice extent. All measures are in square kilometers.
+
+```{r hist}
+ggplot(df2) + geom_histogram(aes(x = Bering_Sea), binwidth = 10000, fill = "blue") + 
+  theme_bw() + ggtitle("Distrbution of Bering Sea Ice Extent") +
+  xlab("Ice Extent (square km)") +
+  ylab("Count of Days Observed")
+
+```
+
+**Figure 2:** Histogram of daily ice extent measurements for the Bering Sea, $km^2$.
+
+Consistent with previous studies [3], the area of sea ice for the years 2018 and 2019 was far lower than average, and these years marked the lowest yearly average sea ice for all of the years of data. In general, it does appear that the presence of sea ice is beginning to reach higher peaks during the winter months in more recent years, after a sharp decrease in average yearly sea ice beginning in 2012. 
+
+By observing the similarities between the monthly and daily frequency lines in Figure 1, we see that the monthly average ice extent is a good approximation of the daily ice extent for each month. Because of the computational complexity of performing modeling with the daily data, as well as our interest in the seasonality of the data, we choose to use the monthly data for our analysis. 
+
+As made obvious in Figure 1 above, there are several days throughout each year where there is almost no sea ice in the Bering Sea. These times are interesting in terms of changing biodiversity within the region's waters, when marine life that could not survive the previously cold waters migrate from the south to the Bering Sea region [3]. 
+
+```{r plot no ice days}
+no_ice <- df2 %>% group_by(year) %>% summarise(count = sum(Bering_Sea <= 100)) %>% filter(year != 2022)
+ggplot(no_ice) + geom_line(aes(x = year, y = count), size = 1) + theme_bw() +
+  xlab("Year") + ylab("Number of Days") +
+  ggtitle("Days with Less than 100 square kilometers of Sea Ice per Year")
+```
+
+**Figure 3:** Number of days per year where sea ice area in the Bering Sea was less than 100 $km^2$, 2006-2021.
+
+One useful property of time series data that can help us visually describe patterns in the data is the autocovariance function. This function of indices $m, n$ is written as [5] 
+
+$$\gamma_{m,n}=E[(Y_m - \mu_m)(Y_n-\mu_n)].$$
+
+
+Later in this analysis, we fit covariance stationary models to the ice sheet data, meaning that the covariance between two observations depends only on their time difference under these models [5]. In this case, we can rewrite the autocovariance function as
+
+$$\gamma_h = \gamma_{n, n+h}$$,
+
+where $h$ is the lag, or number of time units separating the two observations. In our analysis, one month is the time unit of interest. Using this information, we can derive the sample autocovariance function for our Bering Sea ice extent data, which is eequal to
+
+$$\hat{\gamma}_h = \frac{1}{N}\sum_{n=1}^{N-h}(y_n^*-\hat{\mu}_n)(y_{n+h}^*-\hat{\mu}_{n+h})$$
+
+The plot of the autocovariance function for the Bering Sea ice extent data is shown in Figure 4 below. It is very clear from this autocovariance plot that there is some seasonality in the data. The distance from one peak to the next is the length of a cycle in our data. In this case, the data appear to complete a cycle once every 12 months. This is what we expect to see based on the yearly pattern observed in Figure 1. 
+
+```{r}
+sea_ice <- monthly$Bering_Sea
+acf(sea_ice, main = "Bering Sea Ice Extent Autocovariance Function")
+```
+
+**Figure 4:** Autocovariance function for Bering Sea ice extent data.
+
+### Exploring Data Transformations
+
+A common technique in time series analysis is transforming the data in order to learn more information about the data or deal with trends in the data. Let us consider two potential transformations for the data: a first differences transformation and a logarithmic transformation.
+
+The first difference transformation for a time series of values $Y^*_{1:N}$ can be defined by $z_{2:N}$, where $z_n$ is equal to: [5]
+
+$$z_n = \Delta y_n^* = y_n^* - y_{n-1}^*$$
+
+This calculation gives us a series of $N-1$ first differences. The first difference transformation results are shown in Figure 5 below. It appears from first glance that performing this transformations does not reveal any interesting trends or patterns that were not already observed in the original data. This tells us that there isn't much justification for using this transformed data. 
+
+```{r}
+full_trans <- tibble(Data = rep("Original", length(sea_ice)), Date = monthly$Date, Ice = monthly$Bering_Sea)
+diff_trans <- tibble(Data = rep("First Difference", length(sea_ice)-1), Date = monthly$Date[-1], Ice = diff(monthly$Bering_Sea))
+sea_ice[sea_ice < 1] <- 1
+log_trans <- tibble(Data = rep("Logarithmic", length(sea_ice)), Date = monthly$Date, Ice = log(sea_ice))
+full_trans <- full_trans %>% bind_rows(diff_trans)
+ggplot(full_trans) + geom_line(aes(x = Date, y = Ice, color = Data), size = 1)+ 
+  ggtitle("Original and First Differences Transformed Data") +
+  ylab("Bering Sea Ice Area (square km)") +
+  theme_bw() 
+```
+
+**Figure 5:** First differences data plotted alongside the original data. 
+
+Next, consider a natural logarithmic transformation of the data, or $z_{1:N} = \ln(Y^*_{1:N})$. Our raw data includes several values of zero throughout the data, which poses a problem. This problem has two potential solutions; change all of the values in the data less than one to be equal to one, or exclude data with a value of zero from our analysis. Since it is crucial for our later analysis to not exclude these values of zero, we consider the first of these options. The results of this transformation after making the necessary adjustments to the data are shown in Figure 6 below.
+
+```{r}
+ggplot(log_trans) + geom_line(aes(x = Date, y = Ice), size = 1) + 
+  ggtitle("Logarithm-Transformed Data") +
+  ylab("Transformed Bering Sea Ice Area") +
+  theme_bw() 
+```
+
+**Figure 6:** Bering Sea ice extent data with a natural logarithm transformation.
+
+One benefit of the logarithmic transformation is that the noticeable decrease in sea ice between 2015 and 2018 is less obvious after transforming the data. However, one of the motivators for our analysis is understanding the stark difference in sea ice extent during this period, and seeing if there is any trend to the sea ice extent. For this reason, as well as to avoid excess data manipulation, we choose to proceed with modeling and analysis using our original Bering Sea ice extent data. 
+
+
+## ARMA Modeling
+```{r}
+df <- read.csv("Monthly Averages.csv")
+names(df)[names(df) == 'Average.of.X.12..Bering_Sea'] <- "Bering_Sea"
+```
+
+
+```{r}
+aic_table <- function(data,P,Q){
+  table <- matrix(NA,(P+1),(Q+1))
+  for(p in 0:P) {
+    for(q in 0:Q) {
+      table[p+1,q+1] <- arima(data,order=c(p,0,q))$aic
+    }
+  }
+  dimnames(table) <- list(paste("AR",0:P, sep=""),
+                          paste("MA",0:Q,sep=""))
+  table
+}
+#plot(c(1:194),df$Average.of.X.1..Beaufort_Sea, type = 'l')
+#ice_level_aic_table <- aic_table(df$Average.of.X.1..Beaufort_Sea,5,5)
+#kable(ice_level_aic_table,digits=2)
+```
+
+
+We begin by attempting to fit an autoregressive moving average (ARMA) model to our data. The ARMA(p, q) model is defined as  
+
+$$Y_{n} = \phi_{1}Y_{n-1} + \phi_{2}Y_{n-2} + \dots + \phi_{p}Y_{n-p}+ \varepsilon _{n} +  \psi_{1}\varepsilon _{n-1} +\dots+ \psi _{q}\varepsilon _{n-q}, $$
+
+where $\phi_p$ are the autoregressive parameters, $\psi_q$ are the moving average parameters, and $\varepsilon_n$ are white noise errors [5]. For the purposes of our analysis, we assume that these errors are from a normal distribution.
+
+In order to find the best model, we use the Akaike Information Criterion (AIC) as our loss function, which aims to find a balance between the likelihood of our model and the number of parameters it requires. Naturally, we're looking for the highest likelihood in a model, but we have also ensure that we aren't encountering any overfitting issues. The AIC helps include the latter as a priority, and is calcuated using the formula
+
+$$AIC = 2k - 2ln({\widehat{L}})$$,
+
+where $k$ is the number of parameters and $ln({\widehat{L}})$ is the log-likelihood of the model.
+```{r}
+ice_level_aic_table <- aic_table(df$Bering_Sea,5,5)
+kable(ice_level_aic_table,digits=2)
+```
+
+**Table 1:** AIC result for each combination of parameters $p$ and $q$ in the ARMA model.
+
+We run a function that calculates the AIC for combinations of ARMA(p,q) models where $p,q \in {[1,5]}$ are integers. Our AIC table suggests that ARMA(2,4) appears to be the best model, so we will simulate this model and present the results. This model can be written using the formula
+
+$$Y_{n} = \phi_{1}(Y_{n-1}) + \phi_{2}(Y_{n-2}) + \varepsilon _{n} +  \psi_{1}\varepsilon _{n-1} + \psi _{2}\varepsilon _{n-2} + \psi _{3}\varepsilon _{n-3} + \psi _{4}\varepsilon _{n-4}$$
+
+```{r}
+arma1 <- arima(df$Bering_Sea, order = c(2,0,4))
+arma1
+```
+
+**Table 2:** Results of the ARMA(2,4) model.
+
+
+```{r}
+t(confint(arma1))
+```
+
+**Table 3:** 95% confidence intervals for the ARMA(2,4) coefficient estimates.
+
+### Diagnostics for ARMA(2,4) model
+
+```{r}
+acf(residuals(arma1), main = "ACF Plot for the ARMA(2,4) Model Residuals")
+```
+
+**Figure 7:** Plot of the autocovariance function for the residuals of the ARMA(2,4) model.
+
+```{r}
+qqnorm(arma1$residuals, main = "Q-Q Plot for ARMA(2,4) Model Residuals")
+qqline(arma1$residuals)
+```
+
+**Figure 8:** Quantile-quantile plot of residuals for the ARMA(2,4) model.
+
+The residuals in the ACF show us that our confidence intervals are violated multiple times and specifically, more than we would expect under the 5% significance level in order to assume that our residuals are uncorrelated. We see clear periodicity at a lag of 6, suggesting that fitting a SARMA model might be an appropriate further investigation to create a more accurate model for our data that also satisfies our requirement of uncorrelated errors. We take a closer look at this in the next section. 
+
+The quantile-quantile plot also shows a slight deviation towards the ends of the line, but for the most part appears to align with our normality assumption. Since we have previously discovered that difference and log transformations don't appear to have the desired effect on the data, if the deviance towards the ends is believed to be an issue, a possible redemptive strategy would be to search for a larger dataset such that the Central Limit Theorem will hold.
+
+## Trend Analysis
+
+Another important factor, particularly in the wider context of this time series, is the presence of trend. This could be significant, not just to assessing the validity of the claim in the aforementioned paper, but also in understanding the seriousness of the issue of melting ice levels across the world.
+
+We will test the statistical significance of our trend using the log-likelihood test. We start by plotting our original time series against a standard least squares linear regression model, to see if there is any visual trend that we can observe.
+
+We then return our summary of the ARMA(2,4) model, whilst adding the index as a trend parameter and use the knowledge that 2 times the difference between the log-likelihoods follows a $\chi_1^{2}$ distribution
+
+```{r}
+df$index <- 1:nrow(df)
+lm_fit <- lm(Bering_Sea ~ index, data = df)
+anova(lm_fit)
+
+##Plot SLR trend with data
+yr <- 1:194
+Z <- cbind(1,yr)
+beta <- coef(lm_fit)
+prediction <- Z%*%beta
+#prediction <- predict(lm_fit,list(c(2006:2022)))
+```
+
+**Table 4:** Analysis of variance (ANOVA) results for the standard least squares regression model.
+
+```{r}
+plot(Bering_Sea~index, data = df, ty = "l", xlim = range(yr), ylim = range(c(df$Bering_Sea, prediction), na.rum = TRUE), main = "Line Plot with Trend", xlab = "Index (Months after January 2006)", ylab = "Bering Sea Ice Levels (square km)")
+lines(x = yr, y = prediction, col = "red")
+```
+
+**Figure 9:** Monthly Bering Sea ice sheet extent, with the trend line plotted in red.
+
+We can clearly see a downward trend, with the peaks consistently falling from a high point in April 2012. The simple least squares model fits the ice levels as our target and the index as our single covariate ($Y_i = \beta_0 + \beta_1X_{i1} + \varepsilon_i$).This plot confirms a clear downward trajectory and the corresponding ANOVA table informs us that this is significant at both the 5% and 1% levels.
+
+We now present the summary of our ARMA(2,4) model with the trend parameter.
+
+```{r}
+arma2 <- arima(df$Bering_Sea, order = c(2,0,4), xreg = df$index)
+arma2
+```
+
+**Table 5:** Results of the ARMA(2,4) model with the trend parameter included.
+
+
+Using this model and the previous ARMA(2,4) model that we had fitted from the AIC tables, we calculate the log-likelihood as follows:
+
+$$H_0:\beta_0 = 0$$
+
+$$H_1:\beta_0 \neq 0$$
+
+$$\Delta =  -2504.51 - -2538.23 = 33.72$$
+
+$$\frac{1}{2}\Delta \sim \chi_{1}^2$$
+
+This result has a p-value = 2.220446e-16, which means we can reject $H_0$ at both the 1% and 5% levels, concluding that our trend value is significant.
+
+The natural question after observing the significance of the trend is then "when does the mean function become 0?" We calculate this as $E[X|Y = 0]$, which gives us an answer of 29.8 years after the intercept (January 2006), which equates to the end of 2035.
+
+```{r read data}
+dat <- read.table(file="Monthly Averages.csv",sep=",",header=TRUE)
+ice_level <- as.vector(t(dat[2:194,15]))
+```
+
+## Seasonality
+
+
+Our previous study has shown that ARMA(2,4) model would useful in the regression of ice level data. From the spectrum of our model, we may want to consider adding in one seasonality terms into our error model, encoding the yearly variation.[5]
+
+```{r spectrum}
+ice_spec = spectrum(ts.union(ice_level),spans=c(3,5,3), main="Smoothed Ice Level Periodogram")
+abline(v=ice_spec$freq[which.max(ice_spec$spec)], lty="dotted")
+abline(v=ice_spec$freq[which.max(ice_spec$spec[20:100])+19], lty="dotted")
+
+```
+
+**Figure 10:** Periodigram of Bering Sea ice sheet data.
+
+There appears to be several dominant frequencies. The domain frequencies are given by:
+```{r max freq}
+ice_spec$freq[which.max(ice_spec$spec)]
+ice_spec$freq[which.max(ice_spec$spec[20:100])+19]
+```
+
+The first is $ω_{1}=0.085$, which corresponds to a period of $1/0.085≈12$ months, or about $1$ year. This period fits our climate knowledge and the patterns we have observed in earlier analysis, so we will include this in our model fitting below. There is also a noticeable maximum at around $ω_{2}=0.165$; however, this corresponds to the second harmonic of $ω_{1}$, so we can ignore this. 
+
+### Seasonal ARMA Model Selection
+
+Given our analyses above, we find it appropriate to conduct a linear regression with some sort of seasonal ARMA (SARMA) process. The regression equation is shown as below:
+
+$$Y_{n}=\beta_{0}+\beta_{1} t_{n}+\beta_{2} t_{n}^{2}+\beta_{3} t_{n}^{3}+\eta_{n}$$
+
+where $Y_{n}$ is the ice level of Bering sea at time $t_{n}$, $\beta_{i}$ is the estimated coefficient, and $\eta_{n}$ is the SARMA process.
+
+In the previous section, we confirmed that the yearly component needs to be introduced in the SARMA model. Therefore, we have our SARMA $(p,q) \times (P,Q)_{12}$ model as shown below: [5]
+
+$$\phi(B) \Phi\left(B^{12}\right)\left[Y_{n}-\left(\beta_{0}+\beta_{1} t+\beta_{2} t^{2}+\beta_{3} t^{3}\right)\right]=\psi(B) \Psi\left(B^{12}\right) \varepsilon_{n}$$
+
+From our previous analysis, we have concluded that the ARMA $(2,4)$ model performs well. Now we only start by choosing an appropriate $(P,Q)$. The AIC table of some tested $(P,Q)$ is shown as below.
+
+```{r aic table}
+aic_table <- function(data,P,Q){
+  table <- matrix(NA,(P+1),(Q+1))
+  for(p in 0:P) {
+    for(q in 0:Q) {
+      table[p+1,q+1] <- arima(ice_level,
+order=c(2,0,4), seasonal=list(order=c(p,0,q),period=12))$aic
+    }
+  }
+  dimnames(table) <- list(paste("P",0:P, sep=""),
+                          paste("Q",0:Q,sep=""))
+  table
+}
+```
+```{r seasonal aic}
+aic_table(ice_level,1,1)
+
+```
+
+**Table 6:** AIC values for $P$ and $Q$ parameter values in $[0,1]$ for the SARMA model.
+
+The lowest AIC value is from the $(1,1)$ pair of parameters. Therefore, we will consider the SARMA $(2,4) \times (1,1)$ model in our following analysis.[5]
+
+```{r seasonality model}
+
+ice_sarma24x11 <- arima(ice_level,
+order=c(2,0,4),
+seasonal=list(order=c(1,0,1),period=12)
+)
+
+```
+
+```{r}
+ice_sarma24x11
+```
+
+**Table 7:** Coefficients and their standard errors from the SARMA $(2,4) \times (1,1)$ model.
+
+
+### Model Evaluation
+
+The distribution of the residuals is analyzed to evaluate our model. The ACF plot for the SARMA model above is shown in Figure 11 below. The residuals of our model show only one small striking pattern of autocorrelation. Additionally, based on the quantile-quantile plot in Figure 12 below, the residuals generally look to be normally distributed, although there is a lot of variance from a standard normal quantile when observing the lower and upper quantiles in the plot.[5] This suggests that the normality assumption may not be as strong as previously thought.
+
+```{r model evaluaton}
+acf(residuals(ice_sarma24x11), main = "ACF Plot for SARMA(2,4) x (1,1) Model")
+```
+
+**Figure 11:** ACF plot for the SARMA $(2,4) \times (1,1)$ model.
+
+```{r }
+qqnorm(ice_sarma24x11$residuals, main = "Q-Q Plot for SARMA(2,4) x (1,1) Model")
+qqline(ice_sarma24x11$residuals)
+```
+
+**Figure 12:** Quantile-quantile plot for the SARMA $(2,4) \times (1,1)$ model.
+
+## Conclusion
+
+We have fit three different time series models (ARMA(2,4), ARMA(2,4) with trend, SARMA $(2,4) \times (1,1)$) to observe patterns and trends in the Bering Sea ice sheets. As noted by the trend model, there is a startling downward trend in the area of ice sheets in the Bering Sea. This has the potential to have drastic effects on the communities surrounding this region, especially as the melting sea ice causes a rise in sea levels. Using the ARMA and trend analyses performed earlier, we have predicted that the average amount of sea ice in the Bering Sea will reach zero by the year 2035, which is much sooner than it seems. 
+
+
+## References
+
+1. Vaughan, David G. "Ice sheets: indicators and instruments of climate change." Climate Change. Elsevier, 2009. 391-400.
+
+2. Jones, Miriam C., et al. "High sensitivity of Bering Sea winter sea ice to winter insolation and carbon dioxide over the last 5500 years." Science advances 6.36 (2020): eaaz9588.
+
+3. Rosen, Yereth. "How the loss of Bering Sea ice is triggering cascading effects for the ecosystem — and the people and wildlife that depend on it". https://www.arctictoday.com/how-the-loss-of-bering-sea-ice-is-triggering-cascading-effects-for-the-ecosystem-and-the-people-and-wildlife-that-depend-on-it/#:
+
+4. U.S. National Ice Center, National Snow and Ice Data Center, Multisensor Analyzed Sea Ice Extent - Northern Hemisphere. https://nsidc.org/data/masie
+
+5. Ionides, Edward. Statistics 531, Winter 2022 Course Notes.
