@@ -1,0 +1,714 @@
+---
+title: "The Silver Age of Cinema: Modeling Movie Revenue Over Time"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+bibliography: midterm.bib
+csl: https://raw.githubusercontent.com/citation-style-language/styles/master/cell-numeric.csl
+---
+
+```{r libs, echo=FALSE, include=FALSE}
+library(readr)
+library(tidyverse)
+library(lubridate)
+library(forecast)
+library(knitr)
+library(quantmod)
+library(tidyquant)
+library(astsa)
+```
+
+```{r, , | user defined functions, echo = F,cache = TRUE, include=F}
+# user functions
+check_roots = function(mdl){
+  
+  coefs = coef(mdl)
+  ars = coefs[startsWith(names(coefs), 'ar')]
+  mas = coefs[startsWith(names(coefs), 'ma')]
+  
+  print('ar roots:')
+  print(abs(polyroot(c(1, -ars))))
+  print('ma roots:')
+  print(abs(polyroot(c(1, mas))))
+  
+}
+likratiotest = function(mdlA, mdl0){
+  teststat = 2*(as.numeric(logLik(mdlA))-as.numeric(logLik(mdl0)))
+  dfdiff = length(coef(mdlA)) - length(coef(mdl0))
+  return(pchisq(teststat, df=dfdiff, lower.tail = FALSE ))
+}
+ARMA_tables <- function(data,P,Q, xreg = NULL){ 
+  aic_table <- matrix(NA,(P+1),(Q+1)) 
+  lrt_table <- matrix(NA,(P+1),(Q+1)) 
+  mdl0 = arima(data,order=c(0,0,0),
+               seasonal=list(order=c(1,0,1),period=12),
+               optim.control=list(maxit = 1000), xreg = xreg)
+  for(p in 0:P) {
+    for(q in 0:Q) {
+      try({mdl = arima(data,order=c(p,0,q),
+                      seasonal=list(order=c(1,0,1),period=12),
+                      optim.control=list(maxit = 1000), xreg = xreg)
+        lrt_table[p+1,q+1] = likratiotest(mdl, mdl0)
+        aic_table[p+1,q+1] = mdl$aic}, T)
+    }
+  }
+  dimnames(aic_table) <- list(paste("AR",0:P, sep=""),
+                              paste("MA",0:Q,sep=""))
+  dimnames(lrt_table) <- list(paste("AR",0:P, sep=""),
+                              paste("MA",0:Q,sep=""))
+  return(list(aic_table, lrt_table))
+}
+format_cells <- function(df, rows ,cols, value = c("italics", "bold", "strikethrough")){
+  
+  # select the correct markup
+  # one * for italics, two ** for bold
+  Map <- setNames(c("*", "**", "~~"), c("italics", "bold", "strikethrough"))
+  markup <- Map[value]  
+  
+  for (r in rows){
+    for(c in cols){
+      
+      # Make sure values are not factors
+      df[[c]] <- as.character( df[[c]])
+      
+      # Update formatting
+      df[r, c] <- paste0(markup, df[r, c], markup)
+    }
+  }
+  
+  return(df)
+}
+localMaxima <- function(x) {
+  # https://stackoverflow.com/a/6836924
+  # Use -Inf instead if x is numeric (non-integer)
+  y <- diff(c(-.Machine$integer.max, x)) > 0L
+  rle(y)$lengths
+  y <- cumsum(rle(y)$lengths)
+  y <- y[seq.int(1L, length(y), 2L)]
+  if (x[[1]] == x[[2]]) {
+    y <- y[-1]
+  }
+  y
+}
+coef_table = function(arima_fit, signif = 3){
+  pe = arima_fit$coef
+  se = sqrt(diag(arima_fit$var.coef))
+  Z = pe/se
+  pval = (1-pnorm(abs(Z)))*2
+  dfcoef = tibble(' '=names(pe), 'coef' = pe, 'se'=se, 'Z score'=Z, 'p-val'=pval)
+  dfcoef[,2:4 ] = signif(dfcoef[,2:4 ], signif)
+  return(dfcoef)
+}
+
+check_roots_general = function(mdl){
+  return(list('ar' = abs(polyroot(c(1, -mdl$model$phi))),
+              'ma' = abs(polyroot(c(1, mdl$model$theta)))))
+}
+
+
+sim_study = function(data, xreg, order, seasonal, iter = 100, seed = 108){
+  # takes input for arima model returns the simulation fits for the coefficients
+  mdl = arima(data,
+              order=order,
+              seasonal=seasonal,
+              xreg = xreg)
+  
+  set.seed(seed)
+  params = coef(mdl)
+  ar = params[grep("^ar",names(params))]
+  ma = params[grep("^ma",names(params))]
+  sar = params[grep("^sar",names(params))]
+  sma = params[grep("^sma",names(params))]
+  sigma = sqrt(mdl$sigma2)
+  intercept = params["intercept"]
+  
+  # calc trend
+  rest = setdiff(names(params), c(names(c(ar, ma, sar, sma)), 'intercept'))
+  trend = as.matrix(xreg)%*%params[rest]+intercept
+
+  theta = matrix(NA,nrow=iter,ncol=length(params),
+                 dimnames=list(NULL,names(params))) 
+  
+  for(j in 1:iter){
+    try({
+      sim_res = sarima.sim(ar = ar, ma = ma, 
+                           sar = sar, sma = sma, S = 12,
+                           rand.gen = function(n, ...) rnorm(n, 0, sigma),
+                           n = length(data)) 
+      sim_res = as.vector(sim_res) + trend
+      
+      theta[j,] <- coef(arima(sim_res,
+                              order = order,
+                              seasonal = seasonal,
+                              xreg = xreg,
+                              optim.control=list(maxit = 1000))) 
+      }, T)
+  }
+  theta = na.omit(theta)
+  return(theta)
+}
+
+# Function for QQ Plot, title argument for help make title easier
+normal_qq_plot <- function(data, title){
+  graph_title = paste("Normal QQ Plot for ", title, sep = "")
+  graph <- data %>% as.data.frame() %>% ggplot(aes(sample = data)) + 
+    # QQ Functions
+    stat_qq() + stat_qq_line() + 
+    labs(x = "Theoretical Quantiles", y = "Sample Quantiles",
+         title = graph_title)
+  return(graph)
+}
+
+```
+
+```{r , |Downloading Data, echo=F, cache = TRUE, include=F}
+# read the data
+movies_metadata = read_csv("movies_metadata.csv",
+                           col_types = cols(release_date = col_date(format = "%Y-%m-%d"),
+                                            vote_count = col_double())) %>%
+  # Get the year and the month
+  mutate(release_month = month(release_date)) %>% 
+  mutate(release_year = year(release_date)) %>%
+  #Remove unnecessary Columns
+  dplyr::select(-belongs_to_collection, -poster_path,-video) %>%
+  # Reorder columns
+  dplyr::select(title, revenue, release_date, release_month, release_year, budget, everything())
+
+n_tmdb <- nrow(movies_metadata)
+min_year <- min(movies_metadata$release_year, na.rm = T)
+max_year <- max(movies_metadata$release_year, na.rm = T)
+```
+
+
+# Introduction
+
+Since the invention of motion pictures, movies and films have steadily gained great popularity throughout the world.
+The global film industry is ever growing, and as of 2020 sat at a value of nearly $239.4 billion.
+This value is expected to reach \$318.2 billion by 2025, and \$410.6 billion by 2030 [@business_wire].
+Even through tumultuous times, the film industry has been steadfast in its ability to draw in great revenue.
+
+Although the global film industry net worth has greatly increased over time, and is expected to continue to do so, it is unclear how this net worth has changed over time with respect to various income sources.
+With the great rise of streaming services such as Netflix, Hulu, HBOMax, and more, movies are more accessible than ever in a home setting.
+Patrons no longer need to purchase DVDs or attend movie theaters to gain access to feature films.
+The goal of this work is to analyze whether the increased accessibility to movies at home has led to a decrease in movie theater attendance, resulting in a decrease in box office revenues for new films.
+This question will be approached from many angles, most importantly exploring seasonality that may arise as popular movies are released in similar time frames, such as the holiday season or start of summer.
+
+# Data
+
+In order to answer this question we utilize the  *The Movies Dataset* from Kaggle [@banik_2017]. *The Movies Dataset* contains movie information from the The Movie Database (TMDB) - a collaborative online movie database with information input by users according to guidelines [@tmbd], accompanied by a free API - matched with rating information from GroupLens, a research lab in the Department of Computer Science and Engineering at the University of Minnesota [@grouplens]. The dataset contains data `r n_tmdb` movies (i.e. our observations) released between `r min_year` and `r max_year`. 
+Because the data only extends to `r max_year`, we do not need to account for any effects the pandemic may have had on the film industry.
+
+
+```{r , |Preprocessing and Data Summary, echo = F, cache = TRUE}
+#movies = movies_metadata %>% mutate(release_month = month(release_date)) %>% 
+#  mutate(release_year = year(release_date)) 
+
+# Filter years
+start_year = 1991
+end_year = 2015
+movies1 = movies_metadata %>% filter((release_year>=start_year) & (release_year<=end_year))
+#Number of movies in the range
+n_movies_initial <- movies1 %>% nrow()
+
+# Drop if it's not been released
+movies2 = movies1 %>% filter(status == 'Released')
+dropped_movies_release <- movies1 %>% filter(!status == 'Released') %>% nrow()
+
+# Drop when budget == 0 or revenue<5000
+movies3 = movies2 %>% filter((budget!=0) & (revenue>=100000))
+
+#Get dropped movies dropped as a table might or might not be used
+droped_movies_revenue <- movies2 %>% 
+  #Get movies with 0 revenue marked with 1
+  mutate(Revenue_0 = ifelse(revenue == 0, 1,0),
+         #mark movies with more than 0 but less than 100,000 revenue as 1
+         revenue_not_0_less100m = ifelse(revenue >0 & revenue < 10^5,1,0)) %>% 
+  group_by(release_year) %>% 
+  summarise(Revenue_0 = sum(Revenue_0),
+            revenue_not_0_less100m = sum(revenue_not_0_less100m))
+droped_movies_revenue <- droped_movies_revenue %>% kable(col.names = list("Release Year", "Movies with 0 Revenue", "Movies with Non-Zero, but Less than 100 Million Revenue"))
+
+# Final filter: Filter by vote count
+movies4 = movies3 %>% filter(vote_count >= 10)
+
+dropped_movies_vote <- movies3 %>% filter(vote_count < 10) %>% nrow()
+
+
+# Combine the year and the month info and call it as index
+movies = movies4 %>% mutate(index = release_year+release_month/12) 
+
+final_count <- movies %>% nrow()
+final_count_year_avg <- final_count/(max(movies$release_year)-min(movies$release_year))
+
+```
+
+We concern ourselves with only the movies released between `r start_year` and `r end_year`. This subset contains `r n_movies_initial` observations. Given the collaborative nature of the TMDB, we consider a subset of this data which only contains movies that are released to public, had more than $100 million in revenue, a non-zero budget entry, and more than 10 votes contributing to its rating. This allows us to focus the analysis on major feature films, discarding any movie that might be made with non-monetary intentions, including film festivals, small scale projects, and possibly low-budget "direct to DVD" movies. As a result, we are left with `r final_count` movies between the years `r start_year` and `r end_year`, averaging out to `r final_count_year_avg %>% round(digits = 2)` movies per year. 
+
+
+
+```{r  |Constructing time series, echo=F}
+#A Plot showing number of movies in each month of year
+number_movies_plot<- movies %>% group_by(index) %>% count() %>% ggplot(aes(index,n)) +
+  geom_point() + scale_x_continuous(breaks = scales::breaks_pretty(n=12)) +
+  scale_y_continuous(breaks = scales::breaks_pretty(12)) +
+  labs(x="Year", y= "Number of Movies Released", title = "Number of Movies Released Per Month")
+
+# get the average revenue by month in each year
+dr = movies%>% group_by(index) %>% summarise(revenue = mean(revenue)) 
+year = dr$index
+revenue = log(dr$revenue)
+
+# First 5 observations
+#kable(tibble('year'=year[1:5], 'log(E(Revenue|Month))'= revenue[1:5]))
+
+```
+
+Using this subset, we construct a time-series of movie revenues by taking the mean revenue of the movies released in the given month and taking its logarithm. We utilize the mean movie revenue rather than the total movie revenue to filter out the effect of the number of movies released that month. Instead we focus on the particular effect that being released in a given month has on movie revenue. Formally, let the revenue of the $j$th movie released in month $u$ and year $v$ be $X^j_{u,v}$. We would like to model the average revenue of movies in a given month and year. Which is;
+$$R_i = \frac{\sum_{j = 1}^{M_i}X^{j}_i}{M_i}$$
+and the sample version is 
+$$r^*_i = \frac{\sum_{j = 1}^{m_i}x^{*j}_i}{m_i}$$
+where $i$ is the index value defined by; $i=v+u/12$  and $m_i$ is the number of movies that are released in the month $u$ year $v$. By definition $R_i$ is an averaged random variable. We are aware that this construction might create a non constant variance problem, especially if the number of movie releases varies greatly in each month. Suppose the revenue of a movie in the index $i$ has a distribution with mean $\mu_i$ and variance $\sigma^2$. Then, $E[R_i] = \mu_i$
+and $Var[R_i] = \frac{\sigma^2}{m_i}$
+
+We will comment on this issue in the modeling diagnostics section. 
+
+The decision to take logarithms of mean revenue, $R_i$, is motivated partially by numerical convergence issues in the model fitting process and partially by ease of interpretation as our models can be interpreted as *percent change in mean revenue* rather than *absolute dollar change in mean revenue*. The plot of the time series, as well as a linear and quadratic trend estimated by least squares, can be seen below:
+
+```{r | Time Series Graph, echo =F }
+#Plot of our time series with linear and quadratic trend
+time_series_plot <- dr %>% mutate(log_revenue = log(revenue)) %>% 
+  ggplot(aes(index,log_revenue)) + geom_line() +
+  geom_smooth(method = "lm", formula = y~x, se = F, aes(color = "Linear")) + 
+  geom_smooth(method = "lm", formula = y~poly(x,2,raw = T),se = F, aes(color = "Quadratic")) +
+  scale_x_continuous(breaks = scales::breaks_pretty(12)) +
+  labs(x= "Year", y = "Log Revenue", 
+       title = "Time Series of Monthly Log Mean Movie Revenue", color = "Trend")
+time_series_plot
+```
+
+Looking at the time series of monthly movie revenue, we observe that the mean movie revenue for the month exhibits a positive trend, suggesting the use of Regression with ARMA Errors to incorporate the information regarding trend as well as the time dependence. 
+In selecting which regressor to apply, there is very little difference between the quadratic fit and linear fit as seen above. Thus, for simplicity, we utilize a linear trend.
+
+Next, in plotting the Autocorrelation Function (ACF) of the log mean movie revenue as seen below, there appears to be a clear oscillatory behavior, with peaks occurring around every 12 months.
+This seasonality within the data can be defined as yearly peaks in movie revenue.
+Although there are smaller peaks at 6 month intervals, the peaks found at 12 month intervals are much more substantial.
+
+```{r  |ACF Plot with 10 year lag, echo = F}
+acf(revenue,lag.max = 36, type = "correlation", xaxp = c(0,36,6),
+main = "Autocorrelation Function of Log Mean Movie Revenue")
+```
+
+Using this observation and fitting a periodogram to the data, the results matched the above conclusions.
+After testing multiple different smoothing factors, the below periodogram was produced.
+Following this, it is clear to see that the first major peak falls around a frequency of approximately 0.085.
+This dominant peak corresponds to a frequency of 0.085 cycles per month, which is equivalent to approximately 12 months per cycle.
+Intellectually, this makes sense, as most major blockbuster films are released during the summer months (June-August) [@daveswallet].
+This is due to the fact that school-aged children are on break, and people have more free time in general for fun activities, such as going to the movie theater.
+Historically, the highest grossing films were released in this time frame, so the seasonality was unsurprising.
+The blip seen at the 6 month period is likely due to the increase in movie attendance during the holiday season at the end of the year, but because it is much less significant than that seen at 12 months, it is not analyzed.
+Therefore, based on the given evidence the analysis is continued assuming a yearly seasonality within the data.
+
+```{r |periodgram, echo = F}
+x = spec.pgram(revenue, span = c(3,5,3), main = "Smoothed Periodogram of Log Mean Monthly Reveneue")
+abline(v = x$freq[localMaxima(x$spec)][3])
+```
+
+
+# Model 
+
+Our preliminary results indicate two things which we will have to incorporate into our model:
+
+1) There is a clear trend in our data as seen by the time series plot of log mean monthly movie revenue. Our results indicate the trend can be better modeled as linear as a quadratic trend might over-fit the data.
+
+2) There is a 12 month (1 year) seasonality in the data, as indicated by both the auto-correlation plot and the periodogram. While we might also consider the smaller 6 month seasonality, the annual seasonality makes more sense from a theoretical standpoint.
+
+Under these considerations we utilize a noise plus colored noise framework, modeling the noise using a **S**easonal **A**uto**R**egressive **M**oving**A**verage (SARMA) model.
+
+#### Signal plus Noise Framework
+
+Signal plus noise models are one of the most common models in statistics, serving as a generalization of regression. A general signal plus noise model is given by $Y_n=\mu_n+\eta_n$, consisting of two parts: the signal, given by the mean function $\mu_n$, and the noise, given by a zero mean stochastic process $\{\eta_n\}$. When the noise $\{\eta_n\}$ is assumed to be a uncorrelated Gaussian random variables (or equivalently independent Gaussian random variable as for Gaussian random variables independence is equivalent to being uncorrelated), we have the special case of signal plus white noise model utilized commonly in regression setting. In our case the seasonality in our data is a violation of the uncorrelated (i.e. independence) assumption and thus we have to utilize a signal plus colored noise model, where the dependence in noise is modeled. In our case we utilize a SARMA model for the noise, and modeling the signal, the mean function, using a classical regression framework. Such a model is also referred to as Regression with SARMA Errors.
+
+
+#### Modeling the Noise: The SARMA Framework
+
+A SARMA model is a subset of the greater **A**uto**R**egressive **M**oving**A**verage (ARMA) model framework. An ARMA(p,q) model for stationary time series as is defined as:
+
+$$Y_n = \mu + \phi_1(Y_{n-1} - \mu) + \dots + \phi_p(Y_{n-p} - \mu) + \epsilon_n + \psi_1\epsilon_{n-1} + \dots + \psi_q\epsilon_{n-q}$$
+
+where $\mu$ is the mean of $Y_n$ and $\{\epsilon_n \}$ is a Gaussian white noise process with $\epsilon_n\sim N(0,\sigma^2)$. An ARMA(p,q) model consists of 2 components, a p order autoregressive (AR) component $\phi_1,\dots,\phi_p$,  and a q order moving average (MA) component $\epsilon_1,\dots,\epsilon_q$. Using the backshift operator $B$ the AR and MA components are succinctly written in terms of the polynomials $\phi(B)= 1-\phi_1B-\phi_2B^2-\dots +\phi_pB^p$ and $\psi(B)= 1+\psi_1B+\psi_2B^2+\dots +\psi_pB^p$, which are aptly called the AR(p) and MA(q) polynomials. Utilizing these AR(p) and MA(q) polynomials, the ARMA(p,q) model can be written in its compact form: 
+
+$$\phi(B)(Y_n-\mu)=\psi(B)\epsilon_n$$.
+
+The ARMA framework can be extended to incorporate seasonality in data by incorporating additional multiplicative polynomials AR and MA for seasonal terms, giving us the **S**easonal **A**uto**R**egressive **M**oving**A**verage (SARMA) model. The $SARMA(p,q)\times(P,Q)_{S}$ model is a special case of the ARMA models of form
+$$\phi(B)\Phi(B^{S})(Y_n-\mu)=\psi(B)\Psi(B^{S})\epsilon_n$$ 
+
+where the polynomials $\Phi(B^{S})$ and $\Psi(B^{S})$ are aptly **S**easonal **A**utog**R**egressive (SAR) and **S**easonal **M**oving **A**verage (SMA) polynomials with exponent S denoting the seasonal period. In the context of monthly data with annual seasons we have the $SARMA(p,q)\times(P,Q)_{12}$ model of form
+
+$$\phi(B)\Phi(B^{12})(Y_n-\mu)=\psi(B)\Psi(B^{12})\epsilon_n$$
+
+where the AR and MA polynomials are factored into a monthly polynomial in $B$ and annual (seasonal) polynomial in $B^{12}$. Further details about the ARMA and by extension SARMA models can be found in Chapter 3 of Shumway and Stoffer [@shumway_stoffer_2017] and in Lectures 4-6 of E.L. Ionides [@lectures].
+
+#### Modeling the Signal: 
+
+After modeling the noise, we can model the signal $\mu_n$ using an appropriate mean function. In our case we model the mean function using a linear regression, using year as the co-variate. This gives us a mean function of form $\mu_n=\beta_1*Year$ where $Year$ is the index used to generate the time series, given by $Year= u+\frac{v}{12}$ where $u$ is the year of the movie's release and $v$ is the month of the movie's release, as defined in the Data section. Note that the intercept term is already incorporated in the $\mu$ term in the left hand side of the $SARMA(p,q)\times(P,Q)_{12}$ model and consequently not included in the mean function. 
+
+
+## Model Selection 
+
+Combining the signal and the noise components, we have the signal plus colored noise model of form 
+$R_i=Year_i+\eta_i$ where the noise $\eta_i$ is given by the $SARMA(p,q)\times(P,Q)_{12}$ model of form $\phi(B)\Phi(B^{12})(R_n-\mu_n)=\psi(B)\Psi(B^{12})\epsilon_n$. Given this format, we apply model selection by AIC to select the model that generalizes the best.
+
+Note that a regression with $SARMA(p,q)\times(P,Q)_{12}$ errors model has $p\times q\times P\times Q$ possible subsets of models, determined by the order of AR,MA, SAR, and MAR polynomials. Given the multiplicative nature of the subset selection problem , we constrain ourselves to the $SARMA(p,q)\times(1,1)_{12}$ models, applying model selection to the AR(p) and MA(q) polynomials. The decision to chose SAR(P) and SMA(Q) polynomials to be order one is motivated partially by the desire to have a simpler model to prevent numerical issues in parameter estimation as well as our preliminary results favoring the use both SAR(P) and SMA(Q) polynomials of order 1. 
+
+Likewise, we also constrain our mean function, the regression, to only contain the covariate $Year$ rather than any higher order polynomials based on $Year$. This is motivated by our preliminary data analysis, where the time series plot with linear and quadratic trend lines of $Year$ estimated by OLS suggests that the second order polynomial of $Year$ is close to the linear trend from just $Year$. These results are further supported by our initial analysis utilizing $Year$ and $Year^2$ (the second order polynomial of $Year$) as a covariate. Our results indicate that the coefficient of $Year^2$ is statistically significant, but practically insignificant. Furthermore, for the subset of models compared, models with $Year$ tended to fit better than models with $Year^2$.
+ 
+Under this general model framework we fit $SARMA(p,q)\times(1,1)_{12}$ models for each combination of p and q ranging from 0 to 5, resulting in $6\times6=36$ different models.  The model parameters are estimated using Maximum Likelihood Estimator (MLE). In order compare these models we will use Akaike's Information Criterion (AIC), an estimation of prediction error that takes into account the opposing forces of model fit and model complexity. The AIC is defined as $AIC=-2\cdot \ell(\theta^*)+2D$ where $\ell(\theta^*)$ is the maximized log likelihood of the model and D is the number of parameters in the model. When comparing models using AIC, the model with smaller AIC is preferred to that with a larger AIC. 
+
+The AIC values of  $SARMA(p,q)\times(1,1)_{12}$ models of all permutations of p and q between 0 and 5 is displayed in table below. From this table we select the models with smallest AIC and verify that the roots of the model polynomials do not cancel and are outside the unit circle.
+
+```{r |Model selection 12 month period,cache = TRUE, echo=F, eval = F}
+arma_test <- ARMA_tables(revenue,5,5,xreg=year) 
+arma_test
+```
+
+```{r |AIC, echo = F,cache = TRUE}
+tmp = ARMA_tables(revenue, 5, 5, xreg = year)
+aic_table = tmp[[1]]
+lrt_table = tmp[[2]]
+
+x = which(aic_table == min(aic_table, na.rm = TRUE), arr.ind = TRUE) # take the index of min aic
+aic_table = format_cells(round(aic_table,2), x[1], x[2], "bold")
+x = which(lrt_table == min(lrt_table, na.rm = TRUE), arr.ind = TRUE) # take the index of min lrt
+lrt_table = format_cells(signif(lrt_table,2), x[1], x[2], "bold")
+
+kable(aic_table, caption = 'AIC for SARMA(p,q)x(1,1)')
+# kable(lrt_table, caption = 'p-values of LRT for SARMA(p,q)x(1,1)')
+```
+
+
+```{r |compare multiple model roots, eval=F, include=F}
+arma55 = arima(revenue,
+                      order=c(5,0,5),
+                      seasonal=list(order=c(1,0,1),period=12),
+                      xreg = year)
+check_roots(arma55) # Cancelling roots and roots close to 0
+
+arma44 = arima(revenue,
+                      order=c(4,0,4),
+                      seasonal=list(order=c(1,0,1),period=12),
+                      xreg = year)
+check_roots(arma44) #cancelling roots and roots close to 0
+
+arma14 = arima(revenue,
+                      order=c(1,0,4),
+                      seasonal=list(order=c(1,0,1),period=12),
+                      xreg = year)
+check_roots(arma14) #cancelling roots and roots close to 0
+
+arma15 = arima(revenue,
+                      order=c(1,0,5),
+                      seasonal=list(order=c(1,0,1),period=12),
+                      xreg = year)
+check_roots(arma15) #cancelling roots and roots close to 0
+
+arma22 = arima(revenue,
+                      order=c(2,0,2),
+                      seasonal=list(order=c(1,0,1),period=12),
+                      xreg = year)
+check_roots(arma22) # Cancelling roots that are also close to 0
+
+
+```
+
+### Selected Model: $SARMA(0,0)X(1,1)_{12}$
+
+We've selected the white noise model with a period of 12. The model formula can be written as follows: 
+
+$$(1-\Phi \times B^{12})(R_n-\mu-\beta \times Year_n) = (1+\Psi\times B^{12})\epsilon_n$$
+
+The fitted time series vs actual time series can be seen in the graph below. 
+
+```{r |Residual Diagnostics, echo =F, warning=F, error=F}
+
+arma00 = arima(revenue,
+               order=c(0,0,0),
+               seasonal=list(order=c(1,0,1),period=12),
+               xreg = year)
+
+arma00_11_resids <- residuals(arma00,h = 1)
+arma00_11_fit<- fitted(arma00)
+
+arma00_diagnostics <- data.frame("Log_Revenue" = revenue, "Year" = year,
+                                 "Fitted" = arma00_11_fit, "Residuals" = arma00_11_resids)
+arma00_diagnostics[,'Fitted'] = as.numeric(arma00_diagnostics[,'Fitted'])
+arma00_diagnostics[,'Residuals'] = as.numeric(arma00_diagnostics[,'Residuals'])
+
+arma00_diagnostics %>% ggplot(aes(x=Year)) +
+  geom_line(aes(y=Fitted, color = "Fitted")) +
+  geom_abline(aes(color = "Trend"),intercept = arma00$coef["intercept"], slope = arma00$coef["year"]) +
+  geom_point(aes(y=Log_Revenue, color="Actual"), size = 0.9) +
+  scale_color_manual(values = c("Actual" = "blue", "Fitted" = "red", "Trend" = "black")) +
+  theme(legend.position = "bottom") +
+  scale_x_continuous(breaks = scales::breaks_pretty(n=12)) +
+  labs(y= "Log Revenue", color = NULL,
+       title = "Log Mean Movie Revenue as Fitted by an Seasonal SARMA(0,0)x(1,1) Model")
+
+```
+
+Shown below are the statistics for the parameter estimates. 
+
+```{r |SARMA, echo = FALSE}
+ct = coef_table(arma00)
+ct[,'lb'] = ct['coef'] - ct[,'se']*1.96
+ct[,'ub'] = ct['coef'] + ct[,'se']*1.96
+
+ct[,2:ncol(ct)] = signif(ct[,2:ncol(ct)], 2)
+
+kable(ct)
+```
+
+From the table we get point estimates as: $\hat{\Phi}$ = `r ct[1, 'coef']`, $\hat{\Psi}$ = `r ct[2, 'coef']`, $\hat{\mu}$ = `r ct[3, 'coef']`, $\hat{\beta}$ = `r ct[4, 'coef']`, where lb and ub correspond to lower and upper confidence interval bounds ($0.025$, $0.975$), respectively.
+
+All parameters have significant p-values by the Z-test. However SARMA coefficients indicate root problems, and confidence intervals obtained by the fisher approximation may not be reliable. Here we checked the roots for causality and invertibiliy:
+
+```{r |root check, echo=FALSE}
+tmp = check_roots_general(arma00)
+print('sar root:')
+tmp$ar[1]
+print('sma root:')
+tmp$ma[1]
+```
+
+These indicate causality and invertibility problems. One can solve this by dropping either $\Phi$ or $\Psi$. After attempting this, we decided against this action, as log likelihood of the model significantly dropped. Therefore, we continue with this model, but to get more accurate confidence intervals, we decided to perform a simulation study.  
+
+### Bootstrap Confidence Intervals
+
+Following the same bootstrap algorithm in the Chapter 5 of the Lecture Notes [@lectures], we repeat the procedure outlined.
+
+
+```{r |simulation CIs, warning=FALSE, error=FALSE, cache = TRUE, echo =F}
+theta = sim_study(revenue, year,
+                  order = c(0,0,0),
+                  seasonal = list(order=c(1,0,1),period=12),
+                  iter = 1000)
+
+hist(theta[,'sar1'], breaks = 100, 
+     xlab = "SAR1 Coefficient", 
+     main = "Histogram for Bootstrap Estimates of SAR1 Coefficient")
+abline(v = arma00$coef['sar1'], col = 'red', lwd = 4)
+abline(v = quantile(theta[,'sar1'],c(0.025, 0.975), na.rm = T),
+       col = 'blue', lwd = 3)
+
+hist(theta[,'sma1'], breaks = 100, 
+     xlab = "SMA1 Coefficient",
+     main = "Histogram for Bootstrap Estimates of SMA1 Coefficient")
+abline(v = arma00$coef['sma1'], col = 'red', lwd = 4)
+abline(v = quantile(theta[,'sma1'],c(0.025, 0.975), na.rm = T),
+       col = 'blue', lwd = 3)
+
+hist(theta[,'xreg'], breaks = 100,
+     xlab = "Year Coefficient",
+     main = "Histogram for Bootstrap Estimates of Year (Trend) Coefficient")
+abline(v = arma00$coef['year'], col = 'red', lwd = 4)
+abline(v = quantile(theta[,'xreg'],c(0.025, 0.975), na.rm = T),
+       col = 'blue', lwd = 3)
+#hist(theta[,'intercept'], breaks = 100
+```
+
+In the above plot, the histogram is for the empirical distribution of the simulation estimates, the red line corresponds to the original point estimates in the SARMA model, and the blue lines are for the bounds of $95\%$ confidence interval. The quadratic approximation in the fisher confidence interval is not very accurate for SAR1 coefficient and its estimate has a left skewed distribution, but it is accurate for SMA1 and the trend estimate.
+
+## Diagnostics
+
+After fitting our model, we perform diagnostic checks to verify model assumptions. The main assumption we need to check is that the errors, as approximated by the residuals, are normally (Gaussian) distributed with mean 0 and constant variance. To do so we will look at the time series of the residuals and the normal Quantile-Quantile plot of the residuals. 
+
+
+```{r |Residual Diagnostics 2, echo =F}
+arma00_diagnostics %>% ggplot(aes(x=Year,y=Residuals)) + geom_line() +
+  geom_smooth(method = "lm",se = F, formula=y~x) + 
+    scale_x_continuous(breaks = scales::breaks_pretty(n=12)) +
+  labs(y= "Residual", x= "Year", 
+       title = "Time Series Plot of SARMA(0,0)x(1,1) Model Residuals")
+```
+
+The time series plot of the the residuals can be seen above. Looking at the plot of the residuals we can see that the residuals are centered at mean 0, satisfying our zero mean assumption. However, it is clear from the plot that the magnitude (absolute value) of the residuals decrease in general as the year increases, exhibiting a "funnel shape". This is a violation of the constant variance assumption. As discussed early on in the Data section, heteroscedasticity, non-constant variance, is expected in our data and is a direct, undesired, consequence of how we constructed our time series. Since the individual observations of our time series are means of the movie revenues for the given month in year, the variance depends on how many movies fitting our filtering criterion were released in that month. The plot of number of movies released each month can be seen below.
+
+
+```{r  | Residual Diagnostics 3, echo =F}
+movies %>% group_by(index) %>% summarise(count = n()) %>% 
+  ggplot(aes(x = index, y = count)) + geom_point() + geom_smooth(method = "lm", se = F, formula=y~x) +
+  scale_x_continuous(breaks = scales::breaks_pretty(n=12)) +
+  scale_y_continuous(breaks = scales::breaks_pretty(n=6)) +
+  labs(title = "Number of Movies Released in a Month", x= "Year",y= "Number of Movies")
+```
+
+As can be seen from the above plot, the number of movies released per month is, on average, increasing every month. This indicates that decreasing magnitude of the variance can be attributed to the increase in the number of movies each month.
+
+The next assumption we look into is the errors, estimated by the residuals, are normally distributed. To do so we plot the normal quantile-quantile (QQ) plot of the residuals, with the theoretical quantiles of a standard normal on the horizontal axis and the empirical quantiles of the residuals on the vertical axis. 
+
+```{r |Residual Diagnostics 5, echo =F}
+residual_density <- arma00_diagnostics %>% ggplot(aes(x = Residuals)) + 
+  geom_histogram(aes(y= ..density..),bins = 30, alpha = 0.5) + geom_density() +
+  scale_x_continuous(breaks = scales::breaks_pretty(n=12)) +
+  labs(x= "Residuals", y= "Density", 
+       title = "Distribution of the Residuals given by Frequency Histogram and \nKernel Density Estiamte")
+
+arma_00_qq_plot <- arma00_diagnostics$Residuals %>% normal_qq_plot(title = "ARMA(0,0)x(1,1) Residuals")
+arma_00_qq_plot
+
+#arma_00_shapiro_test <- arma00$residuals %>% shapiro.test()
+```
+
+The normal QQ plot, as seen above, indicates that the empirical quantiles of the residual match that of the normal closely, with some minor deviations in the tails, with the empirical quantiles of the residuals being higher than the theoretical quantiles of the normal. This form of deviation indicates that the residuals might have heavier tails than the normal distribution. The deviation in the lower tail is minor and can be attributed to statistical randomness while the deviation in the upper tail is more significant, yet still minor. 
+
+Finally, we look into whether the error terms in our model, as estimated by the residuals, are independent. We check this assumption by plotting the autocorrelation function for the residuals up to 240 month lag (i.e. 20 years).
+
+```{r, echo=F}
+arma00_diagnostics$Residuals %>% acf(lag.max = 240,type = "correlation", xaxp = c(0,240,10),
+main = "Autocorrelation Function of SARMA(0,0)x(1,1) Residuals")
+```
+
+The plot of autocorrelation function is within the 95% confidence band and therefore indicates that our residuals are independent with respect to time lags.
+
+Overall the model assumptions for regression with $SARMA(0,0)\times(1,1)_{12}$ errors hold, with the exception of the constant variance assumption. As discussed above, heteroscedasticity in our data is a unwanted consequence of how we constructed the time series and consequently hard to get rid of.
+
+## Robustness Check: Adjusting for Inflation
+
+In this section we conduct a robustness check on the trend in our data by repeating our analysis after adjusting movie revenues for inflation.
+
+According to the community guidelines for inputting data into the TMDB, the revenues must be quoted nominally. This suggests that part of the trend, increase in log mean revenue over time, we capture in our data is simply the inflation, the increase in prices in an economy due to increasing money supply. To determine whether the monthly movie revenues are increasing in real terms (i.e. after adjusting for inflation), we repeat our analysis after adjusting the movie revenues for inflation.
+
+We utilize the **C**onsumer **P**rice **I**ndex (CPI) data, released by the Federal Reserve Economic Research Division (FRED) in Federal Reserve Bank of St. Louis (St. Louis FED) [@fred_2021]. The consumer price index is a measure of inflation obtained by measuring the cost of a fixed basket of goods representative of the needs of an average consumer [@mankiw_2019]. Unlike other forms of inflation, CPI measures inflation felt by the consumers (hence the name) more so than the overall economy. Since the revenue of movies are inherently related with whether the audiences can afford to actually watch them, CPI should be a more appropriate measure of inflation compared to others.
+
+
+
+```{r |Inflation adjustment, echo = F, include=F}
+# https://stackoverflow.com/a/12591311
+# conversion factor
+options("getSymbols.warning4.0"=FALSE)
+loadSymbols("CPIAUCSL", src='FRED', auto.assign = TRUE, quiet=TRUE)
+cf = CPIAUCSL/as.numeric(CPIAUCSL['2015-12-01']) # use 2015 as the base inflation
+
+cf = cf %>% fortify.zoo %>% as_tibble
+cf = cf %>% mutate(release_month = month(Index)) %>% 
+  mutate(release_year = year(Index)) %>% select(-Index)
+
+movies_inf = movies %>% left_join(cf , by = c('release_year', 'release_month'))
+
+movies_inf = movies_inf %>% mutate(adj_budget = budget/CPIAUCSL, adj_revenue = revenue/CPIAUCSL)
+
+
+# get the average revenue by month in each year
+dr_adj = movies_inf%>% group_by(index) %>% summarise(revenue = mean(adj_revenue)) 
+year = dr_adj$index
+adj_revenue = log(dr_adj$revenue)
+```
+
+
+```{r | Adj Time Series Graph, include = F}
+#Plot of our time series with linear and quadratic trend
+adjusted_time_series_plot <- dr_adj %>% mutate(log_adj_revenue = log(adj_revenue)) %>% 
+  ggplot(aes(index,log_adj_revenue)) + geom_line(size =0.7) +
+  geom_smooth(method = "lm", formula = y~x, se = F, aes(color = "Linear")) + 
+  geom_smooth(method = "lm", formula = y~poly(x,2,raw = T),se = F, aes(color = "Quadratic")) +
+    geom_smooth(method = "lm", formula = y~1, se = F, aes(color = "Constant")) + 
+  scale_x_continuous(breaks = scales::breaks_pretty(12)) +
+  labs(x= "Year", y = "Log Revenue", 
+       title = "Time Series of Inflation Adjusted Monthly Mean Movie Revenue", color = "Trend")
+adjusted_time_series_plot
+
+```
+
+
+```{r  |Adjusted ACF Plot with 10 year lag, echo = F, include = F}
+acf(adj_revenue,lag.max = 120, type = "correlation", xaxp = c(0,120,10),
+main = "Autocorrelation Function of Inflation Adjusted Log Mean Movie Revenue up to 10 year Lag")
+```
+
+```{r  |Adj Models,cache = TRUE, include=F}
+ARMA_tables(adj_revenue,5,5,xreg = year)
+adj_arma55 <- arima(adj_revenue,order = c(5,0,5),
+                    seasonal = list(order = c(1,0,1), period = 12), xreg = year)
+adj_arma55 %>% check_roots()
+adj_arma22 <- arima(adj_revenue,order = c(2,0,2),
+                    seasonal = list(order = c(1,0,1), period = 12), xreg = year)
+adj_arma22 %>% check_roots()
+adj_arma00 <- arima(adj_revenue,order = c(0,0,0),
+                    seasonal = list(order = c(1,0,1), period = 12), xreg = year)
+adj_arma00 %>% check_roots()
+adj_arma00
+arma00
+```
+
+```{r |Adj Model Diagnostics, include = F}
+adj_arma00_11_resids <- residuals(adj_arma00,h = 1)
+adj_arma00_11_fit<- fitted(adj_arma00)
+
+adj_arma00_diagnostics <- data.frame("Adj_Log_Revenue" = adj_revenue, "Year" = year,
+                                 "Fitted" = adj_arma00_11_fit, "Residuals" = adj_arma00_11_resids)
+adj_arma00_diagnostics %>% ggplot(aes(x=Year)) + 
+  geom_line(aes(y=Fitted, color = "Fitted")) + 
+  geom_line(aes(y=Adj_Log_Revenue, color="Actual")) + 
+  scale_color_manual(values = c("Actual" = "Black", "Fitted" = "deepskyblue")) +
+  theme(legend.position = "bottom") +
+  scale_x_continuous(breaks = scales::breaks_pretty(n=12)) +
+  labs(y= "Log Revenue", color = NULL,
+       title = "Log Mean Movie Revenue as Fitted by an Seasonal SARMA(0,0)x(1,1) Model")
+adj_arma00_diagnostics %>% ggplot(aes(x=Year,y=Residuals)) + geom_line() +
+  geom_smooth(method = "lm",se = F) +
+    scale_x_continuous(breaks = scales::breaks_pretty(n=12)) +
+  labs(y= "Residual", x= "Year", 
+       title = "Time Series Plot of SARMA(0,0)x(1,1) Model Residuals")
+
+adj_arma00_diagnostics$Residuals %>% acf(lag.max = 120,type = "correlation", xaxp = c(0,120,10),
+main = "Autocorrelation Function of SARMA(1,1)x(1,1) Residuals")
+
+adj_arma_00_qq_plot <- adj_arma00_11_resids %>% normal_qq_plot(title = "Inflation Adjusted ARMA(0,0)x(1,1) Residuals")
+adj_arma_00_qq_plot
+adj_arma_00_shapiro_test <- adj_arma00$residuals %>% shapiro.test()
+
+```
+
+Utilizing the CPI data from FRED (CPIAUCSL) [@fred_2021], we adjust the movie revenues to be quoted in 2015 dollars, and repeat our analysis. We again select the $SARMA(0,0)\times(1,1)_{12}$ model; however, the main difference is that the trend, the coefficient of $Year$ parameter for the inflation-adjusted revenue is `r adj_arma00$coef["year"] %>% round(3)` rather than `r arma00$coef["year"] %>% round(3)` for nominal movie revenue. This difference is consisted with our expectation as the `r (arma00$coef["year"]-adj_arma00$coef["year"]) %>% round(3)` in the $year$ coefficient corresponds to the average inflation in United States between `r start_year` and `r end_year` [@fred_2021].
+
+```{r |SARMA adjusted revenue, echo = F}
+adj_rev_sarma00_1 = arima(adj_revenue,
+                          order=c(0,0,0),
+                          seasonal=list(order=c(1,0,1),period=12),
+                          xreg = year)
+
+#plot(year, adj_revenue)
+#lines(year, fitted(adj_rev_sarma11_1), col = 'red')
+
+kable(coef_table(adj_rev_sarma00_1), caption="Parameter Estimates for Inflation-Adjusted Revenue")
+
+#tsdiag(adj_rev_sarma11_1)
+```
+
+# Conclusion
+
+The goal of this report was to model movie revenue over time, with the aim of exploring how monthly revenue has changed as movies have become increasingly more accessible.
+Based on the above analysis, it can be seen that the best fitting model for this data is the regression with $SARMA(0,0)\times(1,1)_{12}$ errors model.
+The year variable was found to be significant in terms of trend, and the data followed a seasonal pattern of around 12 months per cycle.
+These yearly oscillations align well with what is expected, due to the high release volume of big name movies in the summer months.
+The results provided hold for both nominal and real (inflation-adjusted) revenue.
+
+As can be seen in the diagnostic plots above, the model does a good job fitting the data provided.
+One surprising result was the fact that movie revenue has remained fairly constant, with a slight positive trend, from `r start_year` to `r end_year`.
+Our original hypothesis was that this value would decrease due to a great increase in the popularity of at home movie availability, starting with DVDs followed by streaming services.
+Surprisingly, the opposite is true: box office movie revenues have slightly increased in the time frame of this data set.
+That being said, there are many plausible explanations as to why this may be true.
+First, many "cinematic universes" exist with ever growing fan bases, such as the Marvel Cinematic Universe, Star Wars, James Bond, Harry Potter, etc.
+The great increase in fanatics that follow these movie releases closely are a likely cause for the increase in revenue.
+Another plausible explanation for this increase is the fact that humans frequently study the human mind.
+In doing so, researchers have learned how to appeal to large groups of people.
+By learning what will pique viewers' interest, they can draw in a larger crowd, generating a greater revenue.
+
+There are many possibilites for future research with this dataset.
+One interesting comparison would be to look at the cross-covariance between monthly revenue and GDP, as we suspect people are more likely to go to the movies as their income increases.
+Another possible direction would be focusing on cinematic universe movies and exploring their trends.
+Lastly, exploring the trend with return on investment (RoI), rather than revenue, may provide differing insights.
+
+
+
+**<big>References</big>**.
