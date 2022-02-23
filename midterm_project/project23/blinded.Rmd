@@ -1,0 +1,380 @@
+---
+title: "STATS 531 Midterm Project"
+date: "2022/2/16"
+output:
+  html_document:
+    theme: cerulean
+    toc: yes
+    toc_float: yes
+    numberPsections: yes
+    code_folding: hide
+    css: style.css
+  pdf_document:
+    toc: yes
+---
+
+```{r setup, include=FALSE}
+library(readxl)
+library(tidyverse)
+library(data.table)
+library(zoo)
+library(astsa)
+library(stats)
+library(forecast)
+library(AICcmodavg)
+library(broom)
+library(corrr)
+library(dplyr)
+library(knitr)
+library(kableExtra)
+library(readr)
+library(tidyr)
+data <- read.csv('file.csv')
+
+```
+
+# Introduction
+
+Nowadays, the price of gasoline is having a great impact on the everyday life. A small fluctuation on the gasoline price would influence the whole industrial chain, including the plastic production, public transportation and the most importantly, the development of fertilizer and other chemical solutions. 
+
+In this project, we would love to study the [US CPI Average Price Gasoline Data				](https://beta.bls.gov/dataViewer/view/timeseries/APU00007471A/)[1]. We will use methods and models that we learned in class to figure out the following questions.
+
+> Can we fit a model for gasoline prices and possibly predict future prices? 
+
+> Is the monthly change of the gasoline prices stable?
+
+# Data Description
+
+the [US CPI Average Price Gasoline Data				](https://beta.bls.gov/dataViewer/view/timeseries/APU00007471A/) tracks the price of gasoline every month from January 1978 to January 2022. We would use the data from January 1981 to January 2022. We manipulated the rows and columns of the data in order to for better model fitting and visualization. After this transformation, there are five variables in this data:
+
+- Series ID: The series ID of the dataset, which will not used in the dataset
+- Year: The year for each track of price
+- Period: The period of each price, in the format of `M`(month)-`month ID`(01..)
+- Label: `Year`-`Month` for each track of price
+- Value: The value of each track of price in $(dollar/gallon)$
+
+# Analysis
+
+## Exploratory Data Analysis
+
+### Normal Data
+ 
+We first plot the time series first to have an overview of the data. 
+```{r, out.height='80%', out.width='80%', fig.align='center', fig.cap="Fig 1: the US gasoline price by month"}
+price <- data$Value
+year <- seq(from = 1981, length = length(price), by = 1/12)
+plot(year, price, type = 'l', ylab = 'Average Price of gasoline')
+
+```
+The plot of price shows that there exist some trend in the price of gasoline per gallon. It keeps increasing since the beginning of the new centry. But we cannot observe any monthly fluctuation on the price.
+
+Then we include the Acf plot:
+
+```{r, out.height='80%', out.width='80%', fig.align='center', fig.cap="Fig 2: the acf plot of  US gasoline price by month"}
+acf(price)
+```
+
+All values of the acf plot is greater than 0.1, which means that the data is highly autocorrelated. Hence, it indicates that the price of gasoline is highly influenced by the previous prices. ($i.e.$ The price will tend to keep increasing when the price of last month increased.)
+
+### Differenced Data
+
+Since the acf plot shows autocorrelation, we would like to further look into the difference data, which is the price of the next month minus the month of the current month. The value is taken into logarithm for better visualization.
+
+
+```{r, out.height='80%', out.width='80%', fig.align='center', fig.cap="Fig 3: the differenced plot of  US gasoline price by month"}
+
+plot(year, c(0,diff(log(price))), type = "l", ylab = "Average price of gasoline")
+
+```
+
+We would also include the acf plot.
+
+```{r, out.height='80%', out.width='80%', fig.align='center', fig.cap="Fig 4: the differenced acf plot of US gasoline price by month"}
+acf(diff(price))
+```
+The autocorrelation function for the differenced data seems more stationary.
+
+Hence, in order to answering the two proposed questions, we are going to divide our analysis into two parts. 
+
+- In the first part, we will study the normal data to discuss about the trend of the gasoline prices.
+
+- In the second part, we will study the differenced data to evaluate the changing amount of the prices.
+
+
+## The Trend Analysis
+
+### Linear Regression
+
+First thing we want to do is build a linear regression model to check whether there is an obvious increasing trend.
+
+```{r, align = 'center'}
+new_df <- data.frame(cbind(year, price))
+lmod_1 <- lm(price~year, data = new_df)
+lm(price~year, data = new_df) %>%
+  tidy() %>%
+  kable(align="c",  digits = c(0, 2, 3, 2, 3))
+```
+
+
+```{r, out.height='80%', out.width='80%', fig.align='center', fig.cap="Fig 5: the linear regression plot of US gasoline price by month"}
+plot(year, price, type = 'l', ylab = 'Average Price')
+lines(x = year, y = lmod_1$fitted.values, type = 'l', col = 'red')
+
+```
+The P-value is zero indicates that both the intercept and year are statistically significant.
+
+### Residual Analysis {.tabset}
+
+Then we plot the residual of the regression.
+
+
+Noticed that the residual is not random, it appears to be the combinaation of some U shapes. And the Acf plot shows that the residuals are highly correlated. Though the estimated of trend vs year is significant and maybe useful, but this linear model is not good for the error term. 
+
+#### Acf Residual Plot
+
+```{r, out.height='80%', out.width='80%', fig.align='center', fig.cap="Fig 6: the acf of the residual"}
+acf(resid(lmod_1))
+```
+#### Regression Residual Plot
+
+```{r, out.height='80%', out.width='80%', fig.align='center', fig.cap="Fig 7: the residual plot of the linear regression"}
+plot(lmod_1$residuals, main = 'residual plot for regression model')
+abline(h = 0, col = 'red')
+```
+
+
+
+### Linear Regression with ARMA Noise
+Next, we want to discuss about the linear model with ARMA noises.
+```{r, out.height='80%', out.width='80%', fig.align='center'}
+aic_table <- function(data,P,Q, xreg = NULL){
+  table <- matrix(NA,(P+1),(Q+1))
+  for(p in 0:P) {
+    for(q in 0:Q) {
+      table[p+1,q+1] <- arima(data,order=c(p,0,q), xreg = xreg)$aic
+    }
+  }
+  dimnames(table) <- list(paste("AR",0:P, sep=""),
+                          paste("MA",0:Q,sep=""))
+  table
+}
+huron_aic_table <- aic_table(price,3,3, year)
+huron_aic_table
+
+arma11_reg <- arima(price, order = c(1, 0, 1), xreg = year)
+arma11_reg
+```
+
+According to the AIC criteria. `ARMA(1,1)` has the lowest AIC value in small models, so we choose regression with ARMA(1,1) noise.
+
+The model with ARMA errors can be written as, where Mt is months and ηt is an ARMA(1,1) error.:
+$$
+Y_t=\beta_0+\beta_1M_t+\eta_t
+$$
+
+
+
+### Residual Analysis of the regression with ARMA noise[5]{.tabset}
+
+Then we plot the residual of the regression.
+
+According to the residual plot, there is a evidence of increasing in the amplitude or the heteroskedasticity, which means our error term's variance is not a constant, the further research can study on this thing. The acf plot shows there are several lags' autocorrelation out of 95\% confidenence interval under null hypothesis of Gussian white noise. On the other hand, the AIC table shows some larger regression model with ARMA noise has lower AIC, so maybe fit a larger ARMA noise is better.
+
+#### Acf Residual Plot
+
+```{r, out.height='80%', out.width='80%', fig.align='center', fig.cap="Fig 8: the acf of the residual"}
+plot(acf(arma11_reg$residuals))
+
+```
+
+
+#### Residual plot of the regression with large arma noise
+
+```{r, out.height='80%', out.width='80%', fig.align='center', fig.cap="Fig 9: the residual plot of the regression with large arma noise"}
+plot(arma11_reg$residuals, ylab = 'Residuals')
+
+```
+
+### Normal ARMA Model
+The other model we want to try is the ARMA model.
+```{r,warning = FALSE}
+aic_table <- function(data,P,Q){
+  table <- matrix(NA,(P+1),(Q+1))
+  for(p in 0:P) {
+    for(q in 0:Q) {
+      table[p+1,q+1] <- arima(data,order=c(p,0,q))$aic
+    }
+  }
+  dimnames(table) <- list(paste("AR",0:P, sep=""),
+                          paste("MA",0:Q,sep=""))
+  table
+}
+huron_aic_table <- aic_table(price,3,3)
+huron_aic_table
+
+arma11 <- arima(price, order = c(1, 0, 1))
+arma11
+```
+95% confidence intervals of coefficients are shown below.
+
+```{r}
+t(confint(arma11))
+```
+
+None of the confidence intervals of the coefficients include 0. Next, check if the ARIMA(3,1,2) model is both causal and invertible.
+
+```{r, out.height='80%', out.width='80%', fig.align='center', fig.cap="Fig 10: The plot of ARMA(1,1) characteristic roots"}
+autoplot(arma11, main = "Plotting the ARMA(1,1) characteristic roots")
+```
+
+According to the AIC table, the ARMA(1, 1) has relatively lower AIC value among small model. Both roots of AR and MA is out of unit circle and have very low standard error.
+
+
+### Freduency Domain {.tabset}
+Finally we want to check whether there is any cyclical fluctuation of the gasoline prices. 
+As we do in class, we plot the spectra using unparametric and parametric methods separately in the following chunks. 
+
+#### Unsmoothed periodogram
+```{r, out.height='80%', out.width='80%', fig.align='center', warning=FALSE, fig.cap = "Fig 11: the unsmoothed periodogram"}
+spectrum(price, main = 'Unsmoothed periodogram')
+```
+
+#### Smoothed periodogram
+```{r, out.height='80%', out.width='80%', fig.align='center', warning=FALSE, fig.cap = "Fig 12: the smoothed periodogram"}
+smoothed_freq <- spectrum(price, spans = c(3, 5, 3), main = 'Smoothed periodogram')
+abline(v = smoothed_freq$freq[which.max(smoothed_freq$spec)], col = 'red', lty = 'dotted', lwd = 2)
+
+```
+### Explannation of the specturm
+```{r, out.height='80%', out.width='80%', fig.align='center', warning=FALSE}
+domin_frequency <- smoothed_freq$freq[which.max(smoothed_freq$spec)]
+period <- 1/(smoothed_freq$freq[which.max(smoothed_freq$spec)]*12)
+period
+```
+The dominant frequcy is `r domin_frequency` and the period is `r period` which is not make sense in our data because the time range of our time series data is just 40 years, this result means there is no obviously period behavior in the average gasoline price per gallon in our data. 
+
+
+### Local linear re gression for the specturm
+Then we check another smoothing method with local linear regression.
+```{r, out.height='80%', out.width='80%', fig.align='center', warning=FALSE, fig.cap = "Fig 13: Local Linear Regression"}
+loess_smooth_model <- loess(price~year, span = 0.1)
+plot(year, price, type = 'l')
+lines(loess_smooth_model$x, loess_smooth_model$fitted, col = 'red')
+```
+
+Then we plot the smoothed periodogram of the local linear regression.
+```{r, out.height='80%', out.width='80%', fig.align='center', warning=FALSE, fig.cap = "Fig 14: the smoothed periodogram of local linear regression"}
+spectrum(loess_smooth_model$fitted, main = 'Smoothed periodogram')
+loess_spectrum <- spectrum(loess_smooth_model$fitted, main = 'Smoothed periodogram')
+abline(v = loess_spectrum$freq[which.max(loess_spectrum$spec)], col = 'red', lty = 'dotted', lwd = 2)
+
+loess_domin_frequency <- loess_spectrum$freq[which.max(loess_spectrum$spec)]
+loess_period <- 1/(loess_spectrum$freq[which.max(loess_spectrum$spec)]*12)
+loess_period
+```
+When we use local linear regression approach to smooth our time series data, the dominant period frequency we got is `r loess_domin_frequency` which means the period is `r loess_period`. This is a large number as well compared to our data's time range. Based on the two smoothing method we can conclude that there is not obvious short-run cyclial behavior in the average price for gasoline per gallon.
+
+
+## Monthly Change stability Analysis
+
+### ARIMA model of the monthly difference
+Since the differenced data is more stationary, let's take the ARMA model for the differenced data. This differenced data has the equation that transforms the data $y^*_{1:N}$ to $z_{2:N}$ such that $z_n = \Delta y^*_n = y^*_n - y^*_{n-1}$ (chp 6 pg.4).
+
+As mentioned before, we will fit an ARMA(p,q) model for the differenced data, this is also called integrated autoregressive moving average model for $y^*_{1:N}$, also written as ARIMA(p,1,q).
+
+The equation for the ARIMA(p,1,q) model with intercept $\mu$ for $Y_{1:N}$ is as follows:
+$$\phi(B)[(1-B)Y_n - \mu] = \psi(B)\epsilon_n$$
+
+where $\epsilon_n$ is a white noise process, $\phi(x)$ and $\psi(x)$ are ARMA polynomials. (Lecture Notes Chapter 6, pg. 4)
+
+```{r, warning = FALSE}
+aic_table <- function(data, P, Q){
+  table <- matrix(NA, (P+1), (Q+1))
+  for (p in 0:P){
+    for(q in 0:Q){
+      table[p+1,q+1] <- arima(data, order=c(p,1,q))$aic
+    }
+  }
+  dimnames(table) <- list(paste("AR", 0:P, sep=""),
+                          paste("MA", 0:Q, sep=""))
+  table
+}
+
+price_aic_table <- aic_table(price,4,6)
+price_aic_table
+```
+
+From AIC table above, it can be seen that ARIMA(4,1,2) model has the lowest AIC. 
+
+
+```{r}
+price_arima <- arima(price, order = c(4,1,2))
+price_arima
+```
+### Model Diagnostics
+
+As a diagnostic test, let's plot the autocorrelation function for the residuals of this ARIMA model.
+```{r out.width='80%', fig.align='center', warning=FALSE, fig.cap = "Fig 15: the AIC plot of the ARIMA model"}
+acf(residuals(price_arima))
+```
+
+It can be seen that autocorrelation mimics that of a white noise, even though there are some relatively high autocorrelation in some lags.
+
+### Trend of differenced data
+
+Next, let's try to see whether there is a trend in this differenced time series data of the average price of gasoline over the years. It can be seen from the plot before, that there seems to be very little or no trend. We will see if this observation is supported statistically.
+
+Let's fit the ARIMA(4,1,2) model that was shown to be performing relatively well with a linear trend on the date.
+```{r}
+linear_model <- arima(price, order = c(4,1,2), xreg = data$Year)
+linear_model
+```
+
+We have fitted the differenced data $z_2:N$: \
+$$(1-\phi(B))(Y_n - \mu - \beta t_n)= \psi(B)\epsilon_n$$
+
+where $\epsilon_n$ is Gaussian white noise with variance $sigma^2$.
+
+To test whether there exista a linear trend, we will perform hypothesis test with null model:
+$$H_0: \beta = 0$$ against the alternative hypotheses $$H_A = \beta \neq 0$$.
+
+Then, perform a z-test on the slope parameter on the coefficient of the `date` variable by calculating the test statistic: $\frac{\beta}{s.e(\hat{\beta})}$.
+
+```{r}
+0.0547/0.0710
+```
+0.7704225 < 1.96. Therefore, we fail to reject our null hypothesis $H_0$ at 5% level.
+
+We can further confirm this by performing a likelihood ratio test, by computing the difference in log likelihood between the model with a linear trend and one without.
+
+
+```{r}
+426.69 - 426.4
+```
+0.29 < 1.92. Therefore, we again fail to reject our null hypothesis $H_0$ at 5% level. 
+
+(Lecture Notes Chapter 6, page 7-8)
+
+Therefore, both z-test and likelihood ratio test agree that there exist no linear trend in the differenced data.
+
+# Conclusion
+In this project, we want to verify that if we could fit a model for the gasoline price of the United states for future prediction. We would also love to discuss the change of the monthly prices. 
+
+In our analysis, we have found that there is no apparent model for us to fit the overall trend. As the price of the gasoline is highly correlated with the previous data, we could not figure out a simple model for further prediction without any other data sources. Also, we have found no periodical pattern in the fluctuation of the gasoline prices, which means that the change of gasoline prices is somehow irreversible. However, the change of the price itself is pretty steady. It indicates that the price of gasoline would not change dramatically between months to months, but there is also no trend in the amount of change.
+
+
+In the future, we want to combine this data with some other data sources, such as the CPI (Consumer price index) data to check whether there is any causal impact between the gasoline price and CPI. We would also love to refer to some important historical events, such as the oil crisis and the pandemic, and check whether these events would pose a great influence.
+
+
+# References
+
+[1] U.S. Bureau of Labor Statistics [Average Gasoline Price Per Gallon](https://beta.bls.gov/dataViewer/view/timeseries/APU00007471A/).
+
+[2] Ionides, Edward. [Analysis of Time Series lecture notes chapter 9](https://ionides.github.io/531w22/09/slides.pdf).
+
+[3] Ionides, Edward. [Analysis of Time Series lecture notes chapter 5](https://ionides.github.io/531w22/05/slides.pdf).
+
+[4] Ionides, Edward. [Analysis of Time Series lecture notes chapter 6](https://ionides.github.io/531w22/06/slides.pdf).
+
+[5] Otexts.comIonides, Edward. [Regression with ARMA errors.](https://otexts.com/fpp2/regarima.html)
+

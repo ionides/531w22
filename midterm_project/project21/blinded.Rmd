@@ -1,0 +1,381 @@
+---
+title: "Time Series Analysis of Bitcoin"
+output:
+  html_document:
+    toc: true
+    toc_depth: 2
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning=FALSE, message=FALSE, fig.align="center", error=FALSE, fig.width=10)
+```
+## 1. Introduction
+#### 1.1 Motivation
+
+Recently, cryptocurrencies such as Bitcoins have been one of the most heated topics around the world. Cryptocurrencies are being used in multiple areas including decentralized ﬁnance [1], application development [2], art collections [3], etc. The market value of Bitcoin also increased dramatically in the past 3 years, as can be seen by the charts of Bitcoin return below.
+
+This project will perform a time series analysis to investigate into the price as well as other indicators of Bitcoin so that we can have more insight and deeper understanding. Our question of interest is "Can we use time series analysis to gain insight into the nature of Bitcoin, or more specifically, the Bitcoin prices?"
+
+#### 1.2 Data Introduction
+
+Our data set is from [blockchain.com](https://www.blockchain.com/charts) [4], and we mainly use 2 fields of Bitcoin from past 3 years.
+
+- <b>Market Price</b>: The price of each Bitcoin calculated in USD. 
+
+- <b>Trade Volume</b>: The number of Bitcoin traded at major exchanges every day.
+
+## 2. Exploratory Analysis
+
+#### 2.1 Frequency Domain Analysis of Bitcoin Price
+
+```{r}
+df <- read.csv("BTC.csv", header=TRUE)
+index = 1:nrow(df)
+price_loess <- loess(df$MarketPrice~index, span=1)
+plot(df$MarketPrice~index, type="l", main="Bitcoin Market Price", xlab="Index", ylab="Bitcoin Price")
+lines(price_loess$x, price_loess$fitted, type="l", col="red")
+```
+
+In the graph above, we apply Loess smoothing upon the market price of Bitcoin, and it shows a increasing trend. The Loess smoothing curve at a point is computed by finding the linear regression of the data within a certain local neighborhood of the point, and evaluating the resulting line at the desired point. By applying this method to every point, we get the loess smoothing of the whole data. To find a loess smoothing of the data, we have to choose the size of the neighborhood, i.e. the span [5]. For our analysis, we chose a span of 1, since the resulting graph seemed to capture the long term trends of Bitcoin.
+
+From the plot of price, we can also identify two high peaks in past months. On the other hand, it looks like the trend is becoming more and more flat recently.
+
+```{r}
+spectrum(df$MarketPrice, main="Unsmoothed periodogram of Bitcoin Price")
+spectrum(df$MarketPrice, spans=c(3,5,3),main="Smoothed periodogram of Bitcoin Price")
+```
+
+To check whether there is seasonal effect, we plot the frequency domain of original data and smoothed data. From the periodgram of the Bitcoin market price, we can't identify any obvious peak in it. There is rumor that the Bitcoin has a cycle of 4 years [6], but our time series data doesn't cover such a long range (it only covers 3 years).
+
+
+#### 2.2 Data Plot of Return
+
+Now, we will calculate the return of Bitcoin's price movement every day. It's calculated by $r_t=\frac{p_t}{p_{t-1}} - 1$.
+
+```{r  fig.height=5}
+plot(df$Return, type="l", main="Bitcoin Return", xlab="Date", ylab="Bitcoin Return")
+summary(df$Return)
+```
+
+The mean of the return is very close to 0, but given that we have over a thousand data points, let's calculate the 95% confidence interval of the mean return:
+
+```{r}
+x = sd(df$Return)/sqrt(length(df$Return))
+paste("[",round(mean(df$Return)-1.96*x,5),",",round(mean(df$Return)+1.96*x,5),"]")
+```
+
+We can therefore conclude that the mean return is non-zero. In addition, the plot of the returns seems to be stationary, so we're going to conclude that a strictly stationary model [7] is appropriate for the return data.
+
+#### 2.3 ACF Analysis of Return
+
+```{r}
+acf(df$Return, main="ACF of Return")
+```
+In this case, the ACF function of the returns refers to the sample autocorrelation of the return data evaluated at many lags in time [8]. The return has a significantly large autocorrelation value when the lag is equal to 1 and 4, implying that there may some information that can be captured by fitting an ARMA model.
+
+## 3. Return Fitting
+
+#### 3.1 Periodogram
+
+```{r}
+spectrum(df$Return, main="Unsmoothed periodogram")
+spectrum(df$Return, spans=c(3,5,3),main="Smoothed periodogram")
+```
+From the periodogram of the Bitcoin returns, there is no clear peak shown in the periodogram, so an ARMA model (without seasonality) seems appropriate for this data.
+
+#### 3.2 ARIMA Fitting
+
+The ARMA(p,q) model is in the form of
+
+\[\begin{eqnarray}Y_n = \mu + \phi_1(Y_{n-1} - \mu) +...+ \phi_p(Y_{n-p} - \mu) + \epsilon_n + \psi_1\epsilon_{n-1} +...+ \psi_q\epsilon_{n-q}\end{eqnarray}\]
+
+where \[\begin{eqnarray} \mu &=& {\mathbb{E}}[X_n] \\ {\phi}(x)&=&1-{\phi}_1 x-\dots -{\phi}_px^p, \\ {\psi}(x)&=&1+{\psi}_1 x+\dots +{\psi}_qx^q, \\ \epsilon_n&\sim&\mathrm{ iid }\, N[0,\sigma^2]. \end{eqnarray}\]
+
+The parameters for this model are \(\theta=({\phi}_{1:p},{\psi}_{1:q},\mu,\sigma^2)\) [9]
+
+```{r fig.height=5}
+require(knitr)
+library(forecast)
+aic_table <- function(data, P, Q, I){
+  table <- matrix(NA, P+1, Q+1)
+  for(p in 0:P){
+    for(q in 0:Q){
+      tryCatch({
+          model = arima(data, order=c(p, 0, q))
+          table[p+1, q+1] <- model$aic
+      }, error = function(e) {})
+    }
+  }
+  dimnames(table) <- list(paste("AR", 0:P, sep=""), paste("MA", 0:Q, sep=""))
+  table
+}
+aa_aic_table <- aic_table(df$Return, 4, 4, 0)
+kable(aa_aic_table, digits=2, format="markdown", caption="AIC for Bitcoin Return")
+```
+[10]
+
+AIC, or Akaike’s information criterion, is a measure of a model fitting a certain dataset. The AIC value will be lower if the likelihood of the model for the data is higher, but the value will be higher if the model is more complex. By using the model with minimal AIC value, we ideally choose a model that has both a relatively high likelihood and low complexity [11]. The table of AIC values show that ARMA(1,1), AR(1,0) and MA(4) are good choices with low AIC value, but we choose to work with ARMA(1,1) due to relatively lower AIC and model simplicity.
+
+```{r}
+model <- arima(x = df$Return, order = c(1, 0, 1))
+autoplot(model, main="ARMA(1,1) characteristic roots")
+```
+All the characteristic roots of the model are in the unit circle, implying that our model is causal and invertible [12].
+
+#### 3.3 Residual Analysis
+
+```{r}
+acf(model$residuals, main="ACF of Redisuals from ARMA(1,1) Model")
+qqnorm(model$residuals, main="Test of Normality of Residual")
+qqline(model$residuals)
+```
+By plotting the ACF and Q-Q plot of the residual, we can see that our ARMA(1,1) effectively capture the time-series information of the return, but our assumption of normally distributed errors is violated. The Q-Q plot shows that the residual has a much heavier tail than normal distribution
+
+```{r, fig.height=10}
+par(mfrow=c(2,2))
+q = (1:length(model$residuals)) / (length(model$residuals) + 1)
+for(dof in c(1, 2, 4, 8))
+{
+  qqplot(model$residuals, qt(q, dof), sub=paste("Residualds' Q-Q Plot with T-distribution for dof ", dof))
+  qqline(model$residuals, qt(q, dof))
+}
+```
+
+It turns out that the a T-distribution with degree of freedom 4 can fit the tail of residuals well, but we may need some other tools to combine T-distribution with ARMA model.
+
+## 4. Profile Likelihood and Simulation
+
+#### 4.1 Paremeter Estimation
+```{r}
+model 
+K <- 50
+ma1 <- seq(from=0,to=1,length=K)
+ar1 <- seq(from=-1,to=0,length=K)
+profile_AR <- rep(NA,K)
+profile_MA <- rep(NA,K)
+for(k in 1:K) {
+  tryCatch({
+    profile_AR[k] <- logLik(arima(df$Return,order=c(1,0,1),
+                                      fixed=c(ar1[k], NA, NA)))
+  }, error = function(e) {})
+  
+  tryCatch({
+    profile_MA[k] <- logLik(arima(df$Return,order=c(1,0,1),
+                                      fixed=c(NA, ma1[k], NA)))
+  }, error = function(e) {})
+}
+plot(profile_AR~ar1,ty="l", main="Profile Likelihood of AR")
+plot(profile_MA~ma1,ty="l", main="Profile Likelihood of MA")
+ci_AR = ar1[which(profile_AR>max(profile_AR, na.rm=TRUE)-0.5 * qchisq(0.95, df=1))]
+ci_MA = ma1[which(profile_MA>max(profile_MA, na.rm=TRUE)-0.5 * qchisq(0.95, df=1))]
+```
+[13]
+
+| Coefficient | $\theta_{mle}$ | MLE CI               | Profile Likelihood CI |
+| ----------- | -------------- | -------------------- | -------------- |
+| AR1         | $-0.6384$      | $[-1.1937, -0.0831]$ | $[-0.8776,0]$  |
+| MA1         | $0.5553$       | $[0.3316, 0.779]$    | $[0, 0.8367]$  |
+
+The profile likelihood give us a narrower confidence interval than MLE for AR1, while the confidence for MA1 is wider. It essentially depends on the shape of likelihood function near to the MLE estimates [14].
+
+#### 4.2 Bootstrap Validation
+
+```{r fig.height=4}
+set.seed(123456)
+J <- 500
+params <- coef(model)
+ar <- params[grep("^ar",names(params))]
+ma <- params[grep("^ma",names(params))]
+intercept <- params["intercept"]
+sigma <- sqrt(model$sigma2)
+theta <- matrix(NA,nrow=J,ncol=length(params),
+                dimnames=list(NULL,names(params)))
+for(j in 1:J) {
+  try( {
+    Y_j <- arima.sim(
+      list(ar=ar,ma=ma),
+      n=length(df$Return),
+      sd=sigma
+    )+intercept
+    theta[j,] <- coef(arima(Y_j,order=c(1,0,1)))
+  } )
+}
+hist(theta[,1], breaks=50, xlim=c(-1, 0), main="Bootstrap Result of AR1 parameter of ARMA(1,1) ")
+hist(theta[,2], breaks=50, xlim=c(0,1), main="Bootstrap Result of MA1 parameter of ARMA(1,1) ")
+```
+[15]
+
+The result from bootstrap is similar to the profile likelihood estimation result.
+
+#### 4.3 Simulation
+
+To generate a more intuitive understanding of the ARMA model, we're going to use the estimated return from the ARMA model to simulate the price of Bitcoin.
+
+```{r}
+set.seed(123456)
+ret <- arima.sim(
+  list(ar=ar,ma=ma),
+  n=length(df$Return),
+  sd=sigma
+)+intercept
+price <- cumprod(ret + 1) * df$MarketPrice[1]
+plot(df$MarketPrice~index, type="l", main="Bitcoin Market Price", xlab="Index", ylab="Bitcoin Price")
+lines(price_loess$x, price_loess$fitted, type="l", col="red")
+lines(price~index, col="blue", type="l")
+```
+It looks like the simulation from return from ARMA model is very different from the true price movement of Bitcoin. It generally follows the trend shown in the red line, but the high volatility behavior of the Bitcoin rarely occurs. We believe it's due to our model can't catch the heavy tail of the residuals.
+
+## 5. Relationship between Returns and Trade Volume
+
+Another interesting aspect to examine is whether there is sufficient evidence of a relationship between returns and other values, like trade volume. First, let's plot the trade volume over time.
+
+```{r}
+plot(df$TradeVolume~index, type="l", ylab="Trade Volume", main="Trade Volume over Time")
+```
+
+It does not seem like a stationary model would fit this data well because the mean seems to be at a higher level around the time that the Bitcoin price rose to a higher price. As a next step, let's examine some sample cross correlation functions [16] between returns and trade volume.
+
+```{r}
+ccf(df$TradeVolume, df$Return, lag.max=30, main="Trade Volume and Return", ylab="CCF")
+```
+
+Interestingly, there seems to be a significant relationship between trade volume and the return 15 and 16 days earlier. In addition, all of the autocorrelation values for lags between 2 and 30 are positive, which seems strange, but we should run statistical tests to see if there is anything significant to be found.
+
+This motivates us to fit some AIC models to the returns, where we additionally include the trade volume as an "independent" variable.
+
+```{r}
+aic_table <- function(data, P, Q){
+  table <- matrix(NA, P+1, Q+1)
+  for(p in 0:P){
+    for(q in 0:Q){
+      tryCatch({
+          model = arima(data, order=c(p, 0, q), xreg=df$TradeVolume)
+          table[p+1, q+1] <- model$aic
+      }, error = function(e) {})
+    }
+  }
+  dimnames(table) <- list(paste("AR", 0:P, sep=""), paste("MA", 0:Q, sep=""))
+  table
+}
+aa_aic_table <- aic_table(df$Return, 4, 4)
+kable(aa_aic_table, digits=2, format="markdown", caption="AIC with trade volume")
+```
+[10]
+
+The models with the lowest AIC values in this table are ARMA(1,1) and ARMA(0,4). Although the ARMA(1,1) model has a slightly larger AIC value than ARMA(1,1), it is also a much simpler model, so we will examine the ARMA(1,1) model (i.e. regression with ARMA(1,1) errors).
+
+However, the ARMA(1,1) & Trade Volume AIC value, -3945.78, is actually greater than the AIC value of the ARMA model without considering trade volume -3947.55, so there is no significant evidence that considering the Trade Volume in this way improves the model.
+
+In conclusion for this section, it is better to leave the trading volume out of the model for Bitcoin returns.
+
+## 6. Analysis of Return Square
+#### 6.1 ACF Analysis of Return Square
+The square of return can show how volatile the market in some way, because when there is huge change in the price, more people may make reaction, so the price may move up and down in a dramatic way.
+
+```{r}
+plot(df$Return**2, main="Bitcoin Return Square", type="l", ylab="Returns Squared")
+acf(df$Return**2, main="ACF of Return Square")
+```
+We also plot the sample ACF function of the square of return, showing how dramatic the market is. The plot shows that there is a significant ACF when the lag is 1 and 7. There is also high ACF when the lag is 4 or 11. Hence, it looks like that there's a clustering affect for the return square.
+
+#### 6.2 Frequency Domain Analysis of Return Sqaure
+
+```{r}
+spectrum(df$MarketPrice**2, main="Unsmoothed periodogram of Bitcoin Return Square")
+spectrum(df$MarketPrice, spans=c(3,5,3),main="Smoothed periodogram of Bitcoin Return Square")
+```
+There is no high peak in the smoothed periodogram of the return sqaure, therefore there is no obvious cycle in it.
+
+#### 6.3 Model Fitting for Return Sqaure
+
+```{r}
+aic_table <- function(data, P, Q, I){
+  table <- matrix(NA, P+1, Q+1)
+  for(p in 0:P){
+    for(q in 0:Q){
+      tryCatch({
+          model = arima(data, order=c(p, 0, q))
+          table[p+1, q+1] <- model$aic
+      }, error = function(e) {})
+    }
+  }
+  dimnames(table) <- list(paste("AR", 0:P, sep=""), paste("MA", 0:Q, sep=""))
+  table
+}
+aa_aic_table <- aic_table(df$Return ** 2, 4, 4, 0)
+kable(aa_aic_table, digits=2, format="markdown", caption="AIC for Bitcoin Return Square")
+```
+[10]
+
+We choose AR(1) model because it has a low AIC among all simple models.
+```{r}
+model = arima(df$Return ** 2 - mean(df$Return**2), order=c(1, 0, 0))
+acf(model$residuals)
+qqnorm(model$residuals)
+qqline(model$residuals)
+```
+The ARMA model doesn't fit well for the return square, because when the ACF is out of the confidence interval when the lag is 4, 7, 11 and 18. What's more, the residuals are not fitting the normal distribution well, since it also has a much heavier tail.
+
+## 7. Conclusion
+
+In this report, we have analyzed Bitcoin price and return of Bitcoin’s daily price movement. We first fitted ARMA(1,1) model to examine the time series of the return. We have also discovered that the residual has a heavy tail. The simulation we have ran using our result from the ARMA(1,1) model did not successfully capture the actual price movement of Bitcoin. We believe this is again due the heavy residual tail influencing the model. Because T distribution with degree of freedom 4 seem to compesate such problem, we believe further investigation is needed to improve the model in combining that with ARMA(1,1).
+
+Alertantively, we could find variables to add into the model to improve such problem. So, we looked into the relationship between returns and trade volume to further explore what influences Bitcoin. However, AIC value of ARMA model including trade volume is greater than that of the ARMA model without trade volume, so we did not include the trade volume into the model.
+
+Another approach taken was examining the squared return instead. However, the ARMA did not fit well and again the heavier tail of residual problem was still remaining. Bitcoin price is influenced by various factors including its supply and demand, competing cryptocurrencies, etc. Therefore, there are various possible studies that could be added from our current models and modfications.
+
+## References
+
+[1] S. Hirsh and S. W. Alman, “Blockchain,” Amazon, 2020. [Online]. Available: https://aws.amazon.com/blockchain/what-is-defi/. 
+
+[2] “Solidity,” Solidity. [Online]. Available: https://docs.soliditylang.org/en/v0.8.12/.
+
+[3] “Non-fungible tokens (NFT),” ethereum.org. [Online]. Available: https://ethereum.org/en/nft/.
+
+[4] “Blockchain.com charts summary,” Blockchain.com. [Online]. Available: https://www.blockchain.com/charts.
+
+[5] Used explanation of loess smoothing from section 3 of chapter 8.
+
+Ionides, Edward L. “Smoothing in the time and frequency domains”
+
+[6] “The bitcoin and crypto market cycles: What you need to know,” CryptoPotato, 22-Sep-2021. [Online]. Available: https://cryptopotato.com/what-are-crypto-market-cycles/. 
+
+[7] Added this reference for the meaning of stationarity from section 1 of chapter 3.
+
+Ionides, Edward L. “Stationarity, white noise, and some basic time series models”
+
+[8] Used explanation of ACF function from section 3 of chapter 2.
+
+Ionides, Edward L. “Estimating trend and autocovariance”
+
+[9] Used ARMA equations from section 2.1 of chapter 4
+
+Ionides, Edward L. “Linear time series models and the algebra of ARMA models”
+
+[10] Code is modified from section 3 of chapter 5.
+
+Ionides, Edward L. “Parameter estimation and model identification for ARMA models”
+
+[11] Explanation of AIC is based on section 2.2 of chapter 5.
+
+Ionides, Edward L. “Parameter estimation and model identification for ARMA models”
+
+[12] Used causality and invertibility of ARMA models from section 2.2 of chapter 4.
+
+Ionides, Edward L. “Linear time series models and the algebra of ARMA models”
+
+[13] Based profile likelihood code off of section 3.1 of chapter 5
+
+Ionides, Edward L. “Parameter estimation and model identification for ARMA models”
+
+[14] Used maximum likelihood estimator and fisher information from section 1 of chapter 5.
+
+Ionides, Edward L. “Parameter estimation and model identification for ARMA models”
+
+[15] Based bootstrap algorithm off of code on section 3.1, page 12 of chapter 5
+
+Ionides, Edward L. “Parameter estimation and model identification for ARMA models”
+
+[16] Used cross correlation from section 6.1 of chapter 9
+
+Ionides, Edward L. “Case study: An association between unemployment and mortality?”

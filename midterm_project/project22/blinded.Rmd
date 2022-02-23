@@ -1,0 +1,667 @@
+---
+title: "Midterm Project: US Ice Cream Production Time Series Analysis"
+date: Feb 19, 2022
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 4
+    code_folding: hide
+    theme: lumen
+    highlight: monochrome
+---
+
+# Research Description
+
+Everyone loves dessert! No matter what age, no one can resist the temptation of frozen desserts, especially ice cream, during the hot summer months. So how does the production of frozen desserts like ice cream change from month to month? In this analysis, we will answer this question by modeling the time-dependent patterns of ice cream and frozen dessert production.
+
+In this project, we are going to study the time series from [Non-Durable Goods: Ice Cream and Frozen Dessert](https://fred.stlouisfed.org/series/IPN31152N)[[1]](#r1). 
+
+This dataset tracks the industrial production (IP) index monthly from 1972-01 to 2021-11. The data frame contains two variables:
+
+ - Date: Monthly date time
+ - Prod: The IP index measures the real output of all relevant establishments located in the United States, regardless of their ownership, but not those located in U.S. territories. This is a useful indicator for economic output and strength of demand.
+
+Our objective is to utilize methods from STATS 531 to identify the best fitting time-series model for the ice cream production series.
+
+```{r setup, include=FALSE}
+library(ggplot2)
+library(tidyverse)
+library(forecast)
+options(warn=-1)
+options(show.error.messages = FALSE)
+```
+
+# Analysis
+
+## Exploration Data Analysis
+
+To obtain an overview of the ice cream data, we first do the time series plot, and use a Local linear regression approach to show the general trend of the data. 
+From the plot, we observe an obvious seasonal pattern and a non-stationary trend in the data.
+Since ARIMA model requires stationarity, we need to first deal with the trend.
+
+```{r load, fig.cap = cap_fig1}
+ice <- read.csv("ice_cream.csv")
+names(ice) = c("Date", "Prod")
+
+cap_fig1 = paste(
+  "**Figure 1.** *US Ice Cream production data by month.*",
+   "Grey region indicates 95% confidence intervel for locally estimated scatterplot smoothing regression line."
+)
+## plot time series
+ice$Date <- as.Date(ice$Date)
+ice %>%
+  ggplot(aes(x = Date, y = Prod)) +
+  geom_line()+
+  geom_smooth(method = 'loess', formula = y ~ x) +
+  xlab("Month") +
+  ylab("Ice cream Production") +
+  theme_bw()
+```
+The blue fitting curve shows that data is not stationary originally. We might need to differentiate it to eliminate trend and get stationary series.  
+
+We can first try to difference the data with lag=1. $$y_n = \Delta x_n = x_n - x_{n-1}$$
+The series now appears stationary, supporting the selection of $d=1$ in the ARIMA model.
+
+```{r diff1, fig.cap = cap_fig2}
+cap_fig2 = paste(
+  "**Figure 2.** *Difference of US ice cream production data with lag = 1.*"
+)
+ice_diff = data.frame(ice$Date[-1],diff(ice$Prod,lag=1))
+names(ice_diff)=c('date_diff', 'prod_diff')
+ice_diff %>%
+  ggplot(aes(x=date_diff, y=prod_diff))+
+  geom_line()+
+  geom_smooth(method = 'loess', formula = y ~ x) +
+  xlab("Month") +
+  ylab("Ice cream Production Diff with lag=1") +
+  theme_bw()
+```
+The curve line becomes more linear and horizontal than before, which means data is more stationary after differencing. However, the seasonal pattern also seems to have disappeared. Thus, we want to try differencing with seasonal lag.
+
+By plotting the auto-correlation function, we can learn a suitable value for the seasonal lag.
+```{r acf, fig.cap = cap_fig3}
+cap_fig3 = paste(
+  "**Figure 3.** *ACF plot for ice cream production data.*"
+)
+acf(ice$Prod, main = "Ice-cream Production ACF plot")
+```
+From the apparent cyclical pattern in the ACF plot, a period of 12 months is apparent, which means we can use a seasonal difference lag of 12. Then we use this lag to plot the difference of data.
+
+```{r diff12, fig.cap = cap_fig4}
+cap_fig4 = paste(
+  "**Figure 4.** *Difference of US ice cream production data with lag = 12.*"
+)
+ice_diff = data.frame(ice$Date[-c(1:12)],diff(ice$Prod,lag=12))
+names(ice_diff)=c('date_diff', 'prod_diff')
+ice_diff %>%
+  ggplot(aes(x=date_diff, y=prod_diff))+
+  geom_line()+
+  geom_smooth(method = 'loess', formula = y ~ x) +
+  xlab("Month") +
+  ylab("Ice cream Production Diff with lag=12") +
+  theme_bw()
+```
+
+The data shows roughly trend-stationarity with seasonal lag=12, which implies that we can set $D=1$ and use $SARIMA(p,d,q)\times (P,D,Q)_{12}$ model to fit the data.
+
+## Spectral Analysis {.tabset .tabset-fade .tabset-pills}
+To understand the deeper structures of the series, we consider the spectral analysis[[3]](#r3) of the data. This allows us to study the series in the frequency domain.
+
+### Unsmoothed Spectrum
+```{r spectrum1, fig.cap = cap_fig5}
+cap_fig5 = paste(
+  "**Figure 5.** *Unsmoothed periodogram of US Ice Cream production monthly data.*"
+)
+spec1=spectrum(ice$Prod, main='Unsmoothed periodogram')
+f1 = spec1$freq[which.max(spec1$spec)]
+abline(v=f1, col='red', lwd=2, lty=2)
+text(0.15,0.1, paste('freq =',round(f1,4)), col='red')
+```
+
+### Smoothed Spectrum
+```{r spectrum2, fig.cap = cap_fig6}
+cap_fig6 = paste(
+  "**Figure 6.** *Smoothed periodogram of US Ice Cream production monthly data.*"
+)
+spec2=spectrum(ice$Prod, spans=c(2), main='Smoothed periodogram')
+f2 = spec2$freq[which.max(spec2$spec)]
+abline(v=f2, col='red', lwd=2,lty=2)
+text(0.15, 2, paste('freq =',round(f2,4)), col='red')
+```
+
+### Smooth via AR model
+```{r spectrum3, fig.cap = cap_fig7}
+cap_fig7 = paste(
+  "**Figure 7.** *Smoothed periodogram of US Ice Cream production monthly data.*",
+  "Smoothed via AR model."
+)
+## Using the interval between peaks here
+find_peaks <- function (x, m = 3){
+    shape <- diff(sign(diff(x, na.pad = FALSE)))
+    pks <- sapply(which(shape < 0), FUN = function(i){
+       z <- i - m + 1
+       z <- ifelse(z > 0, z, 1)
+       w <- i + m + 1
+       w <- ifelse(w < length(x), w, length(x))
+       if(all(x[c(z : i, (i + 2) : w)] <= x[i + 1])) return(i + 1) else return(numeric(0))
+    })
+     pks <- unlist(pks)
+     pks
+}
+
+spec3=spectrum(ice$Prod, method='ar', main='Spectrum estimated via AR model picked by AIC')
+f3 = spec3$freq[find_peaks(spec3$spec)[1]]
+abline(v=f3, col='red', lwd=2, lty=2)
+text(0.15, 9, paste('freq =',round(f3,4)), col='red')
+```
+
+From plots we can find that for unsmoothed and smoothed with spans=2 data, they both have peak near frequency $\omega=0.083$, which corresponds to the period $T=\frac{1}{\omega}=12.05$. That is to say, the domain period is about 1 cycle per year. Note that in figure 7, we use the second highest peak to get the freq. The method to find peaks from data was found in an online question[[2]](#r2).
+
+## Decomposition
+For the ice cream series, high frequency variation can be considered "noise", while low frequency variation might be considered trend. But here we try to extract the business cycles, which requires a band of mid-range frequencies. We build a smoothing operation in the time domain to extract its business cycles and then study it in the frequency domain.
+
+```{r decomposition, fig.cap = cap_fig8}
+cap_fig8 = paste(
+  "**Figure 8.** *Decomposition of ice cream production.*"
+)
+prod = ice$Prod
+date = seq(from = 1972,length = length(prod) , by = 1 / 12)
+
+ice_low = ts(loess(prod ~ date, span = 0.5)$fitted,
+            start = 1972, 
+            frequency = 12)
+ice_high = ts(prod - loess(prod ~ date, span = 0.1)$fitted,
+           start = 1972,
+           frequency = 12)
+ice_cycles = prod - ice_high - ice_low
+plot(ts.union(prod, ice_low, ice_high, ice_cycles),
+     main = "Decomposition of ice production as trend + noise + cycles")
+```
+
+```{r spectrum ratio1, fig.cap = cap_fig9}
+cap_fig9 = paste(
+  "**Figure 9.** *Spectrum for Srigin data and Cycle data.*",
+  "Business cycle data for ice cream production(Red)."
+)
+spec_union = spectrum(ts.union(prod, ice_cycles))
+
+spec_rps = data.frame(freq = spec_union$freq,
+       ratio = spec_union$spec[,2]/spec_union$spec[,1])
+xlim = spec_rps %>%
+  filter(ratio > 0.5) %>%
+  summarize(mini = min(freq), maxi = max(freq)) %>%
+  unlist()
+```
+
+```{r spectrum ratio2, fig.cap = cap_fig10}
+cap_fig10 = paste(
+  "**Figure 10.** *Spectrum response ratio.*"
+)
+spec_rps %>%
+  ggplot(aes(x = freq, y = ratio)) +
+  geom_line()+
+  scale_x_continuous(name = "Frequency") + 
+  scale_y_continuous(name = "Spectrum Ratio(scaled by log10)",
+                     trans = "log10") +
+  geom_hline(yintercept = 0.5,
+             col = "tomato3",
+             lty = "dashed") +
+  geom_hline(yintercept = max(spec_rps$ratio),
+             col = "tomato3",
+             lty = "dashed") +
+  geom_vline(xintercept = xlim,
+             col = "tomato3",
+             lty = "dashed") + 
+  geom_text(aes(x = xlim[1],
+                label = sprintf("%.3f", xlim[1]),
+                y = 1e-15),
+            colour = "darkred") +
+  geom_text(aes(x = xlim[2],
+                label = sprintf("%.3f", xlim[2]),
+                y = 1e-15),
+            colour = "darkred")
+```
+
+Here we set the cutoff value to be 0.5, and the spectrum response ratio plot indicates that nearly half of the power for frequencies with cycle length between $\frac{1}{0.68}=1.47$ and $\frac{1}{0.08}=12.5$ months are kept.
+Then frequencies within this interval could be interpreted as frequencies that related to the ice cream production cycle.
+
+## Model section
+
+### auto selection
+
+R has a built-in ARIMA model selection function, `auto.ARIMA`, which takes into account the AIC and BIC values generated to determine the best combination of parameters. 
+This function may not give us the best fitted model, but it can provide a reference for our model selection process.
+```{r auto selection}
+autoARIMA <- auto.arima(ice$Prod)
+autoARIMA
+```
+The auto-selection process found $ARIMA(1, 1, 0)$ as the best fitting model for the production data. We will have to analyze the performance of this model further, but we can see that the auto-selection process aggrees on differentiating the data with lag = 1. This shows that our previous analysis is reasonable.
+
+### ARIMA model selection
+
+Since the raw data is not stationary, we set $d = 1$. Now, let's find parameters p, and q for $ARIMA(p, 1, q)$ model by a more reliable method, the Akaike Information Criteria(AIC). 
+It penalizes models that predict inaccurately and use more independent variables (parameters). 
+A model with low AIC values is the model we are looking for. 
+First, let's plot the AIC table for small p and q values to select from.
+```{r arima aic selection, eval=FALSE}
+aic_table_arima = function(data, P, Q){
+  table = matrix(NA, (P + 1), (Q + 1) )
+  for(p in 0:P){
+    for(q in 0:Q){
+        try({
+            table[p+1, q+1] = arima(data,
+                              order = c(p, 1, q)
+      )$aic
+            })
+    }
+  }
+  dimnames(table) = list(paste("AR", 0:P),
+                         paste("MA", 0:Q) )
+  table
+}
+aic_table_arima(ice$Prod, 5, 5)
+```
+
+|          | **MA 0** | **MA 1** | **MA 2** | **MA 3** | **MA 4** | **MA 5** |
+|----------|----------|----------|----------|----------|----------|----------|
+| **AR 0** | 4652.762 | 4543.907 | 4502.755 | 4499.941 | 4439.823 | 4391.367 |
+| **AR 1** | 4508.102 | 4510.003 | 4500.125 | 4500.605 | 4414.162 | 4356.125 |
+| **AR 2** |  4509.91 | 4472.067 | 4058.179 | 4440.714 | 3989.001 | 4326.366 |
+| **AR 3** | 4484.355 | 4281.054 | 4041.326 | NA       | NA       | 4325.394 |
+| **AR 4** | 4442.819 | 4233.119 | 4015.794 |  4018.74 | 3983.809 | 3982.459 |
+| **AR 5** |  4372.93 | 4179.788 | 3982.798 | 3972.499 |  4021.77 | 4013.822 |
+
+According to the AIC table, we can find that the $ARIMA(5,3)$ model has the min value of AIC, yet following this criterion tends to result in the complexity of model. 
+To see more carefully, we can find that there is a sharp decrease of AIC value when model comes to $ARIMA(2,2)$, which might be more approprate for us to fit. We will compare different models in Diagnosis part.
+
+### SARIMA model selection
+After selecting ARIMA model, we now consider on the seasonal part. From study before, we set $D=1$ with period=12 to calcuate the AIC table.
+
+```{r sarima aic, eval=FALSE}
+aic_table_sarima = function(data, P, Q){ 
+    table = matrix(NA, (P+1), (Q+1))
+    for (p in 0:P){
+        for (q in 0:Q){
+            try({
+            table[p+1, q+1] = arima(data, 
+                                    order=c(2, 1, 2),
+                                    seasonal = list(order = c(p, 1, q), period = 12))$aic
+                })
+        }
+    }
+    dimnames(table) = list(paste('SAR', 0:P, sep=' '), paste('SMA', 0:Q, sep=' '))
+    table
+}
+aic_table_sarima(ice$Prod, 3, 3)
+```
+
+|           | **SMA 0** | **SMA 1** | **SMA 2** | **SMA 3** |
+|-----------|-----------|-----------|-----------|-----------|
+| **SAR 0** |  3538.415 |  3321.604 |  3323.443 |  3325.039 |
+| **SAR 1** |  3393.053 |  3323.431 |  3325.316 |  3326.864 |
+| **SAR 2** |  3359.898 |  3325.065 |  3326.942 |  3323.571 |
+| **SAR 3** |  3344.342 |  3326.466 |  3349.119 |  3324.304 |
+
+
+For $ARIMA(2,1,2)$ model, its seasonal part $(P,Q)_{12}=(0,1)_{12}$ gives the smallest AIC value, while $(P,Q)_{12}=(1,1)_{12}$ also provides close value.
+We then need to find which model is more stable and has better properties in the Diagnosis section.
+
+# Diagnosis
+
+In this section we will analyze the fit of each of the final 3 models through visualizations, testing the residual assumptions, checking for causality & invertibility, and performing Wilk's approximation.
+ 
+## Fitted Values {.tabset .tabset-fade .tabset-pills}
+
+Below are plots comparing the true and fitted values of the data. All of the models fit the data reasonably well from a visual evaluation, so we will have to take a closer look at the residuals.
+
+### ARIMA(1, 1, 0)
+
+```{r test 110, fig.cap = cap_fig11}
+cap_fig11 = paste(
+  "**Figure 11.** *ARIMA(1,1,0) model Fitted value(Red) and Original time series(Black).*"
+)
+arima110 <- Arima(ice$Prod, order=c(1,1,0))
+ice %>%
+  ggplot(aes(x = Date, y = Prod)) +
+  geom_line() +
+  geom_line(aes(y = fitted(arima110)),
+            col = "tomato3") +
+  xlab("Month") +
+  ylab("Ice-cream Production") +
+  theme_bw()
+```
+
+### SARIMA(2, 1, 2)x(0, 1, 1)
+
+```{r test 212 011, fig.cap = cap_fig12}
+cap_fig12 = paste(
+  "**Figure 12.** *SARIMA(2,1,2)x(0,1,1) model Fitted value(Red) and Original time series(Black).*"
+)
+sarma212011 <- Arima(ice$Prod, order=c(2, 1, 2), seasonal = list(order = c(0, 1, 1), period = 12))
+ice %>%
+  ggplot(aes(x = Date, y = Prod)) +
+  geom_line() +
+  geom_line(aes(y = fitted(sarma212011)),
+            col = "tomato3") +
+  xlab("Month") +
+  ylab("Ice-cream Production") +
+  theme_bw()
+```
+
+### SARIMA(2, 1, 2)x(1, 1, 1)
+
+```{r test 212 111, fig.cap = cap_fig13}
+cap_fig13 = paste(
+  "**Figure 13.** *SARIMA(2,1,2)x(1,1,1) model Fitted value(Red) and Original time series(Black).*"
+)
+sarma212111 <- Arima(ice$Prod, order=c(2, 1, 2), seasonal = list(order = c(1, 1, 1), period = 12))
+ice %>%
+  ggplot(aes(x = Date, y = Prod)) +
+  geom_line() +
+  geom_line(aes(y = fitted(sarma212111)),
+            col = "tomato3") +
+  xlab("Month") +
+  ylab("Ice-cream Production") +
+  theme_bw()
+```
+
+
+```{r, eval=FALSE, results='hide'}
+# Let me know what you were looking for here.
+res <- fitted(sarma212011) - fitted(sarma212111)
+plot(res)
+```
+
+## Residual Assumptions
+
+We assume residuals are a normally distributed white-noise series. We can break this down into 3 core assumptions:
+
+ - The residuals have mean zero
+ - The residuals are uncorrelated
+ - The residuals are distributed approximately normal
+ 
+ We will see below that each model struggles with at least one assumption.
+ 
+### Mean Zero
+
+```{r meanzero, warning=FALSE, message=FALSE, fig.cap = cap_fig14}
+cap_fig14 = paste(
+  "**Figure 14.** *Models' residuals.*",
+  "Green modle is covered by Blue model."
+)
+tibble(Date = ice$Date,
+       r1 = arima110$resid, 
+       r2 = sarma212011$resid, 
+       r3 = sarma212111$resid) %>%  
+ggplot(aes(x = Date)) +
+  geom_line(aes(y = r1, color = "ARIMA (1,1,0)"), alpha = 0.5) +
+  geom_smooth(aes(y = r1, color = "ARIMA (1,1,0)"), alpha = 0.5,
+              method = 'loess', formula = y ~ x) +
+  geom_line(aes(y = r2, color = "SARIMA (2,1,2)x(0,1,1)"), alpha = 0.5) +
+  geom_smooth(aes(y = r3, color = "SARIMA (2,1,2)x(1,1,1)"), 
+              alpha = 0.5, method = 'loess', formula = y ~ x) +
+  geom_line(aes(y = r3, color = "SARIMA (2,1,2)x(1,1,1)"), alpha = 0.5) +
+  scale_colour_manual("", breaks = c("ARIMA (1,1,0)", "SARIMA (2,1,2)x(0,1,1)",
+                      "SARIMA (2,1,2)x(1,1,1)"), values = c("red", "green", "blue")) + 
+  theme_bw() +
+  ylab("Residuals")
+
+```
+
+The residuals from each of the models seem to be centered around 0.
+
+By plotting the residuals of all the models together, we can see that the SARIMA model residuals are much smaller, indicating better fit. The two SARIMA models provide exactly the same residuals, meaning they have the same fitted values.
+
+
+### Uncorrelation {.tabset .tabset-fade .tabset-pills}
+We assume residuals are uncorrelated in all of our models. To check whether this assumption holds, we can examine the autocorrelation plots of each model's residuals[[5]](#r5). Furthermore, we can numerically test if the correlation is different form 0 by using the Ljung-Box-Pierce Chi Square test[[6]]{#r6}.
+
+$$\hat{Q} = N(N+2)\sum_{k=1}^{L(N)}\frac{1}{N-k}|\hat{\rho_k}|^2$$
+
+Where
+
+$$\hat{Q} \sim \chi^2\left(L(N)-p-q\right)$$
+
+The null hypothesis is that the series is independent.
+
+
+Below, we see the ARIMA model demonstrates significant correlation within the residuals at numerous lags as well as oscillating behavior. The SARIMA models fair better, but still exhibit signs of correlated residuals. All models have at least one lag that exceeds the 5% threshold (blue line) and test statistics that reject the null hypothesis.
+
+#### ARIMA (1,1,0)
+```{r fig.height = 4, fig.cap = cap_fig15}
+cap_fig15 = paste(
+  "**Figure 15.** *ACF plot for ARIMA(1,1,0) residuals*"
+)
+acf(arima110$residuals, main = "Residuals Autocorrelation")
+
+```
+
+```{r, eval = FALSE, results = 'hide'}
+for(l in c(12, 24, 36, 48, 60)){
+  print(Box.test(arima110$residuals, lag = l, type = "Ljung-Box", fitdf = 1))
+}
+```
+
+##### ARIMA (1,1,0)
+|         | Lag 12 | Lag 24 | Lag 36 | Lag 48 | Lag 60 |
+|---------|--------|--------|--------|--------|--------|
+|$\hat{Q}$| 615.13 | 1214   | 1793.6 | 2387.2 | 2988.6 |
+| p-value | 0      | 0      | 0      | 0      | 0      |
+
+#### SARIMA (2,1,2)x(0,1,1)
+```{r, fig.height=4, fig.cap = cap_fig16}
+cap_fig16 = paste(
+  "**Figure 16.** *ACF plot for SARIMA(2,1,2)x(0,1,1) residuals*"
+)
+acf(sarma212011$residuals, main = "Residuals Autocorrelation")
+
+```
+
+
+```{r, eval = FALSE, results = 'hide'}
+for(l in c(12, 24, 36, 48, 60)){
+  print(Box.test(sarma212011$residuals, lag = l, type = "Ljung-Box", fitdf = 5))
+}
+
+```
+
+##### SARIMA (2,1,2)x(0,1,1)
+
+|         | Lag 12 | Lag 24 | Lag 36 | Lag 48 | Lag 60 |
+|---------|--------|--------|--------|--------|--------|
+|$\hat{Q}$| 25.957 | 47.688 | 61.793 | 79.181 | 104.67 |
+| p-value | 0      | 0      | 0      | 0      | 0      |
+
+#### SARIMA (2,1,2)x(1,1,1)
+```{r fig.height=4, fig.cap = cap_fig17}
+cap_fig17 = paste(
+  "**Figure 17.** *ACF plot for SARIMA(2,1,2)x(1,1,1) residuals*"
+)
+acf(sarma212111$residuals, main = "Residuals Autocorrelation")
+
+```
+
+```{r, eval = FALSE, results = 'hide'}
+for(l in c(12, 24, 36, 48, 60)){
+  print(Box.test(sarma212111$residuals, lag = l, type = "Ljung-Box", fitdf = 6))
+}
+
+```
+
+##### SARIMA (2,1,2)x(1,1,1)
+
+|         | Lag 12 | Lag 24 | Lag 36 | Lag 48 | Lag 60 |
+|---------|--------|--------|--------|--------|--------|
+|$\hat{Q}$| 25.696 | 47.577 | 61.772 | 79.027 | 104.2 |
+| p-value | 0      | 0      | 0      | 0      | 0      |
+
+
+
+
+### Normality {.tabset .tabset-fade .tabset-pills}
+
+We can check for normality by comparing the sample quantiles to the theoretical quantiles of a variable distributed normally. If the points fall closely to the line in this Quantile-Quantile plot, it supports the assumption of normality in the residuals.
+
+#### ARIMA (1,1,0)
+
+```{r qq1, fig.cap = cap_fig18}
+cap_fig18 = paste(
+  "**Figure 18.** *QQ-plot for ARIMA(1,1,0) residuals*"
+)
+qqnorm(arima110$residuals, main = "QQ-Plot: Residuals")
+qqline(arima110$residuals)
+```
+
+#### SARIMA (2,1,2)x(0,1,1)
+
+```{r qq2, fig.cap = cap_fig19}
+cap_fig19 = paste(
+  "**Figure 19.** *QQ-plot for SARIMA(2,1,2)x(0,1,1) residuals*"
+)
+qqnorm(sarma212011$residuals, main = "QQ-Plot: Residuals")
+qqline(sarma212011$residuals)
+```
+
+#### SARIMA (2,1,2)x(1,1,1)
+
+```{r qq3, fig.cap = cap_fig20}
+cap_fig20 = paste(
+  "**Figure 20.** *QQ-plot for SARIMA(2,1,2)x(1,1,1) residuals*"
+)
+qqnorm(sarma212111$residuals, main = "QQ-Plot: Residuals")
+qqline(sarma212111$residuals)
+```
+
+The ARIMA model residuals fit well to the normal distribution. The SARIMA models residuals have heavier left tails than expected for a normally distributed series, but still fit reasonably well.
+
+
+## Causality and Invertibility {.tabset .tabset-fade .tabset-pills}
+
+For our model to be stationary, it must uphold both causality and invertibility. Causality means that the series can be represented as a linear process (or a linear combination of white noise). Invertibility means the noise sequence can be represented as a linear process.
+
+To test for these properties, we can plot the inverse characteristic roots of the AR and MA polynomials[[7]]{#r7}. We expect to see the roots to be within the unit circle.
+
+### ARIMA (1,1,0)
+
+```{r root1, fig.cap = cap_fig21}
+cap_fig21 = paste(
+  "**Figure 21.** *Inverse AR roots and inverse MA roots displayed in a complex plane.*"
+)
+plot(arima110, type = "both")
+```
+
+
+### SARIMA (2,1,2)x(0,1,1)
+
+```{r root2, fig.cap = cap_fig22}
+cap_fig22 = paste(
+  "**Figure 22.** *Inverse AR roots and inverse MA roots displayed in a complex plane.*"
+)
+plot(sarma212011, type = "both")
+```
+
+
+### SARIMA (2,1,2)x(1,1,1)
+
+```{r root3, fig.cap = cap_fig23}
+cap_fig23 = paste(
+  "**Figure 23.** *Inverse AR roots and inverse MA roots displayed in a complex plane.*"
+)
+plot(sarma212111, type = "both")
+```
+
+
+All models have inverse roots within the unit circle, so our assumption of stationarity holds.
+
+## Wilk's approximation {.tabset .tabset-fade .tabset-pills}
+
+Here we will compare each of the models using Wilk's approximation[[4]](#r4). We want to check if the models are significantly different from one another to warrant the added complexity.
+
+
+### ARIMA(1,1,0) vs SARIMA (2,1,2)x(0,1,1)
+
+\begin{equation}
+\begin{split}
+H^{<0>} &: \theta \in \Theta^{<0>} = (\mu, \sigma^2, \phi_{1})\\
+H^{<1>} &: \theta \in \Theta^{<1>} = (\mu, \sigma^2, \phi_{1:2}, \psi_{1:2},\Psi_{1})\\
+\ell^{<1>} - \ell^{<0>} &\approx \frac{1}{2}\chi^{2}_{4}
+\end{split}
+\end{equation}
+
+
+```{r likelihood}
+
+log_diff = 2 * (sarma212011$loglik - arima110$loglik)
+chisq_cutoff = qchisq(0.95, df = 4)
+diagnose = ifelse(log_diff > chisq_cutoff,
+                  "The two models are significantly different",
+                  "The two models are NOT significantly different")
+print(diagnose)
+```
+
+### ARIMA(1,1,0) vs SARIMA (2,1,2)x(1,1,1)
+
+\begin{equation}
+\begin{split}
+H^{<0>} &: \theta \in \Theta^{<0>} = (\mu, \sigma^2, \phi_{1})\\
+H^{<1>} &: \theta \in \Theta^{<1>} = (\mu, \sigma^2, \phi_{1:2}, \psi_{1:2}, \Phi_{1}, \Psi_{1})\\
+\ell^{<1>} - \ell^{<0>} &\approx \frac{1}{2}\chi^{2}_{5}
+\end{split}
+\end{equation}
+
+
+```{r likelihood2}
+
+log_diff = 2 * (sarma212111$loglik - arima110$loglik)
+chisq_cutoff = qchisq(0.95, df = 5)
+diagnose = ifelse(log_diff > chisq_cutoff,
+                  "The two models are significantly different",
+                  "The two models are NOT significantly different")
+print(diagnose)
+```
+
+### SARIMA (2,1,2)x(1,1,1) vs SARIMA (2,1,2)x(0,1,1)
+
+\begin{equation}
+\begin{split}
+H^{<0>} &: \theta \in \Theta^{<1>} = (\mu, \sigma^2, \phi_{1:2}, \psi_{1:2},\Psi_{1})\\
+H^{<1>} &: \theta \in \Theta^{<1>} = (\mu, \sigma^2, \phi_{1:2}, \psi_{1:2}, \Phi_{1}, \Psi_{1})\\
+\ell^{<1>} - \ell^{<0>} &\approx \frac{1}{2}\chi^{2}_{1}
+\end{split}
+\end{equation}
+
+```{r likelihood3}
+
+log_diff = 2 * (sarma212111$loglik - sarma212011$loglik)
+chisq_cutoff = qchisq(0.95, df = 1)
+diagnose = ifelse(log_diff > chisq_cutoff,
+                  "The two models are significantly different",
+                  "The two models are NOT significantly different")
+print(diagnose)
+```
+
+
+# Conclusion
+
+In this analysis, we examined US Ice Cream production data by month. We observed both a seasonal and non-stationary pattern in the data that was dealt with by using differencing, spectral analysis, and incorporating seasonal parameters. We identified three promising models and performed extensive diagnostics on each. 
+
+We decided the SARIMA (2,1,2)x(0,1,1) model was the simplest model that achieved reasonable performance. There is still some correlation and tailedness in the residuals which could impact forecasts and prediction intervals produced by this model. Higher order pairings of $p$ and $q$ would not resolve the correlations for either ARIMA nor SARIMA models.
+
+The components of this model fits our intuition about patterns in ice cream production. Ice cream is produced and consumed more heavily in the summer months, it has faced a declining demand recently as healthier alternative products have come to market, and production levels are dependent on previous years.
+
+
+# References
+[[1]]{#r1} [Monthly Ice Cream and Frozen Dessert Production Data](https://fred.stlouisfed.org/series/IPN31152N)
+
+[[2]]{#r2} [How to find local peaks in a series of data](https://stats.stackexchange.com/questions/22974/how-to-find-local-peaks-valleys-in-a-series-of-data)
+
+[[3]]{#r3} [Slides: Time series analysis in frequence domain](https://ionides.github.io/531w22/07/notes.pdf)
+
+[[4]]{#r4} [Slides: Wilk's approximation](https://ionides.github.io/531w22/05/notes.pdf)
+
+[[5]]{#r5} [Examining the ACF plot of the residuals](https://otexts.com/fpp2/regression-evaluation.html)
+
+[[6]]{#r6} [Information about the Box-Ljung Test](https://www.itl.nist.gov/div898/handbook/pmc/section4/pmc4481.htm)
+
+[[7]]{#r7} [Cursory Analysis of Inverse characteristic root plot](https://robjhyndman.com/hyndsight/arma-roots/)

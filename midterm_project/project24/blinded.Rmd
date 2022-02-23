@@ -1,0 +1,265 @@
+---
+title: <center>STATS 531 Midterm Project
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 5
+    code_folding: hide
+    theme: flatly
+    highlight: pygments
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(ggplot2)
+library(magrittr)
+library(forecast)
+library(tidyverse)
+library(optimx)
+library(moments)
+library(evir)
+dessert = read.csv("/Users/gaohuo/Downloads/data.csv")
+colnames(dessert) = c('DATE', 'IP')
+dessert$DATE = as.Date(dessert$DATE)
+```
+
+
+### **Data Source**
+Whether ice cream originated in China or Rome is a matter of debate, but there was little debate in the 1990s that ice cream and other frozen desserts had regained their position as one of America's favorite treats. Our data is the industrial production (IP) index measures the real output of Ice Cream and Frozen Dessert Manufacturing industry. The source of data is: https://fred.stlouisfed.org/series/IPN31152N. 
+
+The topic we interested in is using time series analysis methods and models that we learned in the class to figure out the patterns of  production.
+
+### **Analysis**
+
+#### **1. Exploratory Data Analysis**
+
+From the plot below, the IP index initially showed an upward trend, with a significant decline around 2000, and continued to rise for some time before falling again. The ice cream and frozen desserts industry is an important sector of the American dairy industry. Ice cream was a \$20 billion industry in the early 2000s; worldwide consumption of frozen desserts had risen steadily throughout the 1990s.  As consumers have become more conscious of their intake of fats, the ice cream industry production declined after 2005. Besides, most ice cream is made March through July, July is the busiest production month for ice cream makers due to high temperature.
+
+```{r, fig.align="center", echo=FALSE}
+plot(IP~DATE, data = dessert, type = 'l',ylab = 'IP index',  main = "ice cream & dessert production")
+```
+
+Considering about the significant seasonal effects in our data set, we decided to insight into frequency domain. The plot below shows that the spectrum has peaks at 2,3,4,5,6 cycles per year which are harmonics of the 1-year cycle. 
+
+Dominant frequency is 1, thus the period should be 1 year.
+```{r, fig.align="center", echo=FALSE}
+ip = dessert$IP
+ip_ts = ts(ip, start = 1972, frequency = 12)
+date = seq(from = 1972, length = length(ip_ts), by = 1/12)
+sp1 = spectrum(ip_ts)
+abline(v = sp1$freq[which.max(sp1$spec)], col = 'red', lty = 2)
+```
+
+#### **2. Explanation of Spectrum**
+
+Seasonal effect is pretty strong in our data, next step we will try to use Loess Smoothing to find out the cycle. For this part, high frequency variation might be considered “noise” and low frequency variation might be considered trend.
+```{r, fig.align="center", echo=FALSE}
+ip_low <- ts(loess(ip_ts~date,span=0.3)$fitted,
+start=1972,frequency=12)
+ip_hi <- ts(ip_ts - loess(ip_ts~date,span=0.1)$fitted,
+start=1972,frequency=12)
+ip_cycles <- ip_ts - ip_hi - ip_low
+plot(ts.union(ip_ts, ip_low,ip_hi,ip_cycles), main="Decomposition of sunspots as trend + noise + cycles")
+
+```
+
+After reducing the effects of noise and trend, we have the production cycle here. Here we set the cutoff value to be 0.5, relevant period should between $\frac{1}{0.28} = 3.57$ and $\frac{1}{0.16}=6.25$ years, and frequencies within this interval could be interpreted as frequencies that related to dessert production cycle. 
+```{r, fig.align="center", echo=FALSE}
+spec_union = spectrum(ts.union(ip_ts, ip_cycles), span = c(2,2),plot = F)
+plot(spec_union$freq,spec_union$spec[,2]/spec_union$spec[,1], type = 'l', log="y",
+     ylab="spectrum ratio", xlab="frequency")
+spec_ratio = spec_union$spec[,2]/spec_union$spec[,1]
+a = which(spec_ratio > 0.5)
+c1 = a[1]
+c2 = a[length(a)]
+abline(h = 0.5, v = c(spec_union$freq[c1], spec_union$freq[c2]), col = 'blue', lty = 2, lwd=2)
+```
+
+### **Model Selection**
+
+#### **1. Basic Introduction to Model**
+
+Given data analysis above, we believe that the seasonal ARIMA model with parameters $(p,d,q)\times(P,D,Q)_{12}$ for monthly data is appropriate.
+$$\phi(B)\Phi(B^{12})\triangledown^{d}\triangledown_{12}^D(Y_n-\mu)=\psi(B)\Psi(B^{12})\epsilon_n$$
+With assumption that $\epsilon_n$ is the white noise process and 
+\begin{equation}
+\begin{split}
+\triangledown^d &= (1-B)^d \\
+\triangledown_{12}^D &= (1-B^{12})^{D}
+\end{split}
+\end{equation}
+$\phi(x),\Phi(x),\psi(x),\Psi(x)$ are AR or MA coefficients.
+
+#### **2. AIC Based Model Selection**
+
+We need to select the best P and Q values for the model’s seasonal part based on the Akaike’s information criterion (AIC), lower AIC suggets less information lost with better performance. the formulation of AIC shown below:
+$$AIC = -2 \times \ell(\theta) + 2D$$
+From the exploratory data analysis, 
+
+```{r, fig.align="center", fig.width=6, fig.height=12, echo=FALSE}
+par(mfrow=c(3,1))
+plot(diff(dessert$IP,12),type='l')
+acf(diff(dessert$IP,12))
+pacf(diff(dessert$IP,12))
+```
+data seems to have some seasonality and non-stationary, we first take seasonal difference, the acf plot show the seasonally differenced data is non-stationary, take one more difference
+```{r, fig.align="center",fig.width=6, fig.height=12, echo=FALSE}
+par(mfrow=c(3,1))
+diff(dessert$IP,12)%>%diff(1)%>%plot(type="l")
+diff(dessert$IP,12)%>%diff(1)%>%acf()
+diff(dessert$IP,12)%>%diff(1)%>%pacf()
+```
+Considering the ACF and PACF plots for differenced data, we apply d=1 and D=12 in model and then calculate the AIC with the different groups of (P, Q) to select factors for seasonal part of the model.
+
+```{r , echo=FALSE, fig.align="center", echo=FALSE}
+seasonal_select= function(data, P, Q){
+
+  table = matrix(NA, (P+1), (Q+1) )
+  for(p in 0:P){
+    for(q in 0:Q){
+      p_index=p+1
+      q_index=q+1
+      table[p_index, q_index] = arima(data,
+                              order = c(0, 1, 0),
+                              seasonal = list(order = c(p, 1, q),
+                                              period = 12)
+      )$aic
+    }
+  }
+  dimnames(table) = list(paste("SAR", 0:P),
+                         paste("SMA", 0:Q) )
+  table
+}
+cap_tab2 = paste(
+ "*AIC values from ARMA(0,1,0)(P,1,Q) with different choices of P and Q.*"
+)
+seasonal_select(ip_ts, 2, 2) %>%
+  knitr::kable(cap = cap_tab2, digits = 3)
+```
+
+
+
+Table 2 suggests that the smallest AIC is 3380.595 with P=0, Q=2.  Although the AIC table identifies the model with P=0, Q=2 as the most appropriate or the data, we chose not to fully rely on AIC as the only selection criteria.we  compared and contrast different models by considering model complexity, the number of peaks from the plots in exploratory analysis. we decide to choose the model with P=1, Q=1 with following reasons: 
+1. model with P=1, Q=1 has reasonable AIC values with better model complexity compared to other complex model
+2.  Higher P and Q  are more likely tending to cause singular auto-covariance matrix which cause estimation of coefficients to become inaccurate and difficult.
+3. The model with higher P and Q is more likely to have a unstationay result.
+
+we decide to select the model with P=1, Q=1 for the seasonal part.
+
+
+```{r, echo=FALSE, fig.align="center"}
+nonseasonal_select = function(data, P, Q){
+  table = matrix(NA, (P+1), (Q+1) )
+  for(p in 0:P){
+    for(q in 0:Q){
+      p_index=p+1
+      q_index=q+1
+      table[p_index, q_index] = arima(data,
+                              order = c(p, 1, q),
+                              seasonal = list(order = c(1, 1, 1),
+                                              period = 12)
+      )$aic
+    }
+  }
+  dimnames(table) = list(paste("AR", 0:P),
+                         paste("MA", 0:Q) )
+  table
+}
+cap_tab3 = paste(
+ "*AIC values from ARIMA(p,1,q) (1,1,1) with different  p q.*"
+)
+nonseasonal_select(ip_ts, 4, 5) %>%
+  knitr::kable(cap = cap_tab3, digits = 3)
+```
+
+Given the table above, we can tell that the ARIMA part with p=4, q=5 has the smallest AIC value, which is much lower than other groups of p and q. We chose (p=4,q=5) and other pairs such as (p=3,q=5) with similar AIC but less model complexity to fit model and compared  models' performance through checking the assumptions of the residuals from models, invertibility and causality.As the result, $ARIMA(4,1,5)\times(1,1,1)_{12}$ performs better, which was selected as the final model
+
+### **Diagnosis**
+
+#### **1. Residual Analysis**
+
+```{r, echo=FALSE}
+Model_ICE = Arima(ip_ts,
+      order = c(4, 1, 5),
+      seasonal = list(order = c(1, 1, 1),
+                      period = 12)
+      )
+```
+
+```{r, echo=FALSE, fig.align="center"}
+checkresiduals(Model_ICE)
+
+```
+```{r, echo=FALSE, fig.align="center", fig.width=6, fig.height=8}
+par(mfrow=c(2,1))
+acf(Model_ICE$residuals, main = "Residuals Autocorrelation")
+qqnorm(Model_ICE$residuals, main = "QQ-Plot: Residuals")
+qqline(Model_ICE$residuals)
+
+
+```
+
+The graphs shown the residuals from this model. From the ACF plot, a few significant spikes are shown. The model fail the Ljung-Box test with p<0.05,
+
+$H_{null}$:the residuals are independently distributed\ 
+$H_{a}$:the residuals are correlated
+
+which suggests that the residuals are not independently distributed. Although the model could still be used for forecasting, the prediction interval could be inaccurate because of the inaccurate variance made from correlated residuals
+
+we drew both histogram and qq-norm plot for checking the residual's normality assumption, the histogram shows that the residuals could be close to normal distribution. the qq-norm plot shows a little heavy tails on both sides of data but seems not violate the normality assumption too much
+
+#### **2. Invertibility Analysis**
+
+Invertibility testing is important for ARIMA model, which requires the model having roots of AR and MA polynomials outside the unit circle in the complex plane. we drew the graphs for both inverse AR roots and inverse MA roots to see  the invertibility and causality of the model. If the inverse roots are inside the unit circle, the model does not violate the assumption, otherwise, it suggests that we should treat model selection more carefully
+
+```{r, echo=FALSE, fig.align="center"}
+plot(Model_ICE, type = "both")
+```
+
+As can be seen from the figure above, AR roots are mostly inside the unit circle, while MA roots are mostly near the boundary. This situation is caused by the  factors multicollinearity, but is not unacceptable.
+
+
+#### **3. Fitted Value and Prediction**
+
+We plot the fitted value together with the original time series to have a quick look at how well the model is fitted.
+
+```{r, echo=FALSE, fig.align="center"}
+dessert %>%
+  ggplot(aes(x = DATE, y = IP), title="*Fitted value(Blue) and Original time series(Black).*") +
+  geom_line() +
+  geom_line(aes(y = fitted(Model_ICE)),
+            col = "blue") +
+  xlab("year") +
+  ylab("Ice Cream and Frozen Dessert") +
+  theme_bw() + ggtitle("Fitted value(Blue) and Original time series(Black).") +
+  theme(plot.title = element_text(hjust = 0.5))+ geom_line(linetype = "dashed")
+```
+
+We drew the fitted values and the original time series to check the consistency  of data structure. Although there are also some small fluctuations that the model does not catch, in general, this model capture the majority of the data structure well.
+
+Based on ARIMA model above, we have a simple prediction for next 12 months and have a plot below.
+
+```{r, fig.align="center", echo=FALSE}
+Model_ICE%>%forecast(h=12)%>%autoplot()+ ggtitle("Predicted value(Blue) and Original time series(Black).") + theme(plot.title = element_text(hjust = 0.5))
+```
+
+Based on prediction plot above, we can tell that the quantity of ice cream and frozen dessert production tend to have similar trend and fluctuation like before. And with these data, companies in these industries can make detailed producing and selling plan before and maximize their profits.
+
+
+
+
+
+
+### **Conclusion**
+
+Given our ice cream and frozen dessert production data in America, we do spectrum analysis firstly and then select $SARIMA(4,1,5)\times(1,1,1)_{12}$ model based on AIC values analysis.  Although some limits in our analysis needs further improvement in the future including: 1.some inverse MA roots are around the boundary of the unit circle, which caused by the multicollinearity problem. 2. the sharp decrease in 2000 and 2008 that result from the outside influence cannot be well captured by our model.Applying more complex time series model or incorporating more variables in terms of social influence could help to improve the prediction. In general,our model has shown good fitted pattern on original data, which means that our model successfully catch the spectrum pattern of data and has made a reasonable prediction on production in the future.Given the model and reasonable prediction, we believe that our analysis can well explain production patterns and help companies make decisions.
+
+
+### **Reference**
+
+1. Ice Cream and Frozen Desserts Data: https://www.referenceforbusiness.com/industries/Food-Kindred-Products/Ice-Cream-Frozen-Desserts.html
+2. U.S. production of ice cream and frozen yogurt: https://www.ers.usda.gov/data-products/chart-gallery/gallery/chart-detail/?chartId=89524#:~:text=U.S.%20production%20of%20ice%20cream,1.3%20billion%20gallons%20per%20year&text=Since%202000%2C%20production%20of%20low,has%20decreased%20by%2014%20percent
+3. Seasonal ARIMA models, Forecasting: Principles and Practice, https://otexts.com/fpp2/seasonal-arima.html
+4. 2021 Stats 531 midterm Project: https://ionides.github.io/531w21/midterm_project
+
