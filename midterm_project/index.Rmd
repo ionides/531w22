@@ -1,0 +1,49 @@
+---
+title: "STATS 531 Winter 2022 <br>Midterm projects"
+output:
+  html_document:
+      theme: flatly
+      toc: yes
+csl: ecology.csl
+---
+
+---------
+
+* Projects are posted anonymously below. Source code and data are available from [https://github.com/ionides/531w22/midterm_project](https://github.com/ionides/531w22/tree/master/midterm_project).
+
+* After the course is over and the class grades are assigned, you may choose to request to have your name attached to your project.
+
+-----------
+
+----------
+
+| | |
+|:----|:----|
+| 1. [Project 1](https://ionides.github.io/531w22/midterm_project/project01/blinded.html). <br> | [Review comments](project01/comments.html) |
+| 2. [Project 2](https://ionides.github.io/531w22/midterm_project/project02/blinded.html) | [Review comments](project02/comments.html) |
+| 3. [Project 3](https://ionides.github.io/531w22/midterm_project/project03/blinded.html) | [Review comments](project03/comments.html) |
+| 4. [Project 4](https://ionides.github.io/531w22/midterm_project/project04/blinded.html) | [Review comments](project04/comments.html) |
+| 5. [Project 5](https://ionides.github.io/531w22/midterm_project/project05/blinded.html) | [Review comments](project05/comments.html) |
+| 6. [Project 6](https://ionides.github.io/531w22/midterm_project/project06/blinded.html) | [Review comments](project06/comments.html) | 
+| 7. [Project 7](https://ionides.github.io/531w22/midterm_project/project07/blinded.html) | [Review comments](project07/comments.html) |
+| 8. [Project 8](https://ionides.github.io/531w22/midterm_project/project08/blinded.html) | [Review comments](project08/comments.html) |
+| 9. [Project 9](https://ionides.github.io/531w22/midterm_project/project09/blinded.html) | [Review comments](project09/comments.html) |
+| 10. [Project 10](https://ionides.github.io/531w22/midterm_project/project10/blinded.html) | [Review comments](project10/comments.html) |
+| 11. [Project 11](https://ionides.github.io/531w22/midterm_project/project11/blinded.html) | [Review comments](project11/comments.html) |
+| 12. [Project 12](https://ionides.github.io/531w22/midterm_project/project12/blinded.html) | [Review comments](project12/comments.html) |
+| 13. [Project 13](https://ionides.github.io/531w22/midterm_project/project13/blinded.html) | [Review comments](project13/comments.html) |
+| 14. [Project 14](https://ionides.github.io/531w22/midterm_project/project14/blinded.html) | [Review comments](project14/comments.html) |
+| 15. [Project 15](https://ionides.github.io/531w22/midterm_project/project15/blinded.html) | [Review comments](project15/comments.html) |
+| 16. [Project 16](https://ionides.github.io/531w22/midterm_project/project16/blinded.html) | [Review comments](project16/comments.html) |
+| 17. [Project 17](https://ionides.github.io/531w22/midterm_project/project17/blinded.html) | [Review comments](project17/comments.html) |
+| 18. [Project 18](https://ionides.github.io/531w22/midterm_project/project18/blinded.html) | [Review comments](project18/comments.html) |
+| 19. [Project 19](https://ionides.github.io/531w22/midterm_project/project19/blinded.html) | [Review comments](project19/comments.html) |
+| 20. [Project 20](https://ionides.github.io/531w22/midterm_project/project20/blinded.html) | [Review comments](project20/comments.html) |
+| 21. [Project 21](https://ionides.github.io/531w22/midterm_project/project21/blinded.html) | [Review comments](project21/comments.html) |
+| 22. [Project 22](https://ionides.github.io/531w22/midterm_project/project22/blinded.html) | [Review comments](project22/comments.html) |
+| 23. [Project 23](https://ionides.github.io/531w22/midterm_project/project23/blinded.html) | [Review comments](project23/comments.html) |
+| 24. [Project 24](https://ionides.github.io/531w22/midterm_project/project24/blinded.html) | [Review comments](project24/comments.html) |
+
+----------
+
+-----------
