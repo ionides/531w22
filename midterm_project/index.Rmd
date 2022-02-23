@@ -1,0 +1,49 @@
+---
+title: "STATS 531 Winter 2022 <br>Midterm projects"
+output:
+  html_document:
+      theme: flatly
+      toc: yes
+csl: ecology.csl
+---
+
+---------
+
+* Projects are posted anonymously below. Source code and data are available from [https://github.com/ionides/531w22/midterm_project](https://github.com/ionides/531w22/tree/master/midterm_project).
+
+* After the course is over and the class grades are assigned, you may choose to request to have your name attached to your project.
+
+-----------
+
+----------
+
+| | |
+|:----|:----|
+| 1. [Space weather](https://ionides.github.io/531w22/midterm_project/project01/Blinded.html). <br> | [Review comments](project01/comments.html) |
+| 2. [Ethereum and Investment](https://ionides.github.io/531w22/midterm_project/project02/blinded.html) | [Review comments](project02/comments.html) |
+| 3. [Future gold return](https://ionides.github.io/531w22/midterm_project/project03/blinded.html) | [Review comments](project03/comments.html) |
+| 4. [NFT and Stock Markets](https://ionides.github.io/531w22/midterm_project/project04/blinded.html) | [Review comments](project04/comments.html) |
+| 5. [Chinese Yuan and USD Exchange Rates](https://ionides.github.io/531w22/midterm_project/project05/blinded.html) | [Review comments](project05/comments.html) |
+| 6. [NFT sales](https://ionides.github.io/531w22/midterm_project/project06/blinded.html) | [Review comments](project06/comments.html) | 
+| 7. [license plates to fossil-fuel car buyers](https://ionides.github.io/531w22/midterm_project/project07/blinded.html) | [Review comments](project07/comments.html) |
+| 8. [Stack Overflow](https://ionides.github.io/531w22/midterm_project/project08/blinded.html) | [Review comments](project08/comments.html) |
+| 9. [Nasdaq Composite](https://ionides.github.io/531w22/midterm_project/project09/blinded.html) | [Review comments](project09/comments.html) |
+| 10. [Daily Confirm and Vaccination in Texas](https://ionides.github.io/531w22/midterm_project/project10/blinded.html) | [Review comments](project10/comments.html) |
+| 11. [The Silver Age of Cinema: Modeling Movie Revenue Over Time](https://ionides.github.io/531w22/midterm_project/project11/blinded.html) | [Review comments](project11/comments.html) |
+| 12. [Average Temperature Change of Los Angeles and Mexico city](https://ionides.github.io/531w22/midterm_project/project12/Blinded.html) | [Review comments](project12/comments.html) |
+| 13. [Avocado Market Volatility](https://ionides.github.io/531w22/midterm_project/project13/blinded.html) | [Review comments](project13/comments.html) |
+| 14. [CO2 Emission from Natural Gas Electric Power Generation in United States](https://ionides.github.io/531w22/midterm_project/project14/blinded.html) | [Review comments](project14/comments.html) |
+| 15. [Ice Sheet Extent in the Bering Sea](https://ionides.github.io/531w22/midterm_project/project15/blinded.html) | [Review comments](project15/comments.html) |
+| 16. [California Wildfires Time Series](https://ionides.github.io/531w22/midterm_project/project16/blinded.html) | [Review comments](project16/comments.html) |
+| 17. [Average Monthly PM2.5 in Detroit, Michigan](https://ionides.github.io/531w22/midterm_project/project17/blinded.html) | [Review comments](project17/comments.html) |
+| 18. [Atmospheric CO2 Level Trends and Seasonality](https://ionides.github.io/531w22/midterm_project/project18/blinded.html) | [Review comments](project18/comments.html) |
+| 19. [Store sales data](https://ionides.github.io/531w22/midterm_project/project19/blinded.html) | [Review comments](project19/comments.html) |
+| 20. [Birth Rate in the U.S.A.](https://ionides.github.io/531w22/midterm_project/project20/blinded.html) | [Review comments](project20/comments.html) |
+| 21. [Time Series Analysis of Bitcoin](https://ionides.github.io/531w22/midterm_project/project21/blinded.html) | [Review comments](project21/comments.html) |
+| 22. [US Ice Cream Production](https://ionides.github.io/531w22/midterm_project/project22/blinded.html) | [Review comments](project22/comments.html) |
+| 23. [US CPI Average Price Gasoline Data](https://ionides.github.io/531w22/midterm_project/project23/blinded.html) | [Review comments](project23/comments.html) |
+| 24. [Ice cream data](https://ionides.github.io/531w22/midterm_project/project24/blinded.html) | [Review comments](project24/comments.html) |
+
+----------
+
+-----------
