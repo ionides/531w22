@@ -13,6 +13,7 @@ output: html_document
 | Annotated slides | [pdf](slides-annotated.pdf) |
 | Recording, Winter 2021: Chapter 7, Part 1  | [(29 mins)](https://youtu.be/72aKoeHqhe8) |
 | Recording, Winter 2021: Chapter 7, Part 2  | [(29 mins)](https://youtu.be/zpMS4jjYpcc) |
+| Discussion question | [html](discussion.html) 
 
 ----------------------
 
