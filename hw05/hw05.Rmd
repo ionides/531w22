@@ -21,7 +21,7 @@ The hints for Exercises 10.2 and 10.4 in the notes may be useful.
 
 The homework can be handwritten and scanned to pdf, however it is recommended to use Latex in Rmarkdown and submit as html. If you are relatively unfamiliar with Latex and Rmarkdown, this will take more time but it is a worthwhile exercise. As usual, you are welcome to use the Latex from the notes as a source, if you like.
 
-Your report should contain a reference section listing sources. The grader should be able to clearly identify where the sources were used, for example using reference numbers in the text. Anything and anyone consulted while you are working on the homework counts as a source and should be credited. The most likely sources for this theoretical homework are class notes, colleagues, Piazza posts and past homework solutions. It is your responsibility to demonstrate in your report the extent to which you have carried out independent work going beyond any sources used. The homework will be graded following the grading scheme in the [syllabus](../syllabus.html).
+Your report should contain a reference section listing sources. The grader should be able to clearly identify where the sources were used, for example using reference numbers in the text. Anything and anyone consulted while you are working on the homework counts as a source and should be credited. The most likely sources for this theoretical homework are class notes, colleagues, Piazza posts and past homework solutions. It is your responsibility to demonstrate and explain in your report the extent to which you have carried out independent work going beyond any sources listed. The homework will be graded following the grading scheme in the [syllabus](../syllabus.html).
 
 
 --------
