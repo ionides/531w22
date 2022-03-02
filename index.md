@@ -78,13 +78,10 @@ Please read the [grading policy in the syllabus](syllabus.html) before submittin
 * [Participation 2](participation/participation2.html), due Mon Jan 31, 11:59pm.
 
 * [Homework 3](hw03/hw03.html), due Mon Feb 7, 11:59pm.
+[Solution](hw03/sol03.html).
 
 * [Participation 3](participation/participation3.html), due Mon Feb 14, 11:59pm.
 
-<!--
-
-[Solution](hw03/sol03.html).
--->
 
 * [Homework 4](hw04/hw04.html), due Mon Feb 14, 11:59pm.
 
