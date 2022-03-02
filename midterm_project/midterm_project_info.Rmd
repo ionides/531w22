@@ -20,7 +20,7 @@ output:
 
 2. A file called `blinded.Rmd` and its compiled version `blinded.html` in which all identifying text is removed. This version will be used for anonymous peer review and posted on the course website.
 
-3. Data files and any other files needed to compile the Rmd on a standard R or Rstudio environment. You can assume that the grader will install any required libraries.
+3. Data files and any other files needed to compile the Rmd on a standard R or Rstudio environment. You can assume that the grader and peer reviewers will install required libraries as needed.
 
 ---------
 
