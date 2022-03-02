@@ -128,11 +128,7 @@ Please read the [grading policy in the syllabus](syllabus.html) before submittin
 
 * [Midterm review report instructions](midterm_project/midterm_review.html)
 
-<!--
-
-* [2021 midterm projects](midterm_project/index.html)
-
--->
+* [2022 midterm projects](midterm_project/index.html)
 
 * You are welcome to browse previous midterm projects from [2016](http://ionides.github.io/531w16/midterm_project/), [2018](http://ionides.github.io/531w18/midterm_project/), [2020](http://ionides.github.io/531w20/midterm_project/) and  [2021](http://ionides.github.io/531w21/midterm_project/) 
 

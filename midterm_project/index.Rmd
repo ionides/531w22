@@ -2,9 +2,7 @@
 title: "STATS 531 Winter 2022 <br>Midterm projects"
 output:
   html_document:
-      theme: flatly
       toc: yes
-csl: ecology.csl
 ---
 
 ---------
