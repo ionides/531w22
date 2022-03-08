@@ -94,6 +94,8 @@ Please read the [grading policy in the syllabus](syllabus.html) before submittin
 
 * [Homework 5](hw05/hw05.html), due Mon Mar 14, 11:59pm.
 
+* [Participation 5](participation/participation5.html), due Mon Mar 21, 11:59pm.
+
 <!--
 
 [Solution](hw05/sol05.html).

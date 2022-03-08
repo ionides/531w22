@@ -23,10 +23,10 @@ output:
 | 4. [NFT and Stock Markets](https://ionides.github.io/531w22/midterm_project/project04/blinded.html) | [Review comments](project04/comments.html) |
 | 5. [Chinese Yuan and USD Exchange Rates](https://ionides.github.io/531w22/midterm_project/project05/blinded.html) | [Review comments](project05/comments.html) |
 | 6. [NFT sales](https://ionides.github.io/531w22/midterm_project/project06/blinded.html) | [Review comments](project06/comments.html) | 
-| 7. [license plates to fossil-fuel car buyers](https://ionides.github.io/531w22/midterm_project/project07/blinded.html) | [Review comments](project07/comments.html) |
+| 7. [License plates to fossil-fuel car buyers](https://ionides.github.io/531w22/midterm_project/project07/blinded.html) | [Review comments](project07/comments.html) |
 | 8. [Stack Overflow](https://ionides.github.io/531w22/midterm_project/project08/blinded.html) | [Review comments](project08/comments.html) |
-| 9. [Nasdaq Composite](https://ionides.github.io/531w22/midterm_project/project09/blinded.html) | [Review comments](project09/comments.html) |
-| 10. [Daily Confirm and Vaccination in Texas](https://ionides.github.io/531w22/midterm_project/project10/blinded.html) | [Review comments](project10/comments.html) |
+| 9. [Nasdaq and gold](https://ionides.github.io/531w22/midterm_project/project09/blinded.html) | [Review comments](project09/comments.html) |
+| 10. [Daily confirmed Covid-19 and vaccination in Texas](https://ionides.github.io/531w22/midterm_project/project10/blinded.html) | [Review comments](project10/comments.html) |
 | 11. [The Silver Age of Cinema: Modeling Movie Revenue Over Time](https://ionides.github.io/531w22/midterm_project/project11/blinded.html) | [Review comments](project11/comments.html) |
 | 12. [Average Temperature Change of Los Angeles and Mexico city](https://ionides.github.io/531w22/midterm_project/project12/Blinded.html) | [Review comments](project12/comments.html) |
 | 13. [Avocado Market Volatility](https://ionides.github.io/531w22/midterm_project/project13/blinded.html) | [Review comments](project13/comments.html) |
