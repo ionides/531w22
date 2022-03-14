@@ -14,6 +14,17 @@ output:
 --------
 
 
+Please submit your homework report to Canvas, including both the Rmarkdown (.Rmd) source file and an HTML file compiled from it.  If necessary, you can submit other files needed for your Rmd file to compile, but please do not submit a copy of the data. Your Rmd file can read in the Consett measles data from the internet, via
+```{r,eval=F}
+read.csv("https://kingaa.github.io/sbied/stochsim/Measles_Consett_1948.csv") 
+```
+
+Your report should contain a reference section listing sources. The grader should be able to clearly identify where the sources were used, for example using reference numbers in the text. Anything and anyone consulted while you are working on the homework counts as a source and should be credited. The homework will be graded following the grading scheme in the [syllabus](../syllabus.html).
+
+This homework is conceptually quite simple, but involves overcoming various technical hurdles. The hurdles may be overcome quite quickly, or could turn into a longer battle. To make progress on statistical inference for POMP models, we have to solve these underlying computational issues. If technical difficulties arise, do not wait long before posting on Piazza.
+
+---------------
+
 ### Installing the **pomp** package
 
 
@@ -36,11 +47,6 @@ output:
 
 ### Homework questions
 
-Please submit your homework report to Canvas, including both the Rmarkdown (.Rmd) source file and an HTML file compiled from it.  If necessary, you can submit other files needed for your Rmd file to compile, but please do not submit a copy of the data. Your Rmd file can read in the Consett measles data from the internet, via
-```{r,eval=F}
-read.csv("https://kingaa.github.io/sbied/stochsim/Measles_Consett_1948.csv") 
-```
-------------
 
 **<big>Question 6.1</big>. Exploring behavior of a POMP model: simulating an SIR process.**
 
@@ -48,7 +54,7 @@ Write a solution to Exercise 2.3 from Chapter 12 (Simulation of stochastic dynam
 
 * We are working toward formal inference for POMP models. Nevertheless, playing with your model by plotting simulations at various parameter values is a useful exercise for getting to understand how your model behaves. It is not enough to know just what parameter value maximizes the likelihood, we also want to understand enough about the model to be able to interpret this MLE. What types of behavior can the model exhibit? How could we describe the behaviors that are consistent with the data?
 
-* Your solution will have to build a copy of the measles model so that you can experiment with it. The [R script](../13/main.R) from Chapter 13 may be useful. The script uses Hadley Wickham's `tidyverse` and `ggplot` approach to R. This is a widely used approach, and well worth learning if you have not seen it before, but you may also stick with basic R. To read the script, you will need to know that `x %>% myfunc(y)` is equivalent to `myfunc(x,y)`, so `%>%` is simply a convenient way to chain together functions, where the output of one function is piped into the next. Check that you understand this syntax for the code 
+* Your solution will have to build a copy of the measles model so that you can experiment with it. The [Chapter 12 R script](https://kingaa.github.io/sbied/stochsim/main.R) may be useful. The script uses Hadley Wickham's `tidyverse` and `ggplot` approach to R. This is a widely used approach, and well worth learning if you have not seen it before, but you may also stick with basic R. To read the script, you will need to know that `x %>% myfunc(y)` is equivalent to `myfunc(x,y)`, so `%>%` is simply a convenient way to chain together functions, where the output of one function is piped into the next. Check that you understand this syntax for the code 
 ```{r,eval=F}
 library(tidyverse)
 read_csv("https://kingaa.github.io/sbied/stochsim/Measles_Consett_1948.csv") %>%
@@ -72,10 +78,6 @@ Write a solution to Exercise 2.4 from Chapter 12 (Simulation of stochastic dynam
 
 ----------
 
-(b) This homework is conceptually quite simple, but involves overcoming various technical hurdles. The hurdles may be overcome quite quickly, or could turn into a longer battle. To make progress on statistical inference for POMP models, we have to solve these underlying computational issues. How long did this homework take? Report on any technical difficulties that arose.
-
-
----------------
 
 ### Acknowledgements
 

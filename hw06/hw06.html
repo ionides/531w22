@@ -365,6 +365,11 @@ pre code {
 
 
 <hr />
+<p>Please submit your homework report to Canvas, including both the Rmarkdown (.Rmd) source file and an HTML file compiled from it. If necessary, you can submit other files needed for your Rmd file to compile, but please do not submit a copy of the data. Your Rmd file can read in the Consett measles data from the internet, via</p>
+<pre class="r"><code>read.csv(&quot;https://kingaa.github.io/sbied/stochsim/Measles_Consett_1948.csv&quot;) </code></pre>
+<p>Your report should contain a reference section listing sources. The grader should be able to clearly identify where the sources were used, for example using reference numbers in the text. Anything and anyone consulted while you are working on the homework counts as a source and should be credited. The homework will be graded following the grading scheme in the <a href="../syllabus.html">syllabus</a>.</p>
+<p>This homework is conceptually quite simple, but involves overcoming various technical hurdles. The hurdles may be overcome quite quickly, or could turn into a longer battle. To make progress on statistical inference for POMP models, we have to solve these underlying computational issues. If technical difficulties arise, do not wait long before posting on Piazza.</p>
+<hr />
 <div id="installing-the-pomp-package" class="section level3">
 <h3>Installing the <strong>pomp</strong> package</h3>
 <ul>
@@ -382,14 +387,11 @@ pre code {
 </div>
 <div id="homework-questions" class="section level3">
 <h3>Homework questions</h3>
-<p>Please submit your homework report to Canvas, including both the Rmarkdown (.Rmd) source file and an HTML file compiled from it. If necessary, you can submit other files needed for your Rmd file to compile, but please do not submit a copy of the data. Your Rmd file can read in the Consett measles data from the internet, via</p>
-<pre class="r"><code>read.csv(&quot;https://kingaa.github.io/sbied/stochsim/Measles_Consett_1948.csv&quot;) </code></pre>
-<hr />
 <p><strong><big>Question 6.1</big>. Exploring behavior of a POMP model: simulating an SIR process.</strong></p>
 <p>Write a solution to Exercise 2.3 from Chapter 12 (Simulation of stochastic dynamic models). Note the following:</p>
 <ul>
 <li><p>We are working toward formal inference for POMP models. Nevertheless, playing with your model by plotting simulations at various parameter values is a useful exercise for getting to understand how your model behaves. It is not enough to know just what parameter value maximizes the likelihood, we also want to understand enough about the model to be able to interpret this MLE. What types of behavior can the model exhibit? How could we describe the behaviors that are consistent with the data?</p></li>
-<li><p>Your solution will have to build a copy of the measles model so that you can experiment with it. The <a href="../13/main.R">R script</a> from Chapter 13 may be useful. The script uses Hadley Wickham’s <code>tidyverse</code> and <code>ggplot</code> approach to R. This is a widely used approach, and well worth learning if you have not seen it before, but you may also stick with basic R. To read the script, you will need to know that <code>x %&gt;% myfunc(y)</code> is equivalent to <code>myfunc(x,y)</code>, so <code>%&gt;%</code> is simply a convenient way to chain together functions, where the output of one function is piped into the next. Check that you understand this syntax for the code</p></li>
+<li><p>Your solution will have to build a copy of the measles model so that you can experiment with it. The <a href="https://kingaa.github.io/sbied/stochsim/main.R">Chapter 12 R script</a> may be useful. The script uses Hadley Wickham’s <code>tidyverse</code> and <code>ggplot</code> approach to R. This is a widely used approach, and well worth learning if you have not seen it before, but you may also stick with basic R. To read the script, you will need to know that <code>x %&gt;% myfunc(y)</code> is equivalent to <code>myfunc(x,y)</code>, so <code>%&gt;%</code> is simply a convenient way to chain together functions, where the output of one function is piped into the next. Check that you understand this syntax for the code</p></li>
 </ul>
 <pre class="r"><code>library(tidyverse)
 read_csv(&quot;https://kingaa.github.io/sbied/stochsim/Measles_Consett_1948.csv&quot;) %&gt;%
@@ -403,10 +405,6 @@ read_csv(&quot;https://kingaa.github.io/sbied/stochsim/Measles_Consett_1948.csv&
 <hr />
 <p><strong><big>Question 6.2</big>. Modifying a POMP model: Adding a latent period to the SIR model</strong></p>
 <p>Write a solution to Exercise 2.4 from Chapter 12 (Simulation of stochastic dynamic models).</p>
-<hr />
-<ol start="2" style="list-style-type: lower-alpha">
-<li>This homework is conceptually quite simple, but involves overcoming various technical hurdles. The hurdles may be overcome quite quickly, or could turn into a longer battle. To make progress on statistical inference for POMP models, we have to solve these underlying computational issues. How long did this homework take? Report on any technical difficulties that arose.</li>
-</ol>
 <hr />
 </div>
 <div id="acknowledgements" class="section level3">
