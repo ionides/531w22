@@ -75,6 +75,7 @@ read_csv("https://kingaa.github.io/sbied/stochsim/Measles_Consett_1948.csv") %>%
 
 Write a solution to Exercise 2.4 from Chapter 12 (Simulation of stochastic dynamic models).
 
+You should use Csnippets for this. It should not require techniques beyond those developed in Chapter 12. However, if you are interested in learning more about writing compiled C code for R, you can look at the [R extensions manual](https://cran.r-project.org/doc/manuals/r-release/R-exts.html). The section on [distribution functions](https://cran.r-project.org/doc/manuals/r-release/R-exts.html#Distribution-functions) is particularly relevant.
 
 ----------
 
