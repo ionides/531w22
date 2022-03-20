@@ -30,7 +30,7 @@ output:
 
 10. It is not sufficient just to cite a whole directory of projects as sources. You should clarify which one (or ones) were used, and where.
 
-11. The first paragraph is copied verbatim from reference 1. However, that source is not referenced at this point. 
+11. The first sentence is copied verbatim from reference 1. However, that source is not referenced at this point. 
 
 12. The research question is posed as just looking for patterns and building a model. It can be helpful to focus on a more specific goal, though providing an industrial forecast might count here.
 
