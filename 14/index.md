@@ -10,11 +10,12 @@ We continue using material from the short course [Simulation-Based Inference for
 |:---------------|:---------------|:------------------------:|
 | Slides  | | [pdf](https://kingaa.github.io/sbied/mif/slides.pdf) |
 | Notes   | | [pdf](https://kingaa.github.io/sbied/mif/notes.pdf) |
-| **R** script  | | [**R**](https://kingaa.github.io/sbied/mif/main.R)          | Recording, Chapter 14, Sections I,II | Classification of inference methods for POMP models | [(16 mins)](https://youtu.be/OaKbivero6I) | 
+| **R** script  | | [**R**](https://kingaa.github.io/sbied/mif/main.R) |
+| Recording, Chapter 14, Sections I,II | Classification of inference methods for POMP models | [(16 mins)](https://youtu.be/OaKbivero6I) | 
 | Recording, Chapter 14, Section III | Introduction to iterated filtering | [(15 mins)](https://youtu.be/4icXW5pdc5E) |
-| Recording, Chapter 14, Section IV | Iterated filtering in practice | [(41 mins)](https://youtu.be/Kq_11Xg8n7E) |
-| Recording, Chapter 14, Sections V | Global likelihood maximization and profile likelihood | [(34 mins)](https://youtu.be/DK9IZFGGYFw) |
-| Recording, Chapter 14, Section VI | Using likelihood and profile calculations to develop a data analysis | [(25 mins)](https://youtu.be/90YyPZiV344) |
+| Recording, Chapter 14, Section IV | Iterated filtering in practice | [(25 mins)](https://youtu.be/xHCcd_6TU9E) |
+| Recording, Chapter 14, Sections V | Global likelihood maximization and profile likelihood | [(33 mins)](https://youtu.be/RFm_KbzkYXk) |
+| Recording, Chapter 14, Section VI | Using likelihood and profile calculations to develop a data analysis | [(20 mins)](https://youtu.be/TL7e4jRg3Xw) |
                                                          |
 -----------
 
@@ -23,9 +24,9 @@ We continue using material from the short course [Simulation-Based Inference for
 
 <iframe width="560" height="315" src="https://www.youtube.com/embed/4icXW5pdc5E" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
 
-<iframe width="560" height="315" src="https://www.youtube.com/embed/Kq_11Xg8n7E" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+<iframe width="560" height="315" src="https://www.youtube.com/embed/xHCcd_6TU9E" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
 
-<iframe width="560" height="315" src="https://www.youtube.com/embed/DK9IZFGGYFw" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+<iframe width="560" height="315" src="https://www.youtube.com/embed/RFm_KbzkYXk" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
 
 <iframe width="560" height="315" src="https://www.youtube.com/embed/90YyPZiV344" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
 
