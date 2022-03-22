@@ -1,4 +1,23 @@
-\input{../header}
+
+\usepackage{paralist}
+\usepackage{pgfpages}
+%\usepackage{mathtools}
+%\usepackage{amsmath}
+%\usepackage{amssymb}
+\usepackage{xspace}        
+\usepackage{graphicx}
+\usepackage{listings}
+
+\setlength{\parskip}{0mm}
+\setlength{\parindent}{0mm}
+\lstset{language=C}
+
+\newcommand\link[2]{\href{#1}{#2}}
+\newcommand{\doi}[1]{\link{https://doi.org/#1}{\texttt{doi:~{#1}}}}
+\newcommand\code[1]{\texttt{#1}}
+\newcommand\package[1]{\textbf{#1}}
+\newcommand\bi{\begin{itemize}}
+\newcommand\ei{\end{itemize}}
 
 \mode<beamer>{\usetheme{AnnArbor}}
 \mode<beamer>{\setbeamertemplate{footline}}
@@ -14,8 +33,8 @@
 
 \setbeamertemplate{footline}[frame number]
 
-<<setup,include=FALSE,cache=FALSE,purl=FALSE,child="../setup.Rnw">>=
-@
+
+
 
 \begin{document}
 
@@ -46,9 +65,13 @@ We follow \link{https://arc-ts.umich.edu/greatlakes/user-guide/\#document-2}{Sec
 \begin{frame}{Connecting to greatlakes with macOS or Linux}
   \begin{enumerate}
   \item Open a Terminal window (recall that, on a Mac, this can be done using Control-Spacebar and typing Terminal) and type
-<<,echo=T,eval=F>>=
+\begin{knitrout}\small
+\definecolor{shadecolor}{rgb}{0.969, 0.969, 0.969}\color{fgcolor}\begin{kframe}
+\begin{alltt}
 ssh uniqname@greatlakes.arc-ts.umich.edu
-@
+\end{alltt}
+\end{kframe}
+\end{knitrout}
 where \code{uniqname} is your uniqname.
 \item Login with your Kerberos level-1 password, and Duo two-factor authentication.
   \end{enumerate}
@@ -78,17 +101,29 @@ This creates a remote terminal shell on greatlakes.
 On Mac or Linux, you can use \code{scp} which has similar syntax to \code{cp}.
 
 To copy \code{myfile} on your laptop to a subdirectory \code{mydir} of your home directory on greatlakes:
-<<,echo=T,eval=F>>=
+\begin{knitrout}\small
+\definecolor{shadecolor}{rgb}{0.969, 0.969, 0.969}\color{fgcolor}\begin{kframe}
+\begin{alltt}
 scp myfile uniqname@greatlakes-xfer.arc-ts.umich.edu:mydir
-@
+\end{alltt}
+\end{kframe}
+\end{knitrout}
 To copy an entire directory, use the \code{-r} flag for recursive copy:
-<<,echo=T,eval=F>>=
+\begin{knitrout}\small
+\definecolor{shadecolor}{rgb}{0.969, 0.969, 0.969}\color{fgcolor}\begin{kframe}
+\begin{alltt}
 scp -r mydir uniqname@greatlakes-xfer.arc-ts.umich.edu:
-@
+\end{alltt}
+\end{kframe}
+\end{knitrout}
 These commands can also be reversed to copy files from greatlakes to your machine. The following copies \code{mydir} back to the current working directory:
-<<,echo=T,eval=F>>=
+\begin{knitrout}\small
+\definecolor{shadecolor}{rgb}{0.969, 0.969, 0.969}\color{fgcolor}\begin{kframe}
+\begin{alltt}
 scp -r uniqname@greatlakes-xfer.arc-ts.umich.edu:mydir .
-@
+\end{alltt}
+\end{kframe}
+\end{knitrout}
 You will need to authenticate via Duo to complete the file transfer.
 On Windows, you can use WinSCP or FileZilla. 
 \end{frame}
@@ -115,23 +150,39 @@ or delete it if it's not doing what you want
 \begin{frame}[fragile]{Useful batch commands}
 
 Submit a job
-<<,echo=T,eval=F>>=
+\begin{knitrout}\small
+\definecolor{shadecolor}{rgb}{0.969, 0.969, 0.969}\color{fgcolor}\begin{kframe}
+\begin{alltt}
 sbatch sample.sbat
-@
+\end{alltt}
+\end{kframe}
+\end{knitrout}
 
 Query job status
-<<,echo=T,eval=F>>=
+\begin{knitrout}\small
+\definecolor{shadecolor}{rgb}{0.969, 0.969, 0.969}\color{fgcolor}\begin{kframe}
+\begin{alltt}
 squeue -j jobid
 squeue -u uniqname
-@
+\end{alltt}
+\end{kframe}
+\end{knitrout}
 Delete a job
-<<,echo=T,eval=F>>=
+\begin{knitrout}\small
+\definecolor{shadecolor}{rgb}{0.969, 0.969, 0.969}\color{fgcolor}\begin{kframe}
+\begin{alltt}
 scancel jobid
-@
+\end{alltt}
+\end{kframe}
+\end{knitrout}
 Check a job script and estimate its start time
-<<,echo=T,eval=F>>=
+\begin{knitrout}\small
+\definecolor{shadecolor}{rgb}{0.969, 0.969, 0.969}\color{fgcolor}\begin{kframe}
+\begin{alltt}
 sbatch --test-only sample.sbat
-@
+\end{alltt}
+\end{kframe}
+\end{knitrout}
 \end{frame}
 
 
@@ -154,16 +205,24 @@ sbatch --test-only sample.sbat
 \begin{frame}[fragile]{R modules on greatlakes}
 
 Sotware on greatlakes is packaged in modules which must be loaded
-<<,echo=T,eval=F>>=
+\begin{knitrout}\small
+\definecolor{shadecolor}{rgb}{0.969, 0.969, 0.969}\color{fgcolor}\begin{kframe}
+\begin{alltt}
 module load R
-@
+\end{alltt}
+\end{kframe}
+\end{knitrout}
 Other versions of R are available:
-<<,echo=T,eval=F>>=
+\begin{knitrout}\small
+\definecolor{shadecolor}{rgb}{0.969, 0.969, 0.969}\color{fgcolor}\begin{kframe}
+\begin{alltt}
 module avail R
-@
+\end{alltt}
+\end{kframe}
+\end{knitrout}
 \bi
 \item 
-We see that R3.6.1 is currently the default. For simple multicore computing, sending jobs to multiple cores on a single node, the default R module is appropriate. 
+We see that R4.1.0 is currently the default. For simple multicore computing, sending jobs to multiple cores on a single node, the default R module is appropriate. 
 
 \ei
 \end{frame}
@@ -178,14 +237,22 @@ We see that R3.6.1 is currently the default. For simple multicore computing, sen
 The \texttt{greatlakes} subdirectory of the \texttt{531w22} git repository has a file \texttt{test.sbat} which submits a batch job running the parallel \texttt{foreach} test in \texttt{test.R}.
 \item
 A basic Linux exercise is to set up a directory on greatlakes with these files, at which point you can run
-<<,echo=T,eval=F>>=
+\begin{knitrout}\small
+\definecolor{shadecolor}{rgb}{0.969, 0.969, 0.969}\color{fgcolor}\begin{kframe}
+\begin{alltt}
 sbatch test.sbat
-@
-to submit the job.
+\end{alltt}
+\end{kframe}
+\end{knitrout}
+to submit the job. If you have little or no experience with Linux or Unix, this is a nontrivial task. You could ask for help or read \link{https://ubuntu.com/tutorials/command-line-for-beginners}{https://ubuntu.com/tutorials/command-line-for-beginners}.
 \item You can transfer the files from your laptop via \texttt{scp}, or by copy-paste, but it may be simplest to clone the class git repository into your greatlakes account,
-<<,echo=T,eval=F>>=
+\begin{knitrout}\small
+\definecolor{shadecolor}{rgb}{0.969, 0.969, 0.969}\color{fgcolor}\begin{kframe}
+\begin{alltt}
 git clone https://github.com/ionides/531w22.git
-@
+\end{alltt}
+\end{kframe}
+\end{knitrout}
 \end{itemize}
 
 \end{frame}
@@ -196,18 +263,26 @@ git clone https://github.com/ionides/531w22.git
 
 \begin{itemize}
 \item Inspect the text file \texttt{test.sbat}, for example by
-<<,echo=T,eval=F>>=
+\begin{knitrout}\small
+\definecolor{shadecolor}{rgb}{0.969, 0.969, 0.969}\color{fgcolor}\begin{kframe}
+\begin{alltt}
 more test.sbat
-@
+\end{alltt}
+\end{kframe}
+\end{knitrout}
 Is it fairly self-explanatory?
 \item One thing that needs changing is to set your email address for alerts about jobs beginning and ending. 
 \item To make these edits on greatlakes, you need a text editor.
 \item It is convenient to use a text editor that runs in a terminal. Options include
-<<,echo=T,eval=F>>=
+\begin{knitrout}\small
+\definecolor{shadecolor}{rgb}{0.969, 0.969, 0.969}\color{fgcolor}\begin{kframe}
+\begin{alltt}
 vi test.sbat
 emacs -nw test.sbat
 nano test.sbat
-@
+\end{alltt}
+\end{kframe}
+\end{knitrout}
 \item It is useful to have some familiarity with each of these editors.
 \end{itemize}
 
@@ -217,13 +292,17 @@ nano test.sbat
 
 \begin{itemize}
 \item You are now ready to run a batch job
-<<,echo=T,eval=F>>=
+\begin{knitrout}\small
+\definecolor{shadecolor}{rgb}{0.969, 0.969, 0.969}\color{fgcolor}\begin{kframe}
+\begin{alltt}
 sbatch test.sbat
-@
+\end{alltt}
+\end{kframe}
+\end{knitrout}
 \item
 From inspecting the code in \texttt{test.R}, we see that the results are saved in \texttt{test.csv}
 \item 
-Optionally, you can think about what you learn from comparing the output in \texttt{test2.csv} with \texttt{test.csv}, though the main goal here is just to practice running the code.
+You can asess what you learn from comparing run times on greatlakes and your laptop, though the main goal here is just to practice running the code.
 
 \end{itemize}
 
@@ -234,16 +313,26 @@ Optionally, you can think about what you learn from comparing the output in \tex
 \begin{frame}[fragile]{Other ways to run R on greatlakes}
 
 \begin{itemize}
-\item It is sometimes useful to start an interactive session on greatlakes, particularly for debugging. This is done from the terminal as follows: 
-<<,echo=T,eval=F>>=
+\item It is sometimes useful to start an interactive session on greatlakes, particularly for debugging. This is done from the terminal as follows:
+\end{itemize}
+\begin{knitrout}\small
+\definecolor{shadecolor}{rgb}{0.969, 0.969, 0.969}\color{fgcolor}\begin{kframe}
+\begin{alltt}
 module load R
-srun --nodes=1 --account=stats531w22_class --ntasks-per-node=8 \
+srun --nodes=1 --account=stats531w22_class --ntasks-per-node=8 \textbackslash{}
   --pty /bin/bash
-@
+\end{alltt}
+\end{kframe}
+\end{knitrout}
+\begin{itemize}
 \item You can then run R in the terminal as usual, just by typing
-<<,echo=T,eval=F>>=
-R
-@
+\begin{knitrout}\small
+\definecolor{shadecolor}{rgb}{0.969, 0.969, 0.969}\color{fgcolor}\begin{kframe}
+\begin{alltt}
+\hlstd{R}
+\end{alltt}
+\end{kframe}
+\end{knitrout}
 \item This R session will have access to the cores you have requested.
 \item Here, we require \texttt{nodes=1} since \texttt{library(doParallel)} alone cannot work with cores spread across different machines.
 \item You can also run \link{https://arc-ts.umich.edu/greatlakes/user-guide/\#document-3}{web-based Rstudio}

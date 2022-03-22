@@ -107,7 +107,14 @@ Please read the [grading policy in the syllabus](syllabus.html) before submittin
 
 [Solution](hw06/sol06.html).
 
-* [Homework 7](hw07/hw07.html), due Mon Apr 5, 11:50pm.
+-->
+
+
+* [Homework 7](hw07/hw07.html), due Mon Mar 28, 11:59pm.
+
+* [Participation 6](participation/participation6.html), due Mon Apr 4, 11:59pm.
+
+<!--
 [Solution](hw07/sol07.html).
 
 * There is no assigned homework for the last two weeks of the semester. You should work on your final project. The lectures for these weeks contain material that will be useful for your final projects. Also, you can optionally look at the exercises in the [notes for Chapter 15](https://kingaa.github.io/sbied/polio/notes.pdf) which have [worked solutions online](15/index.html).
