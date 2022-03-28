@@ -248,6 +248,28 @@ You can asess what you learn from comparing run times on greatlakes and your lap
 
 \end{frame}
 
+\section{pomp on greatlakes}
+
+\begin{frame}[fragile]{Installing packages, including pomp}
+
+\begin{itemize}
+\item After running \code{module load R} to make R avaialable, you can start an R session in a terminal on the login node just by typing \code{R}.
+\item This is useful for setting up all the R libraries you may need.
+\item You are not supposed to do heavy multi-core computing on the login node, but installing libraries and small tests is okay.
+\item For example, if I run the following:
+<<,echo=T,eval=F>>=
+[ionides@gl-login1 ~]$ module load R
+[ionides@gl-login1 ~]$ R
+> install.packages("tidyverse")
+> install.packages("pomp")
+@
+then my subsequent R jobs run via \code{sbatch} are able to use \code{library(tidyverse)} or \code{library(pomp)}.
+
+\end{itemize}
+
+
+\end{frame}
+
 \section{Other ways to run R on greatlakes}
 
 \begin{frame}[fragile]{Other ways to run R on greatlakes}

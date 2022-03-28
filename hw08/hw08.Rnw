@@ -145,7 +145,7 @@ This is a group assignment for which you will collaborate with your final projec
 
 The goal is to think about some issues that might arise in final projects, and indeed some of the questions alert you to common errors from previous 531 final projects.
 
-If you poke around, you may find solutions to these questions. That is not against the rules, following the usual source attribution requirements for the course that all sources are acceptable as long as they are properly acknowledged. The requirement, as in other homeworks, is that you explicitly list all sources you consulted and you make clear what you learned from them. For group work like this, it is your responsibility to make sure that every source consulted by every group member is listed at the end of the report and referenced properly where used within the report.
+If you poke around, you may find solutions to these questions. That is not against the rules, following the usual source attribution requirements for the course that all sources are acceptable as long as they are properly acknowledged. The requirement, as in other homeworks, is that you explicitly list all sources you consulted and you make clear what you learned from them. For group work, it is your responsibility to make sure that every source consulted by every group member is listed at the end of the report and referenced properly where used within the report.
 
 It may be simplest for this homework if you avoid consulting solutions online. If you do obtain answers online, you should find ways to go beyond the sources to make your own contribution.
 
