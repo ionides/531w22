@@ -109,6 +109,8 @@ Please read the [grading policy in the syllabus](syllabus.html) before submittin
 
 * [Participation 6](participation/participation6.html), due Mon Apr 4, 11:59pm.
 
+* [Homework 8](hw08/hw08.pdf), due Mon Apr 4, 11:59pm.
+
 <!--
 [Solution](hw07/sol07.html).
 

@@ -1,4 +1,4 @@
-default: slides.pdf notes.pdf index.html
+default: hw08.pdf 
 
 
 include ../rules.mk

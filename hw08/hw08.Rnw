@@ -141,15 +141,15 @@ STATS/DATASCI 531, Winter 2022
 \end{center}
 
 
-This is a group assignment for which you will collaborate with your final project group. You should submit one homework report for your group. This report should be written in Rmd, and you should submit both the Rmd source and a version compiled to HTML. For each question, you should give both a letter answer (one or more letters, depending on the form of the question) and some text explaining your answer. Most of the questions do not need any coding, but you can show your code when appropriate.
+{\bf This is a group assignment for which you will collaborate with your final project group}. You should submit one homework report for your group. This report should be written in Rmd, and you should submit both the Rmd source and a version compiled to HTML. For each question, you should give an answer (a letter or true/false claims) followed by some text explaining your answer. Most of the questions do not need any coding, but you can show your code when appropriate.
 
-The goal is to think about some issues that might arise in final projects, and indeed some of the questions alert you to common errors from previous 531 final projects.
+The goal is to think about some issues that might arise in final projects, and indeed some of the questions alert you to common issues arising in previous 531 final projects.
 
 If you poke around, you may find solutions to these questions. That is not against the rules, following the usual source attribution requirements for the course that all sources are acceptable as long as they are properly acknowledged. The requirement, as in other homeworks, is that you explicitly list all sources you consulted and you make clear what you learned from them. For group work, it is your responsibility to make sure that every source consulted by every group member is listed at the end of the report and referenced properly where used within the report.
 
 It may be simplest for this homework if you avoid consulting solutions online. If you do obtain answers online, you should find ways to go beyond the sources to make your own contribution.
 
-These questions were developed for a course on \link{https://kingaa.github.io/sbied}{Simulation-based Inference for Epidemiological Dynamics}. That is a vague ackowledgement of a large but unspecified intellectual debt which is okay in this context but not sufficient as an explanation of sources for a homework report. 
+These questions are based on material developed for a course on \link{https://kingaa.github.io/sbied}{Simulation-based Inference for Epidemiological Dynamics}. Note that this vague ackowledgement of a large but unspecified intellectual debt is not intended as a role model for homework reports; it is okay in this context but insufficient to explain your own contribution in a course assignment.
 
 \vspace{2mm}
 
@@ -586,7 +586,7 @@ The iterated filtering convergence diagnostics plot in Fig.~\ref{Q15plot} comes 
 \end{figure}
 \section{}
 \label{Q16}
-The iterated filtering convergence diagnostics plot in Fig.~\ref{Q16plot} comes from a \href{https://ionides.github.io/531w21/final_project/project15/blinded.html}{\textcolor{blue}{student project}}, calculated using $10^3$ particles. Which of the following is the best interpretation of this diagnostic plot?
+The iterated filtering convergence diagnostics plot in Fig.~\ref{Q16plot} comes from a \href{https://ionides.github.io/531w21/final_project/project15/blinded.html}{\textcolor{blue}{student project}}, calculated using $10^3$ particles. Which one of the following is the best interpretation of this diagnostic plot?
 \begin{enumerate}[(A)]
 \item \label{A16a} Everything seems to be working fine. There is a clear consensus from the different searches concerning the highest likelihood that can be found. Therefore, the search is doing a good job of maximization. Occasional searches get lost, such as the purple line with a low likelihood, but that is not a problem.
 \item \label{A16b} The seaches obtain likelihood values spread over thousands of log units. We would like to see consistent convergence within a few log units. We should use more particles and/or more iterations to achieve this.
