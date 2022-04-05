@@ -2,6 +2,7 @@
 
 \usepackage{comment}
 \excludecomment{solution}
+%\includecomment{solution}
 
 \usepackage{fullpage}
 \usepackage[unicode=true,bookmarksnumbered=false,bookmarksopen=false,breaklinks=true,backref=section,colorlinks=true,urlcolor=blue,citecolor=black,linkcolor=blue,filecolor=blue]{hyperref}
@@ -113,7 +114,7 @@
 \newcommand\negBeforeCode{}
 \newcommand\negAfterCode{}
 
-
+\newcommand\mysolution{{\bf Solution}. }
 
 \begin{document}
 
@@ -138,6 +139,11 @@ Homework 8, due 11:59pm Monday April 4
 
 \large
 STATS/DATASCI 531, Winter 2022
+
+\begin{solution}
+{\bf Solutions}
+\end{solution}
+
 \end{center}
 
 
@@ -166,6 +172,7 @@ From a scientific perspective, conclusions should not depend on the units we cho
 \end{enumerate}
 
 \begin{solution}
+\mysolution
   \ref{A13c}.
   For scientific calculations, you generally have to pick an arbitrary set of units and use it consistently. In \code{pomp}, this means that you have to use the same units for measurement times and within the latent process. For example, if your measurement times are in days (7,14,$\dots$) then rate parameters should have units $\mathrm{day}^{-1}$. A latent transition with mean duration 1 week would have corresponding rate $1/7 \mathrm{day}^{-1}$. 
 \end{solution}
@@ -215,7 +222,8 @@ Which one of the following is the most plausible cause for this error?
 
 
 \begin{solution}
-  \ref{A10e}.
+\mysolution
+\ref{A10e}.
   The error message was produced by the code below.
   \code{pomp} passes on the C compiler error message for you to inspect.
   Note the missing semicolon at the line end before \code{W=0;}.
@@ -283,6 +291,7 @@ Which one of the following is the most plausible cause for this error?
 \end{enumerate}
 
 \begin{solution}
+\mysolution
   \ref{A11b}. The code generating this error is below. Here, \code{pop} is intended to be passed as a parameter, but it is missing from the \code{paramnames} argument. It could alternatively be defined as a global variable using the \code{globals} argument to \code{pomp}.
 
   <<Q11-error-code,eval=F>>=
@@ -347,6 +356,7 @@ Which one of the following is the most plausible cause for this error?
 \end{enumerate}
 
 \begin{solution}
+\mysolution
   \ref{A12a}. The code producing the error is below. Within Csnippets, the C versions of R distribution functions are available but they have slightly different syntax from their more familiar R cousins.
 
   <<Q12-error-code,eval=F>>=
@@ -392,6 +402,7 @@ v) If $V_n=(X_n,Y_n)$ where $X_n$ and $Y_n$ are a POMP model, and $h(X_n,Y_n)=Y_
 \end{enumerate}
 
 \begin{solution}
+\mysolution
   \ref{A1b}.
 \end{solution}
 
@@ -406,6 +417,7 @@ Suppose that 10 replications of a particle filter, each using $10^3 $ particles,
 \end{enumerate}
 
 \begin{solution}
+\mysolution
   \ref{A2c}. Using the linear dependence, also called proportionality, of the computing effort on various algorithmic parameters, we calculate
   $$5\times (10000/1000)\times (20/10)\times (1/4)=75.$$
 \end{solution}
@@ -421,6 +433,7 @@ A particle filter is repeated 5 times to evaluate the likelihood at a proposed m
 \end{enumerate}
 
 \begin{solution}
+\mysolution
   \ref{A6e}.
   Answers \ref{A6a}, \ref{A6b} and \ref{A6c} estimate using a mean on the log scale. However, the particle filter provides an unbiased likelihood estimate on a natural scale but not on a log scale. Note that the particle filter also has some bias for most quantities on a natural scale, which reduces to zero as the number of particles tends to infinity, but it happens to be unbiased for the likelihood. The standard error for the log of the mean of the likelihoods can be computed by the delta method or a jack-knife, for example using the logmeanexp function in pomp.
 
@@ -451,6 +464,7 @@ with cholera mortality rate 8\% and other parameters fixed at the default values
 \end{enumerate}
 
 \begin{solution}
+\mysolution
   \ref{A9a}, calculated as follows:
 
   <<Q9>>=
@@ -484,6 +498,7 @@ What is the proper interpretation?
 \end{enumerate}
 
 \begin{solution}
+\mysolution
   \ref{A14d}.
   An example of a situation where the model fits the data well, but filtering is hard, arises when the measurement error is small relative to the process noise. In this case, the particles are scattered by the process noise and very few of them are compatible with the data due to the precise measurement. Thus, almost all the particles must be discarded as unfeasible given the data, corresponding to a low ESS.
 \end{solution}
@@ -500,6 +515,7 @@ When carrying out inference by iterated particle filtering, the likelihood incre
 \end{enumerate}
 
 \begin{solution}
+\mysolution
   \ref{A4c}.
   All the other issues can cause inference problems, but likely would cause similar problems on simulated data.
 
@@ -519,6 +535,7 @@ Which one of the following confirms that the plot is, or is not, a properly cons
 \end{enumerate}
 
 \begin{solution}
+\mysolution
   \ref{A7b}.
 
   If the researchers calculate a sliced likelihood through the MLE and tell you it is a profile, but you are concerned they might have constructed a slice by mistake, it is hard to know without looking at the code. \ref{A7a} is the proper construction of a profile if the points are maximizations over the remaining parameters for a range of fixed values of rho. However, if the code does not involve maximization over other parameters at each value of rho, it cannot be a proper profile. It could be a slice accidentally explained to be a profile, and with a confidence interval constructed as if it were a profile. 
@@ -534,6 +551,7 @@ For each of the following, say whether the statement is true or false.
 \end{enumerate}
 
 \begin{solution}
+\mysolution
   A is true.
   B is not true in general.  If our model depends on a single scalar parameter, then a slice and a profile are the same thing.
   C is false.
@@ -563,6 +581,7 @@ The iterated filtering convergence diagnostics plot in Fig.~\ref{Q15plot} comes 
 \end{enumerate}
 
 \begin{solution}
+\mysolution
   \ref{A15a}.
   All searches are finding parameters with consistent likelihood. The discrepancies of a few log likelihood units put the parameter values within statistical uncertainty according to Wilks's Theorem. Therefore, the spread in the parameter estimates reflects uncertainty about the parameter given the data, rather than a lack of convergence. 
 
@@ -598,6 +617,7 @@ We should look at the effective sample size plot for the best fit we have found 
 \end{enumerate}
 
 \begin{solution}
+\mysolution
   \ref{A16e}.
   The authors of this project were able to show evidence of adequate global maximization for their model, but their maximized likelihood was 47 log units lower than ARMA model. The wide spread in likelihood, thousands of log units, shown in this convergence plot suggests that the numerics are not working smoothly.
   This could mean that more particles are needed: $10^3$ particles is relatively low for a particle filter.
@@ -631,6 +651,7 @@ obj %>%
 \end{enumerate}
 
 \begin{solution}
+\mysolution
   A is false; 100 iterations will be performed.
   B is true.
   C is false.
@@ -664,6 +685,7 @@ Explain whether each of the following are true or false.
 \end{enumerate}
 
 \begin{solution}
+\mysolution
   A is true.
   B is true.
   C is true.
