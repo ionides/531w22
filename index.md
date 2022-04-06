@@ -93,12 +93,7 @@ Please read the [grading policy in the syllabus](syllabus.html) before submittin
 * [Participation 5](participation/participation5.html), due Mon Mar 21, 11:59pm.
 
 * [Homework 6](hw06/hw06.html), due Mon Mar 21, 11:59pm. 
-
-<!--
-
 [Solution](hw06/sol06.html).
-
--->
 
 
 * [Homework 7](hw07/hw07.html), due Mon Mar 28, 11:59pm.
@@ -110,9 +105,7 @@ Please read the [grading policy in the syllabus](syllabus.html) before submittin
 * [Participation 6](participation/participation6.html), due Mon Apr 4, 11:59pm.
 
 * [Homework 8](hw08/hw08.pdf), due Mon Apr 4, 11:59pm.
-<!--
 [Solution](hw08/sol08.pdf).
--->
 
 * There is no assigned homework for the last two weeks of the semester. You should work on your final project. The remaining lectures contain material that will be useful for your final projects.
 
