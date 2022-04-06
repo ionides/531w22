@@ -107,15 +107,10 @@ Please read the [grading policy in the syllabus](syllabus.html) before submittin
 * [Homework 8](hw08/hw08.pdf), due Mon Apr 4, 11:59pm.
 [Solution](hw08/sol08.pdf).
 
+* [Participation 7](participation/participation7.html), due Mon Apr 18, 11:59pm.
+
 * There is no assigned homework for the last two weeks of the semester. You should work on your final project. The remaining lectures contain material that will be useful for your final projects.
 
-
-<!--
-
-* [Homework 8](hw08/hw08.html), due 5pm on Mon Apr 13.
-[slurm script](hw08/sol-3.bat).
-
--->
 
 -------------------
 
