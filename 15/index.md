@@ -23,6 +23,7 @@ Sections VI and VII follow the same route we took for the Consett measles analys
 | Slides  | | [pdf](https://kingaa.github.io/sbied/polio/slides.pdf) |
 | Notes   | | [pdf](https://kingaa.github.io/sbied/polio/notes.pdf) |
 | **R** script  | | [**R**](https://kingaa.github.io/sbied/polio/main.R) |
+| discussion question | | [html](discussion.html) |
 | Recording, Chapter 15, Sections I | Covariates in POMP models and their pomp implementation | [(5 mins)](https://youtu.be/TmlPMl_GkT8) | 
 | Recording, Chapter 15, Section II | A POMP model for historic polio in Wisconsin | [(15 mins)](https://youtu.be/zBPvdscwZGo) |
 | Recording, Chapter 15, Section III | A pomp implementation of the polio POMP model | [(9 mins)](https://youtu.be/FoQGr3hq5Xk) |

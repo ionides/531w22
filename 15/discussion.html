@@ -9,10 +9,10 @@
 <meta http-equiv="X-UA-Compatible" content="IE=EDGE" />
 
 
-<meta name="author" content="Edward L. Ionides" />
+<meta name="author" content="STATS/DATASCI 531, Winter 2022" />
 
 
-<title>Modeling and Analysis of Time Series Data STATS/DATASCI 531, Winter 2022 Chapter 15: A case study of polio including covariates, seasonality &amp; over-dispersion</title>
+<title>Chapter 15 discussion question</title>
 
 <script>// Pandoc 2.9 adds attributes on both header and div. We remove the former (to
 // be compatible with the behavior of Pandoc < 2.8).
@@ -358,129 +358,23 @@ pre code {
 
 
 
-<h1 class="title toc-ignore">Modeling and Analysis of Time Series Data<br>STATS/DATASCI 531, Winter 2022<br>Chapter 15: A case study of polio including covariates, seasonality &amp; over-dispersion</h1>
-<h4 class="author">Edward L. Ionides</h4>
+<h1 class="title toc-ignore">Chapter 15 discussion question</h1>
+<h4 class="author">STATS/DATASCI 531, Winter 2022</h4>
 
 </div>
 
 
-<p>We continue using material from the short course <a href="https://kingaa.github.io/sbied/">Simulation-Based Inference for Epidemiological Dynamics</a> (SBIED). Chapter 15 is Lesson 6 of SBIED. This case study of polio demonstrates time series data analysis via a mechanistic model. It also develops various topics of general interest for inference on POMP models:</p>
-<ul>
-<li><p>Covariates. In Section I, we see that the POMP framework allows arbitrary dependence on covariate time series, and how to implement this in <strong>pomp</strong>.</p></li>
-<li><p>Seasonality. In Section II, we model seasonality using a periodic covariate. In Section III, we implement non-parametric seasonality using a periodic spline basis.</p></li>
-<li><p>Over-dispersion. Poisson and binomial distributions have their variance defined as a function of the mean parameter, which may not be appropriate for the data. In Section II, we discuss the use of the negative binomial distribution and discretized normal distribution to address this. Another approach to over-dispersion is gamma noise on transition rates, which is carried out in a <a href="https://kingaa.github.io/sbied/measles/">measles case study</a> that we may cover later, time permitting.</p></li>
-<li><p>Workflow issues. Section IV discusses ways to avoid recomputing results unnecessarily when using Rmarkdown. It also presents a way control run time so that a single switch in the code moves between a debug setting, a preliminary set of results, and a final computationally intensive calculation.</p></li>
-</ul>
-<p>Sections VI and VII follow the same route we took for the Consett measles analysis. This workflow is common to many POMP models across diverse applications.</p>
 <hr />
-<table>
-<colgroup>
-<col width="27%" />
-<col width="27%" />
-<col width="44%" />
-</colgroup>
-<tbody>
-<tr class="odd">
-<td align="left">Slides</td>
-<td align="left"></td>
-<td align="center"><a href="https://kingaa.github.io/sbied/polio/slides.pdf">pdf</a></td>
-</tr>
-<tr class="even">
-<td align="left">Notes</td>
-<td align="left"></td>
-<td align="center"><a href="https://kingaa.github.io/sbied/polio/notes.pdf">pdf</a></td>
-</tr>
-<tr class="odd">
-<td align="left"><strong>R</strong> script</td>
-<td align="left"></td>
-<td align="center"><a href="https://kingaa.github.io/sbied/polio/main.R"><strong>R</strong></a></td>
-</tr>
-<tr class="even">
-<td align="left">discussion question</td>
-<td align="left"></td>
-<td align="center"><a href="discussion.html">html</a></td>
-</tr>
-<tr class="odd">
-<td align="left">Recording, Chapter 15, Sections I</td>
-<td align="left">Covariates in POMP models and their pomp implementation</td>
-<td align="center"><a href="https://youtu.be/TmlPMl_GkT8">(5 mins)</a></td>
-</tr>
-<tr class="even">
-<td align="left">Recording, Chapter 15, Section II</td>
-<td align="left">A POMP model for historic polio in Wisconsin</td>
-<td align="center"><a href="https://youtu.be/zBPvdscwZGo">(15 mins)</a></td>
-</tr>
-<tr class="odd">
-<td align="left">Recording, Chapter 15, Section III</td>
-<td align="left">A pomp implementation of the polio POMP model</td>
-<td align="center"><a href="https://youtu.be/FoQGr3hq5Xk">(9 mins)</a></td>
-</tr>
-<tr class="even">
-<td align="left">Recording, Chapter 15, Sections IV</td>
-<td align="left">Data analysis logistics: tools for a pomp workflow</td>
-<td align="center"><a href="https://youtu.be/-Qr8Dzgfyww">(12 mins)</a></td>
-</tr>
-<tr class="odd">
-<td align="left">Recording, Chapter 15, Section V</td>
-<td align="left">Persistence of polio</td>
-<td align="center"><a href="https://youtu.be/13KBab1MnbU">Lecture video (7 mins)</a></td>
-</tr>
-<tr class="even">
-<td align="left">Recording, Chapter 15, Section VI</td>
-<td align="left">Likelihood maximization for polio</td>
-<td align="center"><a href="https://youtu.be/xGi9WLUwKWg">(15 mins)</a></td>
-</tr>
-<tr class="odd">
-<td align="left">Recording, Chapter 15, Section VII</td>
-<td align="left">A profile likelihood for polio</td>
-<td align="center"><a href="https://youtu.be/O2OMIPukzVI">(7 mins)</a></td>
-</tr>
-<tr class="even">
-<td align="left">Worked solution to Exercise 6.1</td>
-<td align="left"></td>
-<td align="center"><a href="https://kingaa.github.io/sbied/polio/algorithmic-parameters-exercise.html">HTML</a></td>
-</tr>
-<tr class="odd">
-<td align="left">Worked solution to Exercise 6.2</td>
-<td align="left"></td>
-<td align="center"><a href="https://kingaa.github.io/sbied/polio/initial-values-exercise.html">HTML</a></td>
-</tr>
-<tr class="even">
-<td align="left">Worked solution to Exercise 6.3</td>
-<td align="left"></td>
-<td align="center"><a href="https://kingaa.github.io/sbied/polio/starting-values-exercise.html">HTML</a></td>
-</tr>
-<tr class="odd">
-<td align="left">Worked solution to Exercise 6.4</td>
-<td align="left"></td>
-<td align="center"><a href="https://kingaa.github.io/sbied/polio/demography-exercise.html">HTML</a></td>
-</tr>
-<tr class="even">
-<td align="left">Worked solution to Exercise 6.5</td>
-<td align="left"></td>
-<td align="center"><a href="https://kingaa.github.io/sbied/polio/convergence-exercise.html">HTML</a></td>
-</tr>
-</tbody>
-</table>
-<hr />
-<iframe width="560" height="315" src="https://www.youtube.com/embed/TmlPMl_GkT8" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen>
-</iframe>
-<iframe width="560" height="315" src="https://www.youtube.com/embed/zBPvdscwZGo" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen>
-</iframe>
-<iframe width="560" height="315" src="https://www.youtube.com/embed/FoQGr3hq5Xk" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen>
-</iframe>
-<iframe width="560" height="315" src="https://www.youtube.com/embed/-Qr8Dzgfyww" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen>
-</iframe>
-<iframe width="560" height="315" src="https://www.youtube.com/embed/13KBab1MnbU" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen>
-</iframe>
-<iframe width="560" height="315" src="https://www.youtube.com/embed/xGi9WLUwKWg" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen>
-</iframe>
-<iframe width="560" height="315" src="https://www.youtube.com/embed/O2OMIPukzVI" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen>
-</iframe>
-<hr />
-<p><a href="../index.html">Back to course homepage</a><br />
-<a href="../acknowledge.html">Acknowledgements</a><br />
-<a href="http://github.com/kingaa/sbied/tree/master/polio">Source code for these notes</a></p>
+<ol style="list-style-type: decimal">
+<li><strong>Interpreting a benchmark likelihood</strong>. Two models are fitted to case counts on an epidemic. Model 1 is an SIR POMP model with a negative binomial measurement model, and model 2 is a linear regression model estimating a cubic trend. The log likelihoods are <span class="math inline">\(\ell_1 = −2037.91\)</span> and <span class="math inline">\(\ell_2 = −2031.28\)</span> respectively. Which of the following assessments do you agree with most? Note that we can view the linear model as a benchmark, in the sense of Chapter 15.</li>
+</ol>
+<ol style="list-style-type: upper-alpha">
+<li><p>We should not compare the models using these likelihoods. They correspond to different model structures, so it is an apples-to-oranges comparison.</p></li>
+<li><p>We can compare them, but the difference is in the 4th significant figure, so the likelihoods are statistically indistinguishable.</p></li>
+<li><p>The linear model has a noticeably higher likelihood. Our mechanistic model needs to be updated to beat this benchmark before we can responsibly interpret the fitted model. If a simple regression model has higher likelihood than a more complex mechanistic model, one should prefer the simpler model.</p></li>
+<li><p>The linear model has a noticeably higher likelihood. The mechanistic model is somewhat validated by being not too far behind the simple regression model. We are justified in cautiously interpreting the mechanistic model, while continuing to look for further improvements.</p></li>
+<li><p>The log likelihoods cannot properly be compared as presented, but could be if we used a Gaussian measurement model for the POMP (or a negative binomial generalized linear model instead of least squares for the regression).</p></li>
+</ol>
 <hr />
 
 
