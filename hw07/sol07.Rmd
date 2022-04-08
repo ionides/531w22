@@ -138,7 +138,8 @@ library(doParallel)
 cores <- as.numeric(Sys.getenv('SLURM_NTASKS_PER_NODE',unset=NA))  
 if(is.na(cores)) cores <- detectCores()  
 registerDoParallel(cores)
-results_dir <- paste0("results_",run_level,"/")
+results_dir <- paste0("laptop_",run_level,"/")
+#results_dir <- paste0("greatlakes_",run_level,"/")
 if(!dir.exists(results_dir)) dir.create(results_dir)
 bake(file=paste0(results_dir,"cores.rds"),cores) -> cores
 ```
@@ -150,21 +151,18 @@ library(doRNG)
 registerDoRNG(482947940)
 ```
 
-```{r local_search,eval=FALSE}
-foreach(i=1:Nlocal,.combine=c) %dopar% {
-  library(pomp)
-  library(tidyverse)
-  measSEIR %>%
-    mif2(
-      Np=Np, Nmif=Nmif,
-      cooling.fraction.50=0.5,
-      rw.sd=rw.sd(Beta=0.02, rho=0.02, eta=ivp(0.02),mu_EI=0.02)
-    )
-} -> mifs_local
-```
 ```{r local_search_eval,include=FALSE}
 bake(file=paste0(results_dir,"local_search.rds"),{
-  <<local_search>>
+  foreach(i=1:Nlocal,.combine=c) %dopar% {
+    library(pomp)
+    library(tidyverse)
+    measSEIR %>%
+      mif2(
+        Np=Np, Nmif=Nmif,
+        cooling.fraction.50=0.5,
+       rw.sd=rw.sd(Beta=0.02, rho=0.02, eta=ivp(0.02),mu_EI=0.02)
+      )
+  } -> mifs_local
 }) -> mifs_local
 ```
 
@@ -207,7 +205,9 @@ runif_design(
 mf1 <- mifs_local[[1]]
 ```
   
-```{r global_search,eval=FALSE}
+
+```{r global_search_eval}
+bake(file=paste0(results_dir,"global_search.rds"),{
 registerDoRNG(1270401374)
 foreach(guess=iter(guesses,"row"), .combine=rbind) %dopar% {
   library(pomp)
@@ -223,11 +223,6 @@ foreach(guess=iter(guesses,"row"), .combine=rbind) %dopar% {
   mf %>% coef() %>% bind_rows() %>%
     bind_cols(loglik=ll[1],loglik.se=ll[2])
 } -> results
-```
-
-```{r global_search_eval,include=FALSE}
-bake(file=paste0(results_dir,"global_search.rds"),{
-  <<global_search>>
 }) %>%
   filter(is.finite(loglik)) -> results
 ```
@@ -347,19 +342,29 @@ Including the latent period therefore allows us to fit the data with a model mat
 
 ```{r run_time}
 end_time <- Sys.time()
-bake(file=paste0(results_dir,"run_time.rds"),end_time-start_time) -> run_time
+bake(file=paste0(results_dir,"run_time.rds"),difftime(end_time,start_time,units="secs")) -> run_time
 ```
 
 * On a MacBook Air laptop, the SEIR computations took
-`r signif(as.numeric(readRDS("results_2/run_time.rds"))/60,2)`
-min at run level 2, and 
-`r signif(as.numeric(readRDS("results_3/run_time.rds"))/60,2)`
-min at run level 3, with `r readRDS("results_2/cores.rds")` cores.
+`r signif(as.numeric(readRDS("laptop_2/run_time.rds"))/60,2)`
+min at run level 2,  with `r readRDS("laptop_2/cores.rds")` cores.
+
+* At run level 3, the laptop took
+`r signif(as.numeric(readRDS("laptop_3/run_time.rds"))/60/60,2)`.
+This included a delay when the machine powered down over night! The actual calculation time was about 5 hr. 
+
+* For running long jobs on a laptop, it can be useful to use `nohup` and `&` to run the job in the background, regardless of the fate of the terminal where it was started. 
+
+```
+nohup Rscript --vanilla -e "rmarkdown::render(\"sol07.Rmd\")" &
+```
+
+* However, you also have to stop your laptop powering down. Even then, it is not very practical. Time to use a cluster.
 
 * On greatlakes, the computation time was
-`r signif(as.numeric(readRDS("greatlakes_2/run_time.rds"))/60,2)`
-min at run level 2, and
-`r signif(as.numeric(readRDS("greatlakes_3/run_time.rds"))/60,2)`
+`r signif(as.numeric(readRDS("greatlakes_2/run_time.rds")),2)`
+sec at run level 2, and
+`r signif(as.numeric(readRDS("greatlakes_3/run_time.rds")),2)`
 min at run level 3, with `r readRDS("greatlakes_3/cores.rds")` cores.
 
 * The sbat files used to run the code on greatlakes are `run1.sbat`, `run2.sbat`, `run3.sbat` in the source directory. They compile the document using `knitr::knit()` rather than `rmarkdown::render()`` since the latter needs an additional program (`pandoc`) to convert the results to HTML. `knit` will run the code and save the results of the computations, which can then be copied back to your laptop for compilation to HTML.
