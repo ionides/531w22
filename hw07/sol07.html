@@ -633,13 +633,8 @@ ncpu_rho &lt;- attr(profile_results,&quot;ncpu&quot;)</code></pre>
 bake(file=paste0(results_dir,&quot;run_time.rds&quot;),difftime(end_time,start_time,units=&quot;secs&quot;)) -&gt; run_time</code></pre>
 <ul>
 <li><p>On a MacBook Air laptop, the SEIR computations took 6.3 min at run level 2, with 4 cores.</p></li>
-<li><p>At run level 3, the laptop took</p></li>
-</ul>
-<ol start="18" style="list-style-type: decimal">
-<li>This included a delay when the machine powered down over night! The actual calculation time was about 5 hr.</li>
-</ol>
-<ul>
-<li>For running long jobs on a laptop, it can be useful to use <code>nohup</code> and <code>&amp;</code> to run the job in the background, regardless of the fate of the terminal where it was started.</li>
+<li><p>At run level 3, the laptop took 18 hr. This included a delay when the machine powered down over night! The actual calculation time was about 5 hr.</p></li>
+<li><p>For running long jobs on a laptop, it can be useful to use <code>nohup</code> and <code>&amp;</code> to run the job in the background, regardless of the fate of the terminal where it was started.</p></li>
 </ul>
 <pre><code>nohup Rscript --vanilla -e &quot;rmarkdown::render(\&quot;sol07.Rmd\&quot;)&quot; &amp;</code></pre>
 <ul>
