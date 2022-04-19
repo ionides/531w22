@@ -135,6 +135,8 @@ Please read the [grading policy in the syllabus](syllabus.html) before submittin
 
 * [Information](final_project/final_project_info.html)
 
+* [Final review report instructions](final_project/final_review.html)
+
 <!--
 
 * [2021 final projects](final_project/index.html)
