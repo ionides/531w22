@@ -1,0 +1,670 @@
+---
+title: "An Analysis of Omicron Variant COVID Cases in California and Texas"
+date: "4/19/2022"
+output: html_document
+---
+
+```{r setup, echo = F, message = F, warning = F}
+knitr::opts_chunk$set(
+  echo = FALSE,
+  warning = FALSE,
+	message = FALSE,
+	include = TRUE,
+  comment = '',
+  fig.align = "center"
+)
+```
+```{r}
+library(foreach)
+library(doParallel)
+library(doRNG)
+library(tidyverse)
+library(pomp)
+library(multipanelfigure)
+```
+---
+
+## Introduction
+A coronavirus identified in 2019, SARS-CoV-2, has caused a pandemic of respiratory illness, called COVID-19. COVID-19 is a highly infectious disease that spreads through droplets and virus particles released into the air when an infected person breathes, talks, laughs, sings, coughs or sneezes. According to the statistics from JHU [[1]](https://coronavirus.jhu.edu/map.html), as of 04/18/2022, there are over 504,566,605 cumulative cases and 6,198,216 deaths. Not only has it caused a catastrophe for humans' health but also for the world economy. According to the International Monetary Fund (IMF)[[2]](https://www.kff.org/global-health-policy/issue-brief/economic-impact-of-covid-19-on-pepfar-countries/#:~:text=The%20toll%20the%20COVID%2D19,downturn%20since%20the%20Great%20Depression.), the median global GDP dropped by 3.9% from 2019 to 2020. Since the Omicron variant started to transmit in November in 2021, the new infections continued to grow and peaked at the beginning of 2022.
+
+The objective of this project is to conduct an analysis of Omicron cases with a Susceptible-Exposed-Infection-Recovered (SEIR) compartment model of California and Texas. By conducting simulation and analysis, we want to gain understanding of Omicron spread and explore how to stem the spread. We borrow and apply techniques as seen in the course, and use a previous project as reference [[6]](https://ionides.github.io/531w21/final_project/project15/blinded.html). 
+
+## Data
+
+The data consist of confirmed COVID-19 cases in the United States over time by New York Times. It is compiled from state and local governments and health departments based on various levels of Covid-19 testing. We focus specifically on California and Texas cases after the Omicron outbreak. [[3]](https://github.com/nytimes/covid-19-data)
+
+## Exploratory Data Analysis
+
+```{r}
+df = read.csv("state-covid.txt")
+#df %>% head
+```
+```{r}
+# California
+Cali = df %>% filter(state == "California") %>% mutate(date = as.Date(date, format = "%Y-%m-%d")) %>% select(date, cases)
+
+# Texas
+Texas = df %>% filter(state == "Texas") %>% mutate(date = as.Date(date, format = "%Y-%m-%d")) %>% select(date, cases)
+
+# Create new cases from cumulative
+Cali = Cali %>% mutate(new_cases = c(1,diff(cases)))
+Texas = Texas %>% mutate(new_cases = c(1,diff(cases)))
+
+#Cali %>% head
+#Texas %>% head
+
+# plot
+par(mfrow=c(2,1))
+
+ggplot(Cali, aes(x=date, y=new_cases)) +
+  geom_line() +
+  ggtitle("California Daily New Cases") +
+  xlab("Date")+
+  ylab("New Cases")
+ggplot(Texas, aes(x=date, y=new_cases)) +
+  geom_line() +
+  ggtitle("Texas Daily New Cases") +
+  xlab("Date")+
+  ylab("New Cases")
+
+```
+The above plot is a record of Covid-19 cases in California and Texas since the beginning of the epidemic. The time series contains multiple peaks in 2021 and 2022. These peaks are caused by a variety of political regulations, vaccine availability, and virus variants. The large spike in early 2022 in both states was driven by the highly infectious Omicron variant started in late 2021 [[4]](https://abc7news.com/timeline-of-coronavirus-us-covid-19-bay-area-sf/6047519/). Although it is highly infectious, symptoms were often milder and people tended to recover faster than the previous variants and thus have a higher recovery rate, according to Centers for Disease Control and Prevention (CDC)[[5]](https://www.cdc.gov/mmwr/volumes/71/wr/mm7104e2.htm). This was potentially due to high vaccination rate or specific aspects of the variant itself. We will be focusing on the spread of this variant in both states so we will use the data from 12/01/2021 to 03/01/2022 (89 days).
+
+---
+## SEIR Model
+
+### Model specification
+```{r, echo = FALSE}
+
+# These parameters are adapted from https://ionides.github.io/531w21/final_project/project15/blinded.html
+NCORES = 4L
+run_level = 1
+NP = switch(run_level, 50, 1e3, 3e3) # number of particles
+NMIF_S = switch(run_level, 5, 50, 100) # number of filtering iterations - small
+NMIF_L = switch(run_level, 10, 100, 200) # - large
+NREPS_EVAL = switch(run_level, 5, 20, 40) # number of replications in likelihood evaluation
+NREPS_LOCAL = switch(run_level, 10, 20, 30) # number of replications in local search
+NSTART = switch(run_level, 50, 500, 800) # number of starting points in the global search
+NSIM = switch(run_level, 50, 100, 500) # number of simulations
+
+suppressPackageStartupMessages({
+  library(foreach)
+  library(doParallel)
+  library(doRNG)
+  library(tidyverse)
+  library(pomp)
+})
+cl = makeCluster(NCORES)
+registerDoParallel(cl)
+registerDoRNG(625904618)
+```
+
+Since there is a incubation period of Covid-19, we choose to use an SEIR model to simulate the Omicron epidemic. Compared to the SIR model, the SEIR model has an extra stage of "E" where an individual has been exposed but is not yet infectious. This is an important element to the model, as it is one of the main reasons Covid-19 has spread so rampantly.
+
+
+As discussed in Project 15 from the Winter 2021 semester [[6]](https://ionides.github.io/531w21/final_project/project15/blinded.html), the four stages represent: S:susceptible population; E: incubation population; I: infectious population; R: recovered and removed population. $\beta$ is the contact rate and $\mu_{SI}=\beta I(t)$ denotes the rate at which individuals in S transition to E, $\sigma = \mu_{EI}$ is the rate at which individuals in E transition to I and $\gamma = \mu_{IR}$ denotes the transition rate from I to R. The probability of a case being reported is $\rho$, which happens between the stage E and I.
+
+Then the number of people in each compartment can be computed by
+\[
+\begin{split}
+S(t)&=S(0)-N_{SE}(t)\\
+E(t)&=E(0)+N_{SE}(t)-N_{EI}(t)\\
+I(t)&=I(0)+N_{EI}(t)-N_{IR}(t)\\
+R(t)&=R(0)+N_{IR}(t)
+\end{split}
+\]
+
+where
+\[
+\begin{split}
+\Delta N_{SE}&\sim \mathrm{Binomial}(S,1-e^{\beta\frac{1}{N}\Delta t})\\
+\Delta N_{EI}&\sim \mathrm{Binomial}(E,1-e^{-\mu_{EI}\Delta t})\\
+\Delta N_{IR}&\sim \mathrm{Binomial}(I,1-e^{^{-\mu_{IR}\Delta t}})
+\end{split}
+\]
+
+The distribution for reported cases is as follows (we must truncate at 0, as negative cases are not meaningful):
+
+$$\mathrm{Cases}=\max\{\mathrm{round}(C_n),0\},\ \ \ C_n\sim \mathrm{N}(\phi \rho H_n,\phi \sqrt{\tau H_n \rho(1-\rho)})$$
+
+where $H$ tracks the number of individuals transferred from I to R. $\rho$ represents the reporting rate for people who have been accumulated into $H$ [[7]](https://ionides.github.io/531w21/final_project/project13/blinded.html). We additionally added a fixed scaling parameter $\phi$ to allow the model to reach the heights of the spike (which proved difficult without it). $\tau$ allows for flexibility in the standard deviation, which was needed to account for the number of reported cases dropping close to 0 on certain days.
+
+```{r}
+Cali_ = Cali %>% filter(date > as.Date("2021-12-01") & date < as.Date("2022-03-01")) %>%
+                       mutate(Time = 1:n(), Cases = new_cases) %>% select(Time, Cases)
+
+Texas_ = Texas %>% filter(date > as.Date("2021-12-01") & date < as.Date("2022-03-01")) %>%
+                       mutate(Time = 1:n(), Cases = new_cases) %>% select(Time, Cases)
+
+save(Cali_ ,file="Cali_formatted.Rda")
+save(Texas_ ,file="Texas_formatted.Rda")
+
+load("Cali_formatted.Rda")
+load("Texas_formatted.Rda")
+
+Cases = Cali_
+```
+
+### Model assumption {.tabset .tabset-fade .tabset-pills}
+
+#### California
+Initial values of E and I are approximated based on Covid-19 cases reported the previous day to where we begin our analysis. The H value is approximated based on recovered individuals in the past 90 days that are unlikely to be infected. Set $E  = 5000, I = 5000, H = 613,559$. The population is estimated using the adjusted results of the 2020 census [[8]](https://www.populationu.com/us/california-population).
+
+We let $\beta$ vary across time using a step function based on the California Covid-19 policy timeline [[4]](https://abc7news.com/timeline-of-coronavirus-us-covid-19-bay-area-sf/6047519/).
+
+- 12/1/2021: First Omicron case in US - San Francisco, California
+- 12/15/2021: A statewide indoor mask mandate is implemented
+- 12/27/2021: The CDC updates isolation guidelines to 5 days instead of 10 days of isolation
+- 2/15/2022: Final day of California mask mandate for indoor public places
+- 3/1/2022: The mask mandate is dropped for unvaccinated individuals as well
+
+\[
+  \beta = \begin{cases}
+    b_1, & \text{12/01 - 12/15/2021}.\\
+    b_2, & \text{12/15 - 12/27/2021}. \\
+    b_3, & \text{12/27 - 02/15/2022}. \\
+    b_4, & \text{02/15 - 03/01/2022}. \\
+  \end{cases}
+\]
+
+Different COVID-19 variants can have different incubation periods. According to the WebMD [[9]](https://www.webmd.com/lung/coronavirus-incubation-period#1), some scientists who've studied Omicron and doctors who've treated patients with it suggest the right number might be around 3 days for which we expect $\mu_{EI}=\frac{1}{3\text{day}}$. Moreover, according to the Centers for Disease Control and Prevention (CDC)[[10]](https://www.cdc.gov/media/releases/2021/s1227-isolation-quarantine-guidance.html), majority of SARS-CoV-2 transmission occurs early in the course of illness, generally in the 1-2 days prior to onset of symptoms and the 2-3 days after for which we expect $\mu_{IR}=\frac{1}{7\text{day}}$.
+
+This model assumes that the entire state population, except for those exposed in the last 90 days, are susceptible to being infected. Even though people have received vaccines, this variant has demonstrated immune escapability. Furthermore, the vaccines often only mitigate the symptoms rather than prevent infections. We additionally assume the number of reported cases by the NY Times is an accurate estimate of the true number of infections.
+
+Based on the above information and some initial investigation, we will start our simulation with the following parameters.
+\[
+\begin{cases}
+b_1 = 20,\ b_2 = 30,\ b_3= 100,\ b_4 = 2000 \\
+\mu_{EI} = \frac{1}{3} \text{  (fixed)}\\
+\mu_{IR} = \frac{1}{7} \text{  (fixed)}\\
+\rho = 0.7 \\
+\eta = 0.01 \\
+\tau = 2000 \\
+N = 39,538,223 \text{  (fixed)}
+\end{cases}
+\]
+
+
+```{r,echo=TRUE}
+seir_step = Csnippet(" double Beta;
+                     if(intervention == 1) Beta = b1;
+                     else if(intervention == 2) Beta = b2;
+                     else if(intervention == 3) Beta = b3;
+                     else Beta = b4;
+                     double dN_SE = rbinom(S, 1 - exp(-Beta * I / N * dt));
+                     double dN_EI = rbinom(E, 1 - exp(-mu_EI * dt));
+                     double dN_IR = rbinom(I, 1 - exp(-mu_IR * dt)); S -= dN_SE;  
+                     E += dN_SE - dN_EI; I += dN_EI - dN_IR; H += dN_IR;")
+
+seir_rinit = Csnippet("S = nearbyint(eta * N);
+                      E = 5000; I = 5000;
+                      H = 613559;")
+
+# Phi is 14 in this case
+# Likelihood calculation from https://ionides.github.io/531w21/final_project/project15/blinded.html
+dmeas <- Csnippet(" double tol=1.0e-25;
+                  double mean = 14*rho*H;
+                  double sd = 14*sqrt(tau*rho*H*(1-rho));
+                  if(Cases>0.0){ lik = pnorm(Cases+0.5,mean,sd,1,0)-pnorm(Cases-0.5,mean,sd,1,0)+tol; }
+                  else { lik=pnorm(Cases+0.5,mean,sd,1,0)+tol; }
+                  if(give_log) lik=log(lik); ")
+
+# estimation adapted from https://ionides.github.io/531w21/final_project/project13/blinded.html
+rmeas <- Csnippet(" Cases = rnorm(14*rho*H, 14*sqrt(tau*rho*H*(1-rho)));
+                  if(Cases>0.0){ Cases=nearbyint(Cases); }
+                  else { Cases=0.0; } ")
+
+seir_covar <- covariate_table(
+  t = Cases$Time,
+  intervention = c(rep(1, 14),
+                   rep(2, 13),
+                   rep(3, 49),
+                   rep(4, 13)),
+                   times = "t")
+covidSEIR = Cases %>%
+  pomp(
+    times = "Time", t0 = 1,
+    rprocess = euler(seir_step, delta.t = 1), # delta.t set to 1 day
+    rinit = seir_rinit,
+    rmeasure = rmeas,
+    dmeasure = dmeas,
+    accumvars = "H",
+    partrans=parameter_trans(
+      log = c("mu_EI", "mu_IR", "tau", "b1", "b2", "b3", "b4"),
+      logit = c("rho", "eta")
+    ),
+    statenames = c("S", "E", "I", "H"),
+    paramnames = c("b1", "b2", "b3", "b4", "mu_EI", "mu_IR",
+                   "eta", "rho", "N", "tau"),
+    covar = seir_covar
+  )
+
+```
+```{r}
+pop_cali = 39538223
+params = c( b1 = 20, b2 = 30, b3 = 100, b4 = 2000,
+            mu_EI = 1/3, mu_IR = 1/7, rho = 0.7, eta = 0.01,
+            tau = 2000, N = pop_cali)
+fixed_params = params[c("N", "mu_EI", "mu_IR")]
+params_rw.sd = rw.sd(b1 = 0.01, b2 = 0.01, b3 = 0.01, b4 = 0.01,
+                     rho = 0.01, tau = 0.0001, eta = ivp(0.01))
+
+```
+```{r,echo=TRUE}
+registerDoRNG(1235252)
+bake(file = "writeup_lik_starting_values.rds", {
+  foreach(i=1:20, .combine = c) %dopar% {
+    library(pomp)
+    covidSEIR %>% pfilter(params=params,  Np=500)
+  }
+}) -> pf
+r <- pf %>% logLik() %>% logmeanexp(se = TRUE)
+```
+
+The likelihood estimate of the initial parameters for California is `r r[1]` with a standard error of `r r[2]`.
+
+The simulations based can capture general trend of the data of California, but are slightly lagged behind the initial outbreak. Next, we will use iterative filtering to search for the maximum likelihood estimates (MLE) for California.
+```{r}
+plot_simulation = function(sim_dat) {
+  sim_dat %>%
+    ggplot() +
+    theme_bw() +
+    geom_line(aes(Time, Cases, group = .id,
+                  color = (.id == "data"), alpha = (.id == "data"),
+                  linetype = (.id == "data"))) +
+    scale_color_manual(values = c("#18bc9c", "#c61919")) +
+    scale_alpha_manual(values = c(0.5, 1)) +
+    scale_linetype_manual(values = c(5, 1)) +
+    guides(color = FALSE, linetype = FALSE, alpha = FALSE)}
+covidSEIR %>%
+  simulate(params = params, nsim = 20, format = "data.frame", include.data = TRUE) %>%
+  plot_simulation()
+```
+
+#### Texas
+As opposed to California, there was no state mask mandate during the Omicron variant spread. So, the only delineation is the CDC's updated isolation guidelines. Otherwise, we hold the same assumptions.
+
+\[
+\begin{cases}
+b_1 = 20,\ b_2 = 200\\
+\mu_{EI} = \frac{1}{3} \text{  (fixed)}\\
+\mu_{IR} = \frac{1}{7} \text{  (fixed)}\\
+\rho = 0.4 \\
+\eta = 0.01 \\
+\tau = 1000 \\
+N = 29,527,941 \text{  (fixed)}
+\end{cases}
+\]
+```{r, echo=TRUE}
+Cases = Texas_
+
+seir_step = Csnippet(" double Beta;
+                     if(intervention == 1) Beta = b1;
+                     else Beta = b2;
+                     double dN_SE = rbinom(S, 1 - exp(-Beta * I / N * dt));
+                     double dN_EI = rbinom(E, 1 - exp(-mu_EI * dt));
+                     double dN_IR = rbinom(I, 1 - exp(-mu_IR * dt));
+                     S -= dN_SE;  
+                     E += dN_SE - dN_EI;
+                     I += dN_EI - dN_IR;
+                     H += dN_IR;")
+
+seir_rinit = Csnippet("S = nearbyint(eta * N);
+                      E = 6000;
+                      I = 6000;
+                      H = 696761;")
+
+dmeas <- Csnippet(" double tol=1.0e-25;
+                  double mean = 14*rho*H;
+                  double sd = 14*sqrt(tau*rho*H*(1-rho));
+                  if(Cases>0.0){ lik = pnorm(Cases+0.5,mean,sd,1,0)-pnorm(Cases-0.5,mean,sd,1,0)+tol; }
+                  else { lik=pnorm(Cases+0.5,mean,sd,1,0)+tol; }
+                  if(give_log) lik=log(lik); ")
+
+rmeas <- Csnippet(" Cases = rnorm(14*rho*H, 14*sqrt(tau*rho*H*(1-rho)));
+                  if(Cases>0.0){ Cases=nearbyint(Cases); }
+                  else { Cases=0.0; } ")
+
+seir_covar_texas <- covariate_table(
+  t = Cases$Time,
+  intervention = c(rep(1, 27),
+                   rep(2, 62)),
+                   times = "t")
+
+covidSEIR = Cases %>%
+  pomp(
+    times = "Time", t0 = 1,
+    rprocess = euler(seir_step, delta.t = 1), # delta.t set to 1 day
+    rinit = seir_rinit,
+    rmeasure = rmeas,
+    dmeasure = dmeas,
+    accumvars = "H",
+    partrans=parameter_trans(
+      log = c("mu_EI", "mu_IR", "tau", "b1", "b2"),
+      logit = c("rho", "eta")
+    ),
+    statenames = c("S", "E", "I", "H"),
+    paramnames = c("b1", "b2", "mu_EI", "mu_IR",
+                   "eta", "rho", "N", "tau"),
+    covar = seir_covar_texas
+  )
+```
+
+```{r}
+registerDoRNG(1235252)
+bake(file = "writeup_lik_starting_values_texas.rds", {
+  foreach(i=1:20, .combine = c) %dopar% {
+    library(pomp)
+    covidSEIR %>% pfilter(params=params,  Np=500)
+  }
+}) -> pf
+r <- pf %>% logLik() %>% logmeanexp(se = TRUE)
+```
+
+The likelihood estimate of the initial parameters for Texas is `r r[1]` with a standard error of `r r[2]`.
+
+The simulations based can capture general trend of the data of Texas, but slightly deviates from the peak. Next, we will use iterative filtering to search for the maximum likelihood estimates (MLE) for Texas.
+
+```{r}
+pop_texas = 29527941
+
+params = c( b1 = 20, b2 = 200,
+            mu_EI = 1/3, mu_IR = 1/7, rho = 0.4, eta = 0.01,
+            tau = 1000, N = pop_texas)
+fixed_params = params[c("N", "mu_EI", "mu_IR")]
+params_rw.sd = rw.sd(b1 = 0.01, b2 = 0.01, b3 = 0.01, b4 = 0.01,
+                     rho = 0.01, tau = 0.0001, eta = ivp(0.01))
+
+covidSEIR %>%
+  simulate(params = params, nsim = 20, format = "data.frame", include.data = TRUE) %>%
+  plot_simulation()
+```
+
+
+
+### Local Search {.tabset .tabset-fade .tabset-pills}
+
+#### California
+
+We first run a local search from the initial parameters using iterated filtering with 50 iterations. Also, we can see that the likelihood is increasing for all the runs. The reporting rate $\rho$ is going down in the most runs. The contact rate parameters $b_1$ and $b_3$ are decreasing in most runs, and $b_2$ is increasing in most runs. The $\eta$ increases in most runs. However, it is unclear where to move for $\tau$.
+
+```{r, echo=TRUE}
+pop_cali = 39538223
+params = c( b1 = 20, b2 = 30, b3 = 100, b4 = 2000,
+            mu_EI = 1/3, mu_IR = 1/7, rho = 0.7, eta = 0.01,
+            tau = 2000, N = pop_cali)
+fixed_params = params[c("N", "mu_EI", "mu_IR")]
+params_rw.sd = rw.sd(b1 = 0.01, b2 = 0.01, b3 = 0.01, b4 = 0.01,
+                     rho = 0.01, tau = 0.0001, eta = ivp(0.01))
+
+
+run_id = 1
+registerDoRNG(482947940)
+bake(file = "writeup_local_search.rds", {
+  foreach(i = 1:NREPS_LOCAL, .combine = c) %dopar% {
+    suppressPackageStartupMessages({
+      library(tidyverse)
+      library(pomp)
+    })
+    covidSEIR %>%
+      mif2(
+        params = params,
+        Np = NP, Nmif = NMIF_S,
+        cooling.fraction.50 = 0.5,
+        rw.sd = params_rw.sd
+      )
+  } -> mifs_local
+  attr(mifs_local,"ncpu") <- getDoParWorkers()
+  mifs_local
+}) -> mifs_local
+
+
+mifs_local %>%
+  traces() %>%
+  melt() %>%
+  ggplot(aes(x = iteration, y = value, group = L1, color = factor(L1))) +
+  theme_bw() +
+  geom_line() +
+  guides(color = FALSE) +
+  facet_wrap(~variable, scales = "free_y")
+```
+```{r}
+registerDoRNG(900242057)
+bake(file = "writeup_lik_local.rds", {
+  foreach(mf = mifs_local, .combine = rbind) %dopar% {
+    suppressPackageStartupMessages({
+      library(tidyverse)
+      library(pomp)
+    })
+    ll = replicate(NREPS_EVAL, logLik(pfilter(mf, Np = NP))) %>%
+         logmeanexp(se = TRUE)
+    coef(mf) %>% bind_rows() %>% bind_cols(loglik = ll[1], loglik.se = ll[2])
+  } -> results
+  attr(results,"ncpu") <- getDoParWorkers()
+  results
+}) -> results
+
+results %>% arrange(-loglik) %>% head -> best_local
+#best_local
+```
+```{r}
+covidSEIR %>%
+  simulate(params = unlist(best_local[1,]), nsim = 20, format = "data.frame", include.data = TRUE) %>%
+  plot_simulation()
+```
+
+
+#### Texas
+
+We first run a local search from the initial parameters using iterated filtering with 50 iterations. Also, we can see that the likelihood is increasing for some of the runs. The contact rate parameters $b_1$ is not clear, but $b_2$ is decreasing in all the runs. The reporting rate $\rho$ is going up in the most runs but begins fluctuating. The $\eta$ has general upward trend in most runs. However, it is unclear where to move for $\tau$.
+```{r, echo=TRUE}
+pop_texas = 29527941
+
+params = c( b1 = 20, b2 = 200,
+            mu_EI = 1/3, mu_IR = 1/7, rho = 0.4, eta = 0.01,
+            tau = 1000, N = pop_texas)
+fixed_params = params[c("N", "mu_EI", "mu_IR")]
+params_rw.sd = rw.sd(b1 = 0.01, b2 = 0.01,
+                     rho = 0.01, tau = 0.0001, eta = ivp(0.01))
+
+
+run_id = 1
+registerDoRNG(482947940)
+bake(file = "writeup_local_search_texas.rds", {
+  foreach(i = 1:NREPS_LOCAL, .combine = c) %dopar% {
+    suppressPackageStartupMessages({
+      library(tidyverse)
+      library(pomp)
+    })
+    covidSEIR %>%
+      mif2(
+        params = params,
+        Np = NP, Nmif = NMIF_S,
+        cooling.fraction.50 = 0.5,
+        rw.sd = params_rw.sd
+      )
+  } -> mifs_local
+  attr(mifs_local,"ncpu") <- getDoParWorkers()
+  mifs_local
+}) -> mifs_local
+
+mifs_local %>%
+  traces() %>%
+  melt() %>%
+  ggplot(aes(x = iteration, y = value, group = L1, color = factor(L1))) +
+  theme_bw() +
+  geom_line() +
+  guides(color = FALSE) +
+  facet_wrap(~variable, scales = "free_y")
+
+```
+
+```{r}
+registerDoRNG(900242057)
+bake(file = "writeup_lik_local_texas.rds", {
+  foreach(mf = mifs_local, .combine = rbind) %dopar% {
+    suppressPackageStartupMessages({
+      library(tidyverse)
+      library(pomp)
+    })
+    ll = replicate(NREPS_EVAL, logLik(pfilter(mf, Np = NP))) %>%
+         logmeanexp(se = TRUE)
+    coef(mf) %>% bind_rows() %>% bind_cols(loglik = ll[1], loglik.se = ll[2])
+  } -> results
+  attr(results,"ncpu") <- getDoParWorkers()
+  results
+}) -> results
+
+results %>% arrange(-loglik) %>% head -> best_local
+#best_local
+
+```
+
+```{r}
+covidSEIR %>%
+  simulate(params = unlist(best_local[1,]), nsim = 20, format = "data.frame", include.data = TRUE) %>%
+  plot_simulation()
+```
+
+
+### Global Search {.tabset .tabset-fade .tabset-pills}
+
+We perform a larger search across different starting points for parameters based on what the local search yielded. We do this for both Texas and California (with different sets of starting points). The boundaries of the search space and best parameter values that maximized likelihood are described below:
+
+
+#### California
+```{r, echo=TRUE}
+guesses = runif_design(
+  lower = c(b1 = 3, b2 = 20, b3 = 0, b4 = 700,
+            rho = 0, eta = 0, tau = 1000),
+  upper = c(b1 = 10, b2 = 75, b3 = 60, b4 = 3000,
+            rho = 1, eta = 0.3, tau = 2500),
+  nseq = NSTART
+)
+```
+
+```{r, echo=F}
+all = read_csv("writeup_params.csv") %>%
+  filter(loglik > max(loglik) - 50) %>%
+  bind_rows(guesses) %>%
+  mutate(type = if_else(is.na(loglik), "guess", "result")) %>%
+  arrange(type)
+
+pairs(~loglik + b1 + b2 + b3 + b4, data = all,
+      col = ifelse(all$type == "guess", grey(0.7), "#db5c5c"), pch = 16)
+```
+
+```{r, echo=F}
+read.csv("writeup_params.csv") %>% arrange(-loglik) %>% head %>%
+  knitr::kable(digits = 3, caption = "Global search results (in decreasing order of likelihood) for California")
+```
+
+#### Texas
+```{r, echo=TRUE}
+guesses = runif_design(
+  lower = c(b1 = 10, b2 = 100,
+            rho = 0, eta = 0, tau = 1000),
+  upper = c(b1 = 100, b2 = 225,
+            rho = 1, eta = 0.3, tau = 2500),
+  nseq = NSTART
+)
+```
+
+```{r, echo=F}
+all = read_csv("writeup_params_texas.csv") %>%
+  filter(loglik > max(loglik) - 50) %>%
+  bind_rows(guesses) %>%
+  mutate(type = if_else(is.na(loglik), "guess", "result")) %>%
+  arrange(type)
+
+pairs(~loglik + b1 + b2, data = all,
+      col = ifelse(all$type == "guess", grey(0.7), "#db5c5c"), pch = 16)
+```
+
+```{r, echo=F}
+read.csv("writeup_params_texas.csv") %>% arrange(-loglik) %>% head %>%
+  knitr::kable(digits = 3, caption = "Global search results (in decreasing order of likelihood) for Texas")
+```
+
+### Profile likelihood for the reporting rate {.tabset .tabset-fade .tabset-pills}
+
+#### California
+
+By keeping the reporting rate $\rho$ of California data fixed, we will perform a profile likelihood test for the reporting rate. We start the test at the results of high likelihoods in the global search
+
+```{r, echo = FALSE, fig.width = 5, fig.height = 3}
+all = read.csv("writeup_params.csv") %>% filter(is.finite(loglik))
+all %>%
+  filter(loglik > max(loglik) - 10, loglik.se < 2) %>%
+  group_by(round(rho, 2)) %>%
+  filter(rank(-loglik) < 3) %>%
+  ungroup() %>%
+  ggplot(aes(x = rho, y=loglik)) +
+  theme_bw() +
+  geom_point() +
+  geom_hline(
+    color="red",
+    yintercept=max(all$loglik) - 0.5 * qchisq(df = 1, p = 0.95)
+  )
+
+rho_ci = all %>%
+  filter(is.finite(loglik)) %>%
+  filter(loglik > max(loglik) - 0.5 * qchisq(df = 1, p = 0.95)) %>%
+  summarize(min = min(rho), max = max(rho))
+```
+
+The 95% CI for the reporting rate comes out to be between `r rho_ci[1]` and `r rho_ci[2]` which seems like a reasonable estimate. Next we repeat the same for the Texas data, to see if there are any differences.
+
+#### Texas
+
+```{r, echo = FALSE, fig.width = 5, fig.height = 3}
+all = read.csv("writeup_params_texas.csv") %>% filter(is.finite(loglik))
+all %>%
+  filter(loglik > max(loglik) - 10, loglik.se < 2) %>%
+  group_by(round(rho, 2)) %>%
+  filter(rank(-loglik) < 3) %>%
+  ungroup() %>%
+  ggplot(aes(x = rho, y=loglik)) +
+  theme_bw() +
+  geom_point() +
+  geom_hline(
+    color="red",
+    yintercept=max(all$loglik) - 0.5 * qchisq(df = 1, p = 0.95)
+  )
+
+rho_ci = all %>%
+  filter(is.finite(loglik)) %>%
+  filter(loglik > max(loglik) - 0.5 * qchisq(df = 1, p = 0.95)) %>%
+  summarize(min = min(rho), max = max(rho))
+```
+
+The 95% CI for the Texas reporting rate comes out to be between `r rho_ci[1]` and `r rho_ci[2]` which is a much smaller (and lower) interval as compared to California. This is an interesting result, as there is no reason for the estimates of the reporting rate to be significantly different between two similarly sized states. 
+
+### Conclusion
+
+In this analysis, we fit a SEIR model on California and Texas Covid-19 cases focusing on the time period when the Omicron variant was the dominant strain. We used a step function for the exposure rate, $\beta$, to allow for different rates depending on the major Covid-19 policies at the time. Additionally, we modified the historic rate of individual transfers to better reflect the faster spread and recovery timeline of the new variant. This seemed to work well with the data.
+
+We created an initial guess that the exposure rate after the CDC reduced the quarantine period would be greater than before, but in both states the exposure rate converged closer to the previous rate. This provides some evidence that this policy change did not affect the spread of the virus.
+
+Further development of this pomp model, such as adding compartments for asymptomatic, vaccinated, and deceased individuals or parametrizing based on age and sex, could yield better models. Additionally, we decided to compare pomp models and did not develop a likelihood baseline nor perform extensive diagnostics. Using an ARIMA model as a baseline would have yielded a stronger analysis.
+
+### References
+\[1]: https://coronavirus.jhu.edu/map.html
+
+\[2]: https://www.kff.org/global-health-policy/issue-brief/economic-impact-of-covid-19-on-pepfar-countries/
+
+\[3]: https://github.com/nytimes/covid-19-data
+
+\[4]: https://abc7news.com/timeline-of-coronavirus-us-covid-19-bay-area-sf/6047519/
+
+\[5]: https://www.cdc.gov/mmwr/volumes/71/wr/mm7104e2.htm
+
+\[6]: https://ionides.github.io/531w21/final_project/project15/blinded.html
+
+\[7]: https://ionides.github.io/531w21/final_project/project13/blinded.html
+
+\[8]: https://www.populationu.com/us/california-population.
+
+\[9]: https://www.webmd.com/lung/coronavirus-incubation-period#1
+
+\[10]: https://www.cdc.gov/media/releases/2021/s1227-isolation-quarantine-guidance.html

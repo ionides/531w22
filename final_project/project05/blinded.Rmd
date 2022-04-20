@@ -1,0 +1,1047 @@
+---
+title: "An Inquiry into the Effects of Vaccination on COVID-19 Cases using Compartment Models"
+author: "Group 5"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r Libraries and Dependencies, warning = F, include =F}
+
+suppressPackageStartupMessages(library(tidyverse))
+suppressPackageStartupMessages(library(lubridate))
+suppressPackageStartupMessages(library(toOrdinal))
+suppressPackageStartupMessages(library(fGarch))
+suppressPackageStartupMessages(library(pomp))
+suppressPackageStartupMessages(library(foreach))
+suppressPackageStartupMessages(library(doParallel))
+suppressPackageStartupMessages(library(doRNG))
+suppressPackageStartupMessages(library(ggpubr))
+suppressPackageStartupMessages(library(knitr))
+
+
+```
+
+```{r Function Definitions, include=F}
+# User Defined Functions
+
+# A function to conver date objects to English names
+date_to_text <- function(date){
+  day_comp <- mday(date)
+  month_comp <- month(date,label = T,abbr = F)
+  year_comp <- year(date)
+  # toOrdinal function suggested here
+  #https://stackoverflow.com/questions/53147450/is-there-a-build-in-ordinal-sequence-vector-in-r
+  day_part <- toOrdinal(day_comp)
+  return_string <- paste(day_part, "of", paste(month_comp,",",sep = ""),year_comp, sep = " ")
+  return(return_string)
+}
+
+check_roots = function(mdl){
+  
+  coefs = coef(mdl)
+  ars = coefs[startsWith(names(coefs), 'ar')]
+  mas = coefs[startsWith(names(coefs), 'ma')]
+  
+  print('ar roots:')
+  print(abs(polyroot(c(1, -ars))))
+  print('ma roots:')
+  print(abs(polyroot(c(1, mas))))
+  
+}
+likratiotest = function(mdlA, mdl0){
+  teststat = 2*(as.numeric(logLik(mdlA))-as.numeric(logLik(mdl0)))
+  dfdiff = length(coef(mdlA)) - length(coef(mdl0))
+  return(pchisq(teststat, df=dfdiff, lower.tail = FALSE ))
+}
+ARMA_tables <- function(data,P,Q, xreg = NULL, 
+                        season_period = 7,SAP = 0,SAQ = 0){ 
+  aic_table <- matrix(NA,(P+1),(Q+1)) 
+  lrt_table <- matrix(NA,(P+1),(Q+1)) 
+  mdl0 = arima(data,order=c(0,0,0),
+               seasonal=list(order=c(SAP,0,SAQ),period=season_period),
+               optim.control=list(maxit = 1000), xreg = xreg)
+  for(p in 0:P) {
+    for(q in 0:Q) {
+      try({mdl = arima(data,order=c(p,0,q),
+                      seasonal=list(order=c(SAP,0,SAQ),period=season_period),
+                      optim.control=list(maxit = 1000), xreg = xreg)
+        lrt_table[p+1,q+1] = likratiotest(mdl, mdl0)
+        aic_table[p+1,q+1] = mdl$aic}, T)
+    }
+  }
+  dimnames(aic_table) <- list(paste("AR",0:P, sep=""),
+                              paste("MA",0:Q,sep=""))
+  dimnames(lrt_table) <- list(paste("AR",0:P, sep=""),
+                              paste("MA",0:Q,sep=""))
+  return(list(aic_table, lrt_table))
+}
+
+check_roots_seasonal = function(mdl){
+  
+  coefs = coef(mdl)
+  sars = coefs[startsWith(names(coefs), 'sar')]
+  smas = coefs[startsWith(names(coefs), 'sma')]
+  
+  print('sar roots:')
+  print(abs(polyroot(c(1, -sars))))
+  print('sma roots:')
+  print(abs(polyroot(c(1, smas))))
+  
+}
+
+# Function for QQ Plot, title argument for help make title easier
+normal_qq_plot <- function(data, title){
+  graph_title = paste("Normal QQ Plot for ", title, sep = "")
+  graph <- data %>% as.data.frame() %>% ggplot(aes(sample = data)) + 
+    # QQ Functions
+    stat_qq() + stat_qq_line() + 
+    labs(x = "Theoretical Quantiles", y = "Sample Quantiles",
+         title = graph_title)
+  return(graph)
+}
+
+```
+
+# Introduction
+
+Coronavirus disease (colloquilly known as COVID-19) is respiratory illness caused by the SARS-CoV-2 virus [1]. First observed in mid-December, 2019, in Wuhan, China, COVID-19  has spread across the globe, being declared  a pandemic by World Health Organization in March 11,2020 [2]. Over the course of March and April of 2020, numerous countries around the world closed their borders and issued lockdowns or shelter in place orders [3].
+
+Although much of 2020 was marked by frequent lockdowns and shelter in place orders, the year ended on a high note as Pfizer-BioNTech and Moderna, later on joined by Johnson&Johhnson, obtained emergency authorization for their COVID-19, vaccines using cutting-edge mRNA technology. In United States, as well as in many other countries across the world  these vaccines were first distributed to doctors and nurses, high-risk population groups, and the essential front-line workers due to shortages in production and rollout [3]. 4 months after their emergency authorization, COVID-19 vaccines were made available to all adults over the age of 18 in United States [4]. Despite a the initial effort, COVID-19 vaccination rate soon stagnated due to hesitancy against the vaccine in communities across United States[5]. 
+
+As of today, just a year after the vaccine first became available to general public in the United States, COVID-19 related lock-downs seem a distant memory despite the increasing infectiousness of the COVID-19 variants. As we celebrate the one year anniversery of the COVID-19 vaccine being made available to the general public, the question of what "what if the vaccine rollout post April 19 was faster or slower?" remains a relevant discussion point. In this project we attempt to answer this question by modelling the COVID-19 pandemic following April 19,2021 using the compartment model framework in epidemiology and simulating different vaccine adoption scenarios from our model.
+
+# Data
+
+```{r Reading NYT Data, include = F,eval=F}
+Last_Pull <- as_date("2022-4-15")  # Date we last pulled the data
+NYT_Covid_Case_Data_CSV <- "https://raw.githubusercontent.com/nytimes/covid-19-data/master/us.csv"
+#Last Data Pull April 15 2022. Code for data pull given below
+NYT_Covid_Case_Data <- read_csv(file = NYT_Covid_Case_Data_CSV,
+                                col_types = cols(
+                                  date  = col_date(format = "%Y-%m-%d"),
+                                  cases = col_double(),
+                                  deaths = col_double())) %>% 
+  dplyr::filter(date <Last_Pull)
+```
+
+```{r EDA and Cleaning, include = F,eval=F}
+# We graph the data
+NYT_Covid_Case_Data %>% ggplot() + 
+  geom_line(aes(date,cases), color = "red") + 
+  scale_x_date(breaks = scales::breaks_pretty(10)) +
+  labs(title = "COVID-19 Cases in US",x=NULL,y= "Cases")
+NYT_Covid_Case_Data %>% ggplot() + 
+  geom_line(aes(date,deaths), color = "black") + 
+  scale_x_date(breaks = scales::breaks_pretty(10)) +
+  labs(title = "COVID-19 Deaths in US", x=NULL, y= "Deaths")
+
+#Our graphs indicate that the data is of cumulative cases and death counts
+#So we convert these values into daily by using lag
+
+NYT_Covid_Case_Data %>% mutate(daily_cases = cases- dplyr::lag(cases,1),
+                               daily_deaths = deaths - dplyr::lag(deaths),
+                               change_daily_cases = daily_cases - dplyr::lag(daily_cases,1),
+                               cumulative_cases = cases, #rename cases
+                               cumulative_deaths = deaths) %>% #rename deats
+  dplyr::select(-deaths,-cases) %>%   
+  dplyr::filter(date < Last_Pull # For consistency when debugging
+  )-> NYT_Covid_Case_Data # Drop old variables
+
+#Graph the data again
+NYT_Covid_Case_Data %>% ggplot() +
+   geom_line(aes(date,daily_cases, color = "Daily Cases")) + 
+   geom_line(aes(date,daily_deaths, color = "Daily Deaths")) + 
+  scale_color_manual(values = c("Daily Cases" ="Red", "Daily Deaths" = "Black")) +
+  scale_y_log10() +
+  scale_x_date(breaks = scales::breaks_pretty(10)) +
+  labs(title ="Covid-19 Daily Cases and Deaths (Log-10 Scale)",
+       x = NULL, y = "Daily Count")
+
+min_date_NYT <- min(NYT_Covid_Case_Data$date)
+n_data_NYT <- nrow(NYT_Covid_Case_Data)
+write_csv(NYT_Covid_Case_Data,file = "NYT_Covid_Data_2022_April_15.csv",col_names = T)
+
+#We save the results since the data is updated daily and we need to stop after a point to stabilize our results
+
+#https://www.reuters.com/article/us-health-coronavirus-usa/all-american-adults-to-be-eligible-for-covid-19-vaccine-by-april-19-biden-idUSKBN2BT1IF
+# The article indicates that all americans were elligible for vaccines starting April 19 2021
+
+#So we filter based on those dates
+Vaccine_start_date <- as_date("2021-4-19") #2021 April 19
+NYT_Covid_Case_Data_filtered <- NYT_Covid_Case_Data %>% 
+  dplyr::filter(date >=Vaccine_start_date) #Filter after vaccines became available for all
+
+
+```
+
+```{r Importing CDC Vaccination Data, include = F,eval=F}
+#Note: The data was last pulled on 2022 April 15
+CDC_Vaccine_Data_by_State <- read_csv(file = "COVID-19_Vaccinations_in_the_United_States_Jurisdiction.csv",
+         col_types = cols(Date  = col_date(format = "%m/%d/%Y")))
+names(CDC_Vaccine_Data_by_State)[1] <- "date" #prevent problems with Date as function and var name
+#Find full US Cases
+CDC_Vaccine_Data_by_State  %>% dplyr::filter(Location != "US") %>%
+  group_by(date) %>% 
+  summarize(Doses_Administered = sum(Administered),
+            Complete_Vaccination = sum(Series_Complete_Yes)) -> CDC_Vaccine_Data
+```
+
+```{r EDA and Cleaning CDC, include = F,eval=F}
+
+CDC_Vaccine_Data %>% ggplot() + 
+  geom_line(aes(date,Doses_Administered, color = "Doses")) +
+  geom_line(aes(date,Complete_Vaccination, color = "Complete Vaccinated")) +
+  scale_color_manual(values = c("Doses" = "Black","Complete Vaccinated" = "red"))
+#It appears to be the data is cumulative once again, 
+#so we divide them into cumulative and daily
+CDC_Vaccine_Data %>% 
+  transmute(date = date,
+    cumulative_doses_administered = Doses_Administered,
+    daily_doses_administered = Doses_Administered- dplyr::lag(Doses_Administered,1),
+    cumulative_complete_vaccination = Complete_Vaccination,
+    daily_complete_vaccination = Complete_Vaccination - dplyr::lag(Complete_Vaccination,1)
+  ) -> CDC_Vaccine_Data
+min_date_CDC <- min(CDC_Vaccine_Data$date)
+n_data_CDC <- nrow(CDC_Vaccine_Data)
+CDC_Vaccine_Data
+```
+
+```{r Filter and Combine, include = F,eval=F}
+CDC_Vaccine_Data %>%
+  dplyr::filter(date >= Vaccine_start_date) %>% #Data Vaccines become available for all
+  dplyr::filter(date < Last_Pull) -> CDC_Vaccine_Data_filtered #Date of last pull
+#Combine the two datasets
+Covid_data2021_2022 <- NYT_Covid_Case_Data_filtered %>% 
+  left_join(CDC_Vaccine_Data_filtered,by = "date")
+#Save the data and summary statistics for faster use in the future
+save(Covid_data2021_2022,
+     min_date_CDC,min_date_NYT,
+     NYT_Covid_Case_Data,
+     CDC_Vaccine_Data,
+     n_data_CDC, n_data_NYT,
+     Vaccine_start_date,Last_Pull,
+     file = "COVID19Data.Rdata")
+```
+
+```{r load data, include=F}
+load("COVID19Data.Rdata")
+```
+
+
+In order to answer this question we utilize COVID-19 case and death count data from the New York Times COVID-19 Case Tracker [6] and the COVID-19 vaccination data from the Center for Disease Control in United States (CDC) [7].
+
+The COVID-19 data from New York Times COVID-19 Case Tracker tracks the COVID-19 cases and COVID-19 related deaths going back all the way to `r min_date_NYT %>% date_to_text()`, containing `r n_data_NYT` observations `r min_date_NYT %>% date_to_text()` and `r Last_Pull %>% date_to_text()`, the day we last update the data. The data is represented in terms of cumulative case and death counts, so we take the difference in case counts to obtain daily case and death counts.
+
+CDC's COVID-19 Vaccination Data in United States contains information regarding vaccination rates in United States dating back to `r min_date_CDC %>% date_to_text()`, broken up by numerous categories including state, vaccine manufacturer, and major age brackets. After combining the data from different states, we obtain `r n_data_CDC` observations between `r min_date_CDC %>% date_to_text()` and `r Last_Pull %>% date_to_text()`, the day we last update the data. As of April 2022 there are 3 major COVID-19 vaccines distributed across United States: Janssen (colloquially known as Johnson&Johnson Vaccine), Moderna, and Pfizer-BioNTech. While Janssen vaccine requires one shot to provide full protection against COVID-19 while Moderna and Pfizer-BioNTech requires 2 shots spaced 4 and 3 weeks apart respectively [8]. As such, in order to simplify our analysis, we only consider the doses administered and the number of individuals who have reached "full vaccination". Once again, the data is represented in terms of cumulative numbers, so we take the difference to obtain daily rates.
+
+As afformentioned, given that COVID-19 vaccines were not readily available to general public due to supply constraints prior to April 19, 2021, we consider both time series after `r Vaccine_start_date %>% date_to_text()`. Overall we have `r nrow(Covid_data2021_2022)` observations between `r Vaccine_start_date %>% date_to_text()` and `r Last_Pull %>% date_to_text()`, the day we last update the data.
+
+# Exploratory Data Analysis
+
+## COVID-19 Cases
+
+The time series plot for the daily COVID-19 cases can be seen below
+
+```{r, echo = F}
+Covid_data2021_2022 %>% 
+  ggplot() + geom_line(aes(date, daily_cases)) +
+  scale_x_date(breaks = scales::breaks_pretty(8)) +
+  labs(title = "Daily COVID-19 Cases in United States",
+       y = "Daily Cases", x= NULL)
+```
+
+Looking at the time series of Daily COVID-19 cases, we observe the gradual decrease in cases over time as vaccines become more available. Around July of 2021, we see increase in daily case numbers which can be attributed to the mass gatherings during 4th of July celebrations in United States as well as the spread of the new Delta variant, which was highly infectious to the non-vaccinated [9]. The Delta wave continues till November 2021, when we began to see a rapid increase in case numbers. This increase can be attributed to the gatherings during Thanksgiving and the holiday season (Christmas, Hannukah, New Year, and similar other cultural celebrations based on Winter Solstice) with the emergence of the new Omicron variant [10] which is even more infectious than Delta variant and can result in breakthrough infections in the vaccinated.
+
+
+```{r, echo = F}
+acf(Covid_data2021_2022$daily_cases,lag.max = 180, main = "Sample ACF Plot of Daily COVID-19 Cases")
+```
+
+As expected, the daily COVID-19 cases are highly time dependent, as can be seen in the sample auto-correlation function plot above. This time dependence seems to by cyclic, which is consistent with the wave patterns we have grown accustomed to in COVID-19 data.
+
+Since the time series of daily COVID-19 cases clearly neither mean stationary nor covariance stationary, we look at the differenced data, the change in daily COVID-19 Cases
+
+```{r, echo = F}
+Covid_data2021_2022 %>% 
+  ggplot() + geom_line(aes(date,change_daily_cases)) +
+  scale_x_date(breaks = scales::breaks_pretty(8)) +
+  labs(title = "Change in Daily COVID-19 Cases in United States",
+       y = "Change in Daily Cases", x = NULL)
+```
+
+Looking at the change in daily COVID-19 cases, we observe that the time series looks to be mean stationary with the mean around 0 but a non-constant variance that changes over time (in our case corresponding to the waves caused by different variants). It can be noted that the time series of change in daily COVID-19 cases, the integrated time series, looks similar to time series of returns of a financial asset as such we can use techniques in financial statistics, such as ARMA-GARCH models, to model it. 
+
+```{r, echo = F}
+acf(Covid_data2021_2022$change_daily_cases,lag.max = 180,
+    main= "Sample ACF Plot of Change in Daily COVID-19 Cases")
+```
+
+As suspected, the sample auto-correlation function plot shows us that the integrated time series still has a strong time dependence; however, given our observations, it is reasonable to assume that this dependency is partially due to heteroskadasticity.
+
+## COVID-19 Vaccinations
+
+As noted, given that different vaccines have different times to provide full protection against COVID-19, instead of considering the number people getting vaccinated, we consider number of people reaching full vaccination on a given day. We plot the time series of people reaching full vaccination status on a given day as well as the cumulative number of people that have reached full vaccination on that day below.
+
+```{r, echo = F}
+daily_vax_eda <- Covid_data2021_2022 %>% 
+  ggplot() + geom_line(aes(date, daily_complete_vaccination)) +
+  scale_x_date(breaks = scales::breaks_pretty(6)) +
+  labs(subtitle = "Daily",y = "Number of Individuals", x= NULL,)
+cum_vax_eda <- Covid_data2021_2022 %>% 
+  ggplot() + geom_line(aes(date, cumulative_complete_vaccination)) +
+  scale_x_date(breaks = scales::breaks_pretty(6)) +
+  labs(subtitle = "Cumulative", x= NULL, y= "Number of Individuals")
+
+ggarrange(daily_vax_eda,cum_vax_eda,nrow = 2) %>% 
+  annotate_figure(top = "Number of People Reaching Full Vaccination Status in United States")
+```
+
+```{r Fix backlogs, include = F}
+Covid_data2021_2022 %>% dplyr::filter(daily_complete_vaccination <0) %>% select(date) -> days_w_negative_vax
+Covid_data2021_2022 %>% select(date,daily_complete_vaccination) %>% 
+  mutate(day = row_number()) %>% lm(daily_complete_vaccination ~ poly(day,3,raw = T),data =.) %>% summary()
+Covid_data2021_2022 %>% 
+  mutate(daily_complete_vaccination = ifelse(daily_complete_vaccination <= 0,
+                                             yes = 0,no = daily_complete_vaccination),
+         daily_cases = ifelse(daily_cases <= 0, 1, daily_cases),
+         ) -> Covid_data2021_2022
+```
+
+Looking at the time series plot of the number of people reaching full vaccination in United States as well as the cumulative people that have reached full vaccination by that date, we observe that following `r Vaccine_start_date %>% date_to_text()`, when the vaccines first became available to general public, number of people reaching full immunity increased at first, but then tapered off towards 0. It is important to note that we have `r nrow(days_w_negative_vax)` 0 with negative number of people reaching full vaccination negative vaccination which is implausible. We attribute this to backlogging of revisions, and thus set these values to 0.
+
+# ARIMA Model
+
+We will start by modeling the daily COVID-19 cases using stationary **I**ntegrated, **A**uto**R**egressive **M**oving**Average** (ARIMA) model. As indicated by our exploratory data analysis, the daily COVID-19 cases cannot be modelled as trend and covariance stationary; however, the change in daily cases seem to better suited towards a stationary model despite showing a clear sign of heteroskadasticity. We first proceed fitting an ARMA(p,q) model on the change in daily COVID-19 cases, which constitutes a ARIMA(p,1,q) model on the daily COVID-19 cases, comparing the model fits using Akaike's Information Criterion (AIC).
+
+Since our exploratory data analysis highlights that the Omicron wave occured despite the high number of people with full vaccination status, we expect that utilizing cumulative number of people that has reached full vaccination to obscure our results. This hypothesis is confirmed by our preliminary results where including number of people that has reached full vaccination causes convergence issues and using its log transform decreases the model fit as measured by AIC, as such, despite our goal of understanding the effects of vaccination on COVID-19 cases, we have to proceed by not considering the effect of vaccination as we are not able properly model the non-linear effects of vaccination and variants within the ARIMA framework.
+
+Our preleminary results indicated that incorporation of seasonal terms to the model were not necessary and caused convergence issues as well as the roots of the AR/MA and/or SAR/MAR polynomials cancelling and yielding smaller models. As such we limited our model space to the non-seasonal ARIMA, fitting $ARIMA(p,1,q)$ models for each combination of p and q ranging from 0 to 4, resulting in $5\times6=25$ different models. The fit of these models as indicated by AIC is presented in the table above.
+
+```{r, echo=F}
+vaxxed <- log(Covid_data2021_2022$cumulative_complete_vaccination,base = 10)
+table1 <- ARMA_tables(Covid_data2021_2022$change_daily_cases,4,4,xreg = NULL,0,0)
+kable(table1[[1]], caption = 'Model Fit for ARIMA(p,1,q) Measured by AIC')
+#table2 <- ARMA_tables(Covid_data2021_2022$change_daily_cases,4,4,xreg = vaxxed,0,0)
+#table2[[1]]
+#table3 <- ARMA_tables(Covid_data2021_2022$change_daily_cases,4,4,xreg = NULL,0,1)
+#table3[[1]]
+#table4 <- ARMA_tables(Covid_data2021_2022$change_daily_cases,4,4,xreg = NULL,1,1)
+#table4[[1]]
+
+```
+
+
+```{r, include=F}
+arma_24 <- arima(Covid_data2021_2022$change_daily_cases,order=c(2,0,4))
+check_roots(arma_24)
+arma_21 <- arima(Covid_data2021_2022$change_daily_cases,order=c(2,0,1))
+check_roots(arma_21)
+arma31 <- arima(Covid_data2021_2022$change_daily_cases,order=c(3,0,1))
+check_roots(arma31)
+arma31 <- arima(Covid_data2021_2022$change_daily_cases,order=c(3,0,1))
+check_roots(arma31)
+Covid_cases_ts <- ts(Covid_data2021_2022$change_daily_cases,start = c(2021,4,19), end = c(2022,4,15),deltat = 1/365)
+forecast::auto.arima(Covid_cases_ts,max.p = 4,max.q = 4,stationary = T,
+                     stepwise = T,allowmean = T,ic = "aic")
+arma22 <- arima(Covid_data2021_2022$change_daily_cases,order=c(2,0,2))
+check_roots(arma22)
+arma11 <- arima(Covid_data2021_2022$change_daily_cases,order=c(1,0,1))
+check_roots(arma11)
+arma12 <- arima(Covid_data2021_2022$change_daily_cases,order=c(1,0,2)) # Optimal Model
+check_roots(arma12)
+sarma12 <- arima(Covid_data2021_2022$change_daily_cases,order=c(1,0,2),
+                seasonal=list(order=c(0,0,1),period=7))
+check_roots(sarma12)
+check_roots_seasonal(sarma12)
+```
+
+Although ARIMA(2,4) model has the lowest AIC, the AR and MA polynomials have cancelling roots, simplifying the model into a smaller models. After going through our list of candidate models, we observe that the best fitting ARIMA model without any issues regarding to cancelling roots is the ARIMA(1,1,2) model, for which we plot the fitted values below
+
+```{r,echo = F}
+arma12_resids <- residuals(arma12,h = 1)
+arma12_fit<- fitted(arma12)
+
+arma12_diagnostics <- data.frame("Date" = Covid_data2021_2022$date, 
+                                 "Actual" = Covid_data2021_2022$change_daily_cases,
+                                 "Fitted" = arma12_fit, "Residuals" = arma12_resids)
+arma12_diagnostics[,'Fitted'] = as.numeric(arma12_diagnostics[,'Fitted'])
+arma12_diagnostics[,'Residuals'] = as.numeric(arma12_diagnostics[,'Residuals'])
+
+arma12_diagnostics %>% ggplot(aes(x=Date)) +
+  geom_line(aes(y=Actual, color="Actual"),linetype = "dashed",alpha = 0.5) +
+    geom_line(aes(y=Fitted, color = "Fitted"),size = 0.8) +
+  scale_color_manual(values = c("Actual" = "blue", "Fitted" = "red")) +
+  theme(legend.position = "bottom") +
+  scale_x_date(breaks = scales::breaks_pretty(n=4)) +
+  labs(y= "Number of Cases", color = NULL,
+       title = "Time Series Plot of Fitted ARIMA(1,1,2) Model vs Actual Data")
+```
+
+Looking at the fitted values of the ARIMA(1,1,2) model above, we observe that model fails to model the Delta and Omicron waves due to the heteroskadasticity. This pattern is more appearent when we look into the time series of the ARIMA(1,1,2) model residuals, where the Delta and Omicron waves stand out as outliers, with the model severly underpredicting the change in daily COVID-19 cases in both waves
+
+```{r,echo = F}
+arma12_diagnostics %>% ggplot(aes(x=Date,y=Residuals)) + geom_line() +
+  geom_smooth(method = "lm",se = F, formula=y~x) + 
+  scale_x_date(breaks = scales::breaks_pretty(n=4)) +
+  labs(y= "Residual", x= "Year", 
+       title = "Time Series Plot of ARIMA(1,1,2) Model Residuals")
+```
+
+The time series plot for ARIMA(1,1,2) model shows us that as expected, the heteroskadasticity in the number of COVID-19 cases due to the Delta and Omicron variants renders the ARIMA framework inadequate.
+
+```{r,echo = F}
+acf(arma12_diagnostics$Residuals,lag.max = 180,
+    main = "ACF Plot of the ARIMA(1,1,2) Residuals")
+```
+
+Looking at the ACF of the residuals of the ARIMA(1,1,2) model we observe that there is unaccounted time dependence in our model, which we attribute to the underfitting of the model.
+
+```{r,echo = F}
+normal_qq_plot(arma12_diagnostics$Residuals,"ARIMA(1,1,2) Model Normal QQ Plot")
+```
+
+Finally, looking at the normal quantile-quantile plot of  the ARIMA(1,1,2) residuals, we observe that the residuals are clearly non-normal with extremely heavy tails, which constitutes a violation of Gaussian white noise assumption of the ARIMA framework. This is expected as the time series for change in daily COVID-19 cases exhibited clear signs of heteroskadasticity. As indicated in our exploratoryrortoy data analysis, given the similarities between the time series of hange in daily COVID-19 cases and the time series of the returns of a tpyical financial asset, we can utilize the ARMA-GARCH framework in the financial statistics literature to account for the hetersokadasticity.
+
+
+## ARMA-GARCH Model
+
+As noted in the financial literature, ARMA models perform sufficiently well when the time series have serial correlation; however, the underlying independent identically distributed white noise assumption fails when there is volatility clustering (periods of high/low variance), which is frequently seen in financial data [11]. In order to address this shortcoming, an ARMA-GARCH model replaces the independent and identically distributed white noise process from an ARMA model with a weak white noise process from a GARCH model, yielding a ARMA-GARCH model. Further details about the ARMA-GARCH model family can be found in Chapter 14 of Ruppert and Matteson [11].
+
+
+```{r, include = F, warning = F,eval = F}
+arma_garch = garchFit(~arma(1,2)+garch(1,1),data=Covid_cases_ts,trace=F)
+arma_garch = garchFit(~arma(1,1)+garch(1,1),data=Covid_cases_ts,trace=F)
+arma_garch = garchFit(~arma(2,2)+garch(1,1),data=Covid_cases_ts,trace=F)
+
+summary(arma_garch)
+```
+
+While we expect an ARMA-GARCH model to alleviate the issues arising from heteroskadasticity, these models can already be unstable in relatively well behaving financial data and in our case the ARMA-GARCH models we attempt to fit have computational issues regarding non-invertible Hessian matrix.
+
+Given the poor performance of the ARIMA(1,1,2) model and the numerical convergence issues in the ARMA-GARCH models we try, We conclude this section by pointing out the elementary ARIMA framework is inadequate in modelling COVID-19 cases as the COVID-19 cases exhibit heteroskadasticity due to the variants that randomly emerge and change the infectiousness of the virus. Given the non-linear effects due to variants, vaccinations and dynamic nature of viruses such as COVID-19. As such, we proceed by modelling the daily COVID-19 cases utilizing a modified SEIR model by utilizing the Partially Observed Markov Chain (POMP) framework.
+
+
+# POMP Model: SVEIQRD
+
+To model the daily COVID-19 cases, we modify the SEIR (**S**usceptible, **E**xposed, **I**nfected, **R**ecovered) compartment model from epidemiology, which we name the SVEIQRD (**S**usceptible, **V**accinated,**E**xposed, **I**nfected, **Q**uarantined, **R**ecovered, **D**ead) model. A similar model have been used in the epidemiology literature by Ghostine et al. (2021) [12]; however, their model focuses on Saudi Arabia and had limitations with regards to avilability of vaccine data, as COVID-19 vaccines were authorized relatively recently when the paper was published.
+
+Although we have data for the number of people achieving full vacccination status every day, we choose to model the vaccinations within our model as our end goal is to simulate different vaccination rates in order to explore its effects on case numbers.
+
+## Model:
+
+We present a diagram for the SVEIQRD Model below:
+
+![](model_diag.png)
+
+
+Each arrow demotes the associated rate for which individuals in one compartment move from one to the other. We assume that there are 6 mutually exclusive stages. Invidiuals can move from being succeptible (S) to being Vaccinated (V) or Exposed (E). The vaccinated individuals have some protection against infection (denoted by $\gamma$). Once Exposed (E), individuals move from Exposed (E) to Infected (I), where they can transmit the virus, to Quarantined (Q) where they no longer are able to infect others. After the quarantine stage individuals move to either Recovered (R) or Dead (D) stages, with *\kappa* denoting the fraction of individuals that die. The number of cases is given when individuals move from Infected (I) to Quarantined (Q) stage with respect to discretized normal distribution truncuated at 0, given by
+
+$$Cases = (round(C_N))^+ \text{ where } C_n\sim N(\chi\cdot H_n,(\rho H_n)^2+\chi\cdot H_n)$$ where $a^+=max\{a,0\}$ and H is the variable tracking the individuals moving from I to Q. Although we do not consider the asymptomatic cases, these can be thought of as being part of the measurement error.
+
+The number of people in each compartment is given by:
+
+$$\begin{eqnarray}
+\\ &S(t)&= S(0) - N_{SE}(t)-N_{SV}(t)
+\\ &V(t)&= V(0) + N_{SV}(t)
+\\ &E(t)&= E(0) + N_{SE}(t)+N_{SV}(t)-N_{EI}(t)
+\\ &I(t)&= I(0) + N_{EI}(t) - N_{IQ}(t)
+\\ &Q(t)&= N(0) + N_{IQ}(t) - N_{QR}(t) - N_{QD}(t)
+\\ &R(t)&= R(0) + N_{QR}(t)
+\\ &D(t)&= D(0) + N_{QD}(t)
+\end{eqnarray}$$ 
+
+where the the movement between compartment is given by: 
+
+$$\begin{eqnarray}
+\\ &\Delta N_{SV}(t)&\sim Binomial(S,1-e^{-\nu\Delta t})
+\\ &\Delta N_{SE}(t)&\sim Binomial(S,1-e^{-\beta_t(I/N)\Delta t})
+\\ &\Delta N_{VE}(t)&\sim Binomial(V,1-e^{-(1-\gamma)\beta_t(I/N)\Delta t})
+\\ &\Delta N_{EI}(t)&\sim Binomial(E,1-e^{-\mu_{EI}\Delta t})
+\\ &\Delta N_{IQ}(t)&\sim Binomial(I,1-e^{-\mu_{IQ}\Delta t})
+\\ &\Delta N_{QR}(t)&\sim Binomial(Q,1-e^{-\kappa\cdot\mu_{QR}\Delta t})
+\\ &\Delta N_{QD}(t)&\sim Binomial(Q,1-e^{-(1-\kappa)\cdot\mu_{QD}\Delta t})
+\end{eqnarray}$$ 
+
+```{r Beta init, include=F}
+#Prepare Data for POMP object
+Covid_data2021_2022 %>% 
+  transmute(cases = daily_cases,
+            day = row_number(),
+            date = date) -> model_data
+#From our EDA and https://www.yalemedicine.org/news/5-things-to-know-delta-variant-covid#:~:text=First%20identified%20in%20India%20in,overwhelming%20increase%20in%20hospitalizations%20in
+# We assume Delta wave started in July 1 2021
+Delta_variant_start_date <- ymd("2021-Jul-1")
+#From EDA and https://www.cdc.gov/coronavirus/2019-ncov/variants/omicron-variant.html#:~:text=Emergence%20of%20Omicron&text=November%2024%2C%202021%3A%20A%20new,14%2C%202021%20in%20South%20Africa
+#We assume Omicron wave started in December 1 2021
+Omnicron_variant_start_date <- ymd("2021-12-1")
+
+#Convert dates to days corresponding in our model
+Delta_variant_start_day <- model_data %>% 
+  dplyr::filter(date == Delta_variant_start_date) %>% summarize(day = day) %>% as.numeric()
+Omnicron_variant_start_day <- model_data %>% 
+  dplyr::filter(date == Omnicron_variant_start_date) %>% summarize(day = day) %>% as.numeric()
+```
+
+Note that in order to incorporate different infectiousness of variants, we define $\beta$, the force of infection parameter, as follows.
+
+$$ \beta_t=   \left\{
+\begin{array}{ll}
+      b_o & t \geq \text{ July 1 2021} \\
+      b_1 &  \text{ 1 July 2021} < t\leq \text{ December 1 2021} \\
+      b_2 & > t  \text{ December 1 2021} \\
+\end{array} 
+\right.  $$
+
+where $b_2$ and $b_3$ correspond to the force of infection for Delta and Omicron variant respetively. The dates were determined in combination with our exploratory data analysis and consulted sources [9],
+[10].
+
+```{r Paramter Initializations, include=F}
+
+#https://www.census.gov/quickfacts/fact/table/US/PST045221
+#Use US Population
+initial_N <- round(331449281 * (1+ 0.005)) # 2020 April Census Estimate w/ 0.5% population growth 
+
+#Using the number of cases from last two weeks initialize Q
+initial_Q <- NYT_Covid_Case_Data %>% 
+  dplyr::filter(date > (Vaccine_start_date - weeks(2)),
+                date <= Vaccine_start_date) %>%
+  summarize(cases = sum(daily_cases)) %>% 
+  as.numeric()
+
+last_week_cases <- NYT_Covid_Case_Data %>% 
+  dplyr::filter(date > (Vaccine_start_date - weeks(1)),
+                date <= Vaccine_start_date) %>%
+  summarize(cases = sum(daily_cases)) %>% 
+  as.numeric()
+
+# Use the deaths since 2021 to initialize
+initial_D <- NYT_Covid_Case_Data %>%
+  dplyr::filter(date >= ymd("2021-01-01"),
+                date <= Vaccine_start_date) %>%
+  summarize(deaths = sum(daily_deaths)) %>%
+  as.numeric()
+
+# Use difference between deaths and cases from past year to set up recovered
+initial_R <- NYT_Covid_Case_Data %>%
+  dplyr::filter(date >= (Vaccine_start_date-months(6)),
+                date <= Vaccine_start_date) %>%
+  summarize(recovered_last_year = sum(daily_cases)-sum(daily_deaths)) %>%
+  as.numeric()
+
+#Use total number of people vaccinated to determine # of vaxxed
+initial_V <- CDC_Vaccine_Data %>% 
+  dplyr::filter(date == Vaccine_start_date) %>%
+  summarize(vaccinated = cumulative_complete_vaccination) %>%
+  as.numeric()
+```
+
+In order to initialize the compartments, we utilize the our data. We the initial number of vaccinated $V(0)$ to be the cumulative number of people vaccinated at our start date, `r Vaccine_start_date %>% date_to_text()`. Likewise, we define the initial number of quarantined people $Q(0)$ to be the cumulative number of cases in the last two weeks before our start date, `r Vaccine_start_date %>% date_to_text()`. We define the initial number of dead individuals $D(0)$ to be the cumulative number of deaths since 2021, and the recovered individuals $R(0)$ to be the difference be the difference between the cumulative number of cases and deaths in the 6 months before our start date, `r Vaccine_start_date %>% date_to_text()`. Finally, we define $C_{-7\leq t\leq0}$ to be the cumulative number of cases starting from 1 week before our start date, `r Vaccine_start_date %>% date_to_text()` and $N$ to be the estimated U.S. population at the time of `r Vaccine_start_date %>% date_to_text()`, using these define the remaining compartments as follows:
+
+$$\begin{eqnarray}
+\\ &S(0)=& N- V(0)-S(0)-E(0)-I(0)-Q(0)-R(0)-D(0)
+\\ &E(0)=& \phi \cdot C_{-7\leq t\leq0}
+\\ &I(0)=& \psi \cdot C_{-7\leq t\leq0}
+\end{eqnarray}$$
+
+where $\phi$ and $\psi$ are model parameters.
+
+Apart from $N$ and $C_{-7\leq t\leq0}$, which we determine using the data, all other variables are estimated using IF2 filter implemented in R package POMP.
+
+
+```{r, include = F}
+model_step <- Csnippet("
+  double Beta;
+  if(intervention == 1) Beta = b1;
+  else if(intervention == 2) Beta = b2;
+  else if(intervention == 3) Beta = b3;
+
+  double dN_SV = rbinom(S,1-exp(-nu*dt));
+  double dN_SE = rbinom(S, 1-exp(-1*Beta*(I/N)*dt));
+  double dN_VE = rbinom(V, 1-exp(-1*Beta*(1-gamma)*(I/N)*dt));
+  double dN_EI = rbinom(E,1-exp(-mu_EI*dt));
+  double dN_IQ = rbinom(I,1-exp(-mu_IQ*dt));
+  double dN_QR = rbinom(Q,1-exp(-kappa*mu_QR*dt));
+  double dN_QD = rbinom(Q,1-exp(-(1-kappa)*mu_QD*dt));
+  
+  
+  S -= dN_SE +dN_SV; 
+  V += dN_SV- dN_VE;
+  E += dN_SE + dN_VE - dN_EI;
+  I += dN_EI - dN_IQ;
+  H += dN_IQ;
+  Q += dN_IQ - dN_QR - dN_QD;
+  R += dN_QR;
+  D += dN_QD;
+  ")
+
+#Note: The nearby int in incrementation is for additional safety against getting non-integer values
+
+model_rinit <- Csnippet("
+  S = nearbyint(N - initial_V - nearbyint(last_week_cases *phi) - nearbyint(last_week_cases * psi) - initial_Q - initial_R - initial_D);
+  V = nearbyint(initial_V);
+  E = nearbyint(last_week_cases *phi);
+  I = nearbyint(last_week_cases * psi);
+  Q = nearbyint(initial_Q);
+  R = nearbyint(initial_R);
+  D = nearbyint(initial_D);
+  H = nearbyint(0);
+  ")
+
+model_dmeas <- Csnippet("
+  double tol= 1.0e-10;
+  double mean =chi*H;
+  double sd =sqrt(pow(rho*H,2)+chi*H)+tol;
+  if (cases <= 10*sd || cases >= -10*sd){
+    if(sd <= 0){
+      lik = tol;
+    }
+    else{
+      lik = dnorm(cases, mean, sd, 0)+tol;
+    }
+  }
+  else{
+  lik = tol;
+  }
+  if(give_log) lik=log(lik);
+")
+
+model_rmeas <- Csnippet("
+  double tol= 1.0e-10;
+  double mean =chi*H;
+  double sd =sqrt(pow(rho*H,2)+chi*H+tol);
+
+
+  cases = rnorm(mean, sd);
+  if (sd <=0){
+    cases = 0;
+  }
+  
+  if(cases>0.0){
+    cases = nearbyint(cases);
+  } else {
+    cases=0.0;
+  }
+")
+
+model_covar <- covariate_table(
+  t = model_data$day,
+  intervention = c(rep(1,Delta_variant_start_day),
+                   rep(2,Omnicron_variant_start_day-Delta_variant_start_day),
+                   rep(3,max(model_data$day)-Omnicron_variant_start_day)),
+                   
+  times = "t")
+
+
+model_data %>% select(-date) %>%
+  pomp(times="day",t0=1,
+       rprocess=euler(model_step,delta.t=1),
+       rinit=model_rinit,
+       rmeasure=model_rmeas,
+       dmeasure=model_dmeas,
+       accumvars="H",
+       partrans=parameter_trans(
+        log=c("b1","b2","b3", "mu_EI","mu_IQ","mu_QR","mu_QD"),
+        logit=c("nu", "gamma", "kappa","rho","chi","phi","psi")),
+       statenames=c("S","V","E","I","Q","R","D","H"),
+       paramnames=c("b1", #first strain
+                    "b2", #delta strain
+                    "b3", #omnicron strain
+                    "nu", #vaccination rate, between 0 and 1
+                    "gamma", #Vaccine efficacy (1-gamma)*Beta for vaccinated infection,between 0 and 1
+                    "mu_EI", #Move from Exposed to Inefcted
+                    "mu_IQ", #Move from Infected to Quarantined
+                    "kappa", #Decides on Death vs Recover between 0 and 1
+                    "mu_QR", #Move from Quarantine to Recovered
+                    "mu_QD", #Move from Quarantine to Death
+                    "rho", #Measurement Model between 0 and 1
+                    "N", #Population
+                    "chi", #Reporting rate between 0 and 1
+                    "initial_V", #fixed initialization param
+                    "last_week_cases",  #fixed initialization param
+                    "phi", #Variable, decide on how many exposed at start, between 0 and upper bound
+                    "psi",#Variable, decide on how many infected at start, between 0 and upper bound             
+                    "initial_Q", #fixed initialization param
+                    "initial_R", #fixed initialization param
+                    "initial_D" #fixed initialization param
+       ),
+       covar = model_covar,
+       cdir=".", cfile="model") -> model
+```
+
+
+## Model Assumptions 
+
+The model assumes that United States population is constant across the April 2021-April 2022 year when COVID-19 deaths are accounted and there is no migration/travel in and out of the system. This has the implication that  the birth rates and travel from other countries are to be neglected. Neglecting birth rates over the course of a year is expected given the short duration while neglecting travel/migration reasonable given that the United States population is large enough that traveling/migrating population would be negligible with respect to the overall population. Furthermore, not only non-essential travel has been scrutinized over the past year due the COVID-19 pandemic, but most countries have required proof of a negative COVID-19 test within a set period of time before admitting people in, making increase in transmission rates due to travel less likely.
+
+Another model assumption is that in each period people reach full vaccination status at a fixed rate proportional to the size of the eligible population. This is a simplifying assumption given that, as afformentioned, different vaccines have different timelines to provide full effect. Modelling all three of the main vaccines offered in the United States could have unnecessarily complicated our discussion. A alternative model featuring different vaccines and the vaccination timeline is provided in the Discussion section.
+
+We further assume that the COVID-19 vaccine provides a fixed protection against infections. Although it has become clear that the protection offered by COVID-19 vaccines declines over time, requiring booster shots after 5 months of reaching full vaccination [8], we assume that the protection of  COVID-19 vaccine is fixed in order to simplify our model.
+
+Finally, we assume that recovered inviduals cannot get infected again. This is once again a simplifying assumption since the choice of how to model re-infections can have potential ramifications with regards to the model. For example, it is not clear whether recovered individuals should be modelled as going back to the succeptible compartment, vaccinated compartment, or even a seperate **RS* compartment spesifically for individuals who have recovered but have become susceptible again after a certain amount of time.
+
+# Estimation of Model Parameters
+
+We first guess the parameters and get our first simulated results as the plot shown below. Besides, we set the different run level so we can do different level search in the Great Lakes and our own computers. Then we set the random walk parameters and do the local search.
+
+```{r, echo = F}
+parameters_guess = params=c(
+             b1=0.3,
+             b2=1,
+             b3=2.75,
+             nu = 0.15,
+             gamma = 0.7,
+             mu_EI = 0.25,
+             mu_IQ = 0.2,
+             kappa = 0.9,
+             mu_QR = 0.07,
+             mu_QD = 0.07,
+             rho = 0.7,
+             chi = 0.9,
+             N = initial_N,
+             initial_V = initial_V,
+             last_week_cases = last_week_cases,
+             phi = 0.2,
+             psi = 0.5,
+             initial_Q = initial_Q,
+             initial_R = initial_R,
+             initial_D = initial_D)
+
+```
+
+```{r, eval = F, include = F}
+model %>%
+  simulate(
+    params=parameters_guess,
+    nsim=20,format="data.frame",include.data=TRUE
+  ) -> sims
+
+sims %>% 
+  ggplot()+
+  geom_line(aes(x=day,y=cases,group=.id,color=.id=="data"),alpha = 0.45) +
+  guides(color= "none")
+```
+
+```{r, echo = F,warning = F}
+# The POMP maximum likelihood local search optimization
+num_cores <- detectCores()-2
+
+registerDoParallel(cores=num_cores)
+
+
+run_level = 1
+
+if (num_cores >= 8){
+  run_level = 3
+}
+
+Num_Particales = switch(run_level, 50, 100, 500) # number of particles
+Num_Mifs = switch(run_level, 5, 100, 200) # number of filtering iterations - small
+Num_Reps = switch(run_level, 5, 20, 40) # number of replications in likelihood evaluation
+Num_Start = switch(run_level, 50, 500, 800) # number of starting points in the global search
+Num_Sim = switch(run_level, 50, 100, 500) # number of simulations
+
+
+
+# set the random walk parameters
+covid_cooling.fraction.50 <- 0.5
+covid_rw.sd <- rw.sd(
+  b1=0.01,
+  b2 = 0.01,
+  b3=0.01,
+  nu=0.01,
+  gamma=0.01,
+  mu_EI=0.01,  
+  mu_IQ=0.01,
+  kappa=0.01,
+  mu_QR=0.01,
+  mu_QD=0.01,
+  rho = 0.01,
+  chi = 0.01,
+  phi = ivp(0.01),
+  psi = ivp(0.01)
+ 
+)
+
+bake(file="lik_local.rds",{
+  foreach(i=1:8,.combine=c) %dopar% {
+    library(pomp)
+    library(tidyverse)
+    mif2(model,
+         params = parameters_guess,
+         Np=Num_Particales,
+         Nmif=Num_Mifs,
+         cooling.fraction.50=covid_cooling.fraction.50,
+         rw.sd=covid_rw.sd)	
+  } -> mifs_local 
+  mifs_local
+}) -> mifs_local
+
+coefs_local <- coef(mifs_local)
+max_coefs_local <- coefs_local[,which.max(logLik(mifs_local))]
+bake(file="local_results.rds",{
+  foreach(mf=mifs_local, .combine=rbind) %dopar% {
+    library(pomp)
+    library(tidyverse)
+    evals <- replicate(5,logLik(pfilter(mf,Np=Num_Particales)))
+    ll <- logmeanexp(evals,se=TRUE)
+    mf %>% coef() %>% bind_rows() %>%
+      bind_cols(loglik=ll[1],loglik.se=ll[2])
+  } -> local_results
+  
+  local_results
+}) -> local_results
+```
+
+In the diagnostic plot, the likelihood does not look very stable, waving between -7000 and -5000. Meanwhile, as the iteration process, the other parameters also have large variability. 
+
+```{r, echo = F,warning = F}
+# The paris plot results from the local search
+mifs_local %>%
+  traces() %>%
+  melt() %>%
+  ggplot(aes(x=iteration,y=value,group=L1,color=factor(L1)))+
+  geom_line()+
+  guides(color=FALSE)+
+  facet_wrap(~variable,scales="free_y")
+```
+
+We can see the log likelihood and coefficients of the best local search as shown below. 
+
+```{r, echo = F,warning = F}
+local_cache = local_results[is.finite(local_results$loglik),]
+local_cache = local_cache[local_cache$loglik.se < .5,]
+best_local_results = arrange(local_cache,-loglik)
+head(as.data.frame(best_local_results),5)
+```
+
+We can see the simulated results as shown below. It seems that some parametere are too high.
+
+```{r, echo = F,warning = F}
+model %>%
+  simulate(
+    params=unlist(best_local_results[1,]),
+    nsim=Num_Sim,format="data.frame",include.data=TRUE
+  ) -> sims
+
+sims %>%
+  ggplot(aes(x=day,y=cases,group=.id,color=.id=="data"))+
+  geom_line(alpha = ifelse(sims$.id == 'data', 1, .3), lwd = 1)+
+  guides(color=FALSE) + theme_bw()
+```
+
+In the plot of the likelihood surface, the plots of loglik look so sparse that it does not give us a clear picture or hint of the ridge in likelihood surface. Thus, we move on to do global search.
+
+```{r, echo = F,warning = F}
+pairs(~loglik+b1+b2+nu+gamma+mu_EI+mu_IQ+kappa+mu_QR+mu_QD+rho+chi+phi+psi,data = best_local_results, pch=16, col='red' )
+```
+
+Like what we do in the local search, we set the range of parameters, which are based on the simulation result from the local search.
+
+We refer some of the codes from the project 13 of STATS 531 WN21 here.[19]
+```{r, echo = F,warning = F}
+covid_box <- rbind(
+  b1=c(0.3,2),
+  b2=c(0.3,2.5),
+  b3=c(0,10),
+  nu=c(0,0.8),
+  N=initial_N,
+  initial_V=initial_V,
+  last_week_cases = last_week_cases,
+  initial_Q = initial_Q,
+  initial_R = initial_R,
+  initial_D = initial_D,
+  gamma=c(0,1),
+  mu_EI=c(0,6.5),
+  mu_IQ=c(0,3.5),
+  kappa=c(0.5,1),
+  mu_QR=c(0,2.0),
+  mu_QD=c(0,0.7),
+  rho=c(0.5,1),
+  chi=c(0.6,1),
+  phi=c(0.15,0.25),
+  psi=c(0.45,0.55)
+)
+bake(file="mifs_global.rds",{
+    foreach(i=1:num_cores,.combine=c,.errorhandling='remove') %dopar% {
+        library(pomp)
+        library(tidyverse)
+        mif2(model,
+             params = c(apply(covid_box,1,function(x)runif(1,x[1],x[2]))),
+             Np=Num_Particales,
+             Nmif=Num_Mifs,
+             cooling.fraction.50=covid_cooling.fraction.50,
+             rw.sd=covid_rw.sd)	
+    } -> mifs_global 
+    mifs_global
+}) -> mifs_global
+
+
+```
+
+```{r, echo = F,warning = F}
+# method from project 13 [18]
+bake(file="global_search.rds",{
+    foreach(mf=mifs_global, .combine=rbind,.errorhandling='remove') %dopar% {
+        library(pomp)
+        library(tidyverse)
+        evals <- replicate(Num_Reps,logLik(pfilter(mf,Np=Num_Particales)))
+        ll <- logmeanexp(evals,se=TRUE)
+        mf %>% coef() %>% bind_rows() %>%
+            bind_cols(loglik=ll[1],loglik.se=ll[2])
+    } -> global_results
+    
+    global_results
+}) -> global_results
+```
+
+The best global search had the following coefficients and log likelihood and simulated results. We can see that the best likelihood is -5677.496, which is also in the range of (-7000, -5000).
+
+```{r, echo = F,warning = F}
+# The best global search had the following coefficients and log likelihood and simulated results:
+global_cache = global_results[is.finite(global_results$loglik),]
+global_cache = global_cache[global_cache$loglik.se < .5,]
+best_global_results = arrange(global_cache,-loglik)
+head(as.data.frame(best_global_results),5)
+```
+
+Then we can see the simulation result, it looks a little better than that in the previous simulation. However, it also does not match the data quite well.
+
+```{r, echo = F,warning = F}
+model %>%
+  simulate(
+    params=unlist(best_global_results[1,]),
+    nsim=Num_Sim,format="data.frame",include.data=TRUE
+  ) -> sims
+
+sims %>%
+  ggplot(aes(x=day,y=cases,group=.id,color=.id=="data"))+
+  geom_line(alpha = ifelse(sims$.id == 'data', 1, .3), lwd = 1)+
+  guides(color=FALSE) + theme_bw()
+```
+
+Then we can see the pair plot for the global search, but it also looks sparse
+
+```{r, echo = F,warning = F}
+df = bind_rows(global_results,local_results) 
+cache = df[is.finite(df$loglik),]
+cache = cache[cache$loglik.se < .5,]
+max_num = max(cache$loglik)
+temp = cache[cache$loglik>(max_num-30),]
+pairs(~loglik+b1+b2+nu+gamma+mu_EI+mu_IQ+kappa+mu_QR+mu_QD+rho+chi+phi+psi,data = temp, pch=16, col="red")
+```
+
+
+# Conclusion
+
+The goal of this report was to modelling the COVID-19 virus, focusing on the effect of the adoption of the COVID-19 vaccine on the daily cases and potentially investigate the effects of changing vaccine adoption rates to case counts using simulation based methods. 
+
+As expected, our attempts in modelling daily COVID-19 cases using the Autoregressive Moving Average model framework yielded unsatisfactory results with the ARIMA(1,1,2) model failing to account for heteroskadasticity in the data and having a non-Gaussian noise process underlying it. Although we suspect an ARMA-GARCH model might be useful in modelling the daily COVID-19 cases by taking into account the periods of rappid rise and fall of cases, we suspect a more sophisticated estimation approach might be needed as our models were not able to estimated due to a non-invertible Hessian matrix arising in the estimation process.
+
+Convergence issues were not limited to the conventional mechanistic time series model framework. Using the Partially Observed Markov Chain (POMP) framework, we developed a modified SEIR model to model the effects of vaccination adoption rates and variants in COVID-19 cases.Our SVEIQRD model, which adds additional compartments for **V**accinated, **Q**uarantined, and **D**ead to the conventional SEIR model, had large variations in the model likelihood and the simulated cases were regularly overestimating the actual cases. Given the failure of our model to converge, we are unable to make a definitive simulation study into the effects of changing COVID-19 cases. 
+
+We expect the difficulty in estimation for all of our potential models to be the result of the increase in case numbers due to the Omicron variant being difficult to be accounted without modelling the decreasing effectiveness of the vaccine and the potential for reinfection. 
+
+## Discussion on the Assumptions and Improvements on the Model
+
+As noted throughout our analysis, COVID-19 is a complex virus and modelling it requires some simplifying assumptions. First of all, it is important to highlight that we modelled United States as a whole, which implicitly allows for a person in California to infect a person from North Dakota. This assumption can be relaxed by modelling United States as a population of populations, with each state having their own individual compartment model and the United States consisting of a compartment of states. Such a model would be much more complex, require many more parameters to estimate, and would be more difficult to interpret. 
+
+Second, as noted in the model assumptions section, we assume that is no migration or births within the year we are modelling. This assumption reduces the number of parameters that we have to estimate. This assumption can be held as long as the time horizon we are considering is short (1-2 years) and the travel in and out of the country is small compared to the overall population (which was expected given the ongoing pandemic).
+
+Third, we make a couple simplifying assumptions in our modelling of the vaccines. We assume that there is a steady stream of individuals flowing from Susceptible (S) compartment to the Vaccinated (V) compartment and that there are no individuals who refuses to take the vaccine due to preferences (vaccine hesitancy). Furthermore, we assume that there is only two states of vaccination: vaccinated and un-vaccinated, disregarding the intermediate step of single dose vaccinations (for Pfizer-BioNTech and Moderna). This assumption is in tandem with our implicit assumption that there is only one vaccine with a fixed protection against infection. In other words, we are assuming once vaccinated everyone has the same protection against COVID-19 no matter which vaccine they received and the how long it has been since full vaccination. We present the following model, which takes into account different vaccines, intermediate state between vaccinations for Pfizer-BioNTech and Moderna vaccines, as well as the different duration between doses. 
+
+![](discussion_Diag.png)
+
+Note that such a model would have significantly more parameters to estimate, though this number can be reduced by taking certain parameter fixed. Particularly, the rate of movement between 1st and 2nd doses can be modeled as fixed by taking the suggested time between vaccines. 
+
+Fourth, as noted in the model section, since our goal was to look into effect of vaccination rates on the COVID-19 cases, we chose not to use actual vaccination data, instead modelling the vaccination rate using the parameter $\nu$. One can take the alternative approach of estimating a functional form for number of people reaching complete vaccination daily, and use that functional form to define the daily movements between the Susceptible (S) and Vaccinated (V) compartments. If this method is used, inference on vaccination rates would require to change the paramters of the function defining the movement between Susceptible (S) and Vaccinated (V) compartments. 
+
+```{r, include = F,warning = F}
+Covid_data2021_2022 %>% select(date,daily_complete_vaccination) %>% 
+  mutate(day = row_number()) %>% 
+  lm(daily_complete_vaccination ~ poly(day,4,raw = T),data =.) -> quad_model
+```
+
+Our preliminary investigation shows that the number of people moving people reaching full vaccination every day can be modeled as quadratic polynomial of form $E[{N}_{SV}]=$ `r quad_model$coefficients[1] %>% unname()` $+$ `r quad_model$coefficients[2] %>% unname()` $t+$ `r quad_model$coefficients[3] %>% unname()` $t^2+$ `r quad_model$coefficients[4] %>% unname()` $t^3+$ `r quad_model$coefficients[3] %>% unname()` $t^4$. where t is the number days since `r date_to_text(Vaccine_start_date)`, the day we start our model. The estimated functional form and the actual data can be seen below.
+
+```{r, echo=F}
+Covid_data2021_2022 %>% mutate(day = row_number()) %>%
+  ggplot(aes(day,daily_complete_vaccination)) +  
+  geom_line() +
+  geom_smooth(aes(color = "Quartic Trend"),
+              formula = y~poly(x,4,raw=T),method = "lm",se =F) +
+  geom_smooth(method = "loess",formula = y~x,aes(color = "LOESS"),se = F) +
+  scale_color_manual(values=c("Quartic Trend" = "red", "LOESS" = "deepskyblue")) +
+  scale_x_continuous(breaks = scales::breaks_pretty(10))+
+  labs(title = "Number of People Reaching Full Vaccination Every Day",
+       color = "Fitted Trend", y = "Number of People", 
+       x = base::paste("Days Since",date_to_text(Vaccine_start_date), sep = " ")) +
+  theme(legend.position = "bottom")
+```
+
+Moreover, as noted in the model assumptions, we assume that the recovered individuals are unable to get reinfected. Possible re-infections against COVID-19 has been known since the early days of the pandemic [3]. CDC is still studying reinfections in order to come with a definitive explanation [13]. Given that we are only looking for a single year, it is reasonable to assume people infected with COVID-19 are not at all likely to get reinfected; however, future research can relax this assumption, allowing for reinfections to occur. As noted in the model assumptions section, modelling reinfections becomes a modelling choice as there is no clear indication on whether the recovered should flow back to the Susceptible (S) compartment, the Vaccinated (V) compartment (as they presumably have some immunity against the virus), or their own seperate compartment, which we can refer to as Recovered Succeptible (RS). 
+
+Finally, it is important to once again highligt that we are assuming that the protection provided by the vaccines is constant over time. As noted, research currently indicates that the effectiveness of the vaccines decline over time, requiring people to take boosters once every 5-6 months [8]. Given that the Omicron wave coincided with the time most people got their boosters, it might be benificial to model the protection provided by the vaccines as a decreasing function of elapsed time or adding a new compartment(s) to reflect this waning protection
+
+
+# Suggestions for Future Studies
+
+The main improvement we suggest for future research is to modelling re-infections and waning protection provided by the COVID-19 vaccine using additional compartments or time-varying parameters through the use of covariates. These would complicate the model, but could help explain the unprecedented spike caused by the omicron wave. 
+
+Another different approach would be to disregard the shortages in vaccine distribution and the vaccines not being available to general public, and utilizing data between February 2021 and December 2021, circumventing the omicron spike and the potential issues that can be caused by it.
+
+As noted in the discussion section, future research can also look into modelling the vaccines and their intermediate steps seperately using a modified version of the model we propose in the discussion section. It is important to note that without adressing the main underlying issues with decreasing protection by the COVID-19 vaccine and the potential for re-infection, these models can suffer from similar issues in large variations of model likelihood and overesimation of the data.
+
+Finally, another possibility is to utilize real data or a functional estimate of it to model the flow between the Succeptible (S) and Vaccinated (V) compartments. While the former approach of using real data would help reduce the number of parameters estimated and help turn the attention on fine tuning other parameters, it would not allow for the use of a changing vaccine adoption parameter for the testing the main hypothesis of this project. The latter approach could be  useful to study effects of changing vaccine adoption rates similar by varying the parameters of the underlying functional form; however, could introduce issues in prediction.
+
+# Works Cited
+
+1: https://www.who.int/health-topics/coronavirus#tab=tab_1
+
+
+2: https://www.cdc.gov/museum/timeline/covid19.html
+
+3: https://www.yalemedicine.org/news/covid-timeline
+
+4: https://www.reuters.com/article/us-health-coronavirus-usa/all-american-adults-to-be-eligible-for-covid-19-vaccine-by-april-19-biden-idUSKBN2BT1IF
+
+5: https://www.nytimes.com/2021/07/24/us/covid-vaccine-hesitant.html
+
+
+6: https://github.com/nytimes/covid-19-data
+
+7: https://data.cdc.gov/Vaccinations/COVID-19-Vaccinations-in-the-United-States-Jurisdi/unsk-b7fc/data
+
+8: https://www.cdc.gov/coronavirus/2019-ncov/vaccines/stay-up-to-date.html?s_cid=11304:covid%20vaccine%20types:sem.ga:p:RG:GM:gen:PTN:FY21
+
+9: https://www.yalemedicine.org/news/5-things-to-know-delta-variant-covid#:~:text=First%20identified%20in%20India%20in,overwhelming%20increase%20in%20hospitalizations%20in
+
+10: https://www.cdc.gov/coronavirus/2019-ncov/variants/omicron-variant.html#:~:text=Emergence%20of%20Omicron&text=November%2024%2C%202021%3A%20A%20new,14%2C%202021%20in%20South%20Africa
+
+11: Ruppert, David and Matteson, David S., “Statistics and Data Analysis for Financial Engineering with R examples.” Springer New York: Imprint: Springer, New York, NY:, 2015.
+
+12: Ghostine, Rabih, Mohamad Gharamti, Sally Hassrouny, and Ibrahim Hoteit. 2021. "An Extended SEIR Model with Vaccination for Forecasting the COVID-19 Pandemic in Saudi Arabia Using an Ensemble Kalman Filter" Mathematics 9, no. 6: 636. https://doi.org/10.3390/math9060636 Available at: https://www.mdpi.com/2227-7390/9/6/636?type=check_update&version=1#cite
+
+13: https://www.cdc.gov/coronavirus/2019-ncov/your-health/reinfection.html
+
+14: https://www.census.gov/quickfacts/fact/table/US/PST045221
+
+15: Ionides, E.L. (2022). Modeling and Analysis of Time Series Data. Available at: https://ionides.github.io/531w22/.
+
+16: https://stackoverflow.com/questions/53147450/is-there-a-build-in-ordinal-sequence-vector-in-r
+
+17: https://ionides.github.io/531w22/midterm_project/project11/blinded.html
+
+18: https://ionides.github.io/531w21/final_project/project13/blinded.html
+
+19: https://github.com/ionides/531w21/blob/main/final_project/project13/blinded.Rmd
+
+20: https://ionides.github.io/531w21/final_project/project03/blinded.html
+
+21: https://github.com/ionides/531w21/blob/main/final_project/project03/blinded.Rmd
+
+22: https://ionides.github.io/531w21/final_project/project15/blinded.html
+
+23: https://github.com/ionides/531w21/blob/main/final_project/project15/blinded.Rmd
+
+
+

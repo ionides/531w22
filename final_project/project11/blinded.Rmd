@@ -1,0 +1,811 @@
+---
+title: "Hungarian Chickenpox POMP Model Analysis"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: hide
+    theme: spacelab
+---
+
+
+```{r,echo=FALSE}
+options(warn=-1)
+suppressPackageStartupMessages({
+    library(pomp)
+    library(magrittr)
+    library(plyr)
+    library(dplyr)
+    library(ggplot2)
+    library(reshape2)
+    library(tidyverse)
+    library("lemon")
+    library(foreach)
+    library(doParallel)
+})
+
+```
+
+# Introduction
+
+Chickenpox is a highly contagious disease which many associate with childhood. The rash it comes with is unpleasant and disruptive to everyday life. The development of a chickenpox vaccine in the 1970s, with it becoming fully available to the public in 1984, led to a sharp decline in chickenpox cases around the world. It is an extremely effective vaccine which prevents 100% of severe cases of chickenpox with little to no side effects. If the entirety of a population that is able to be vaccinated is vaccinated against chickenpox, it is highly unlikely for there to be much transmission between community members [1].
+
+In Hungary, chickenpox is not a required vaccine for children and is not reimbursed when patients opt to get it, which has caused chickenpox to be much more prevalent in Hungary than in other countries where vaccination against chickenpox is expected [2]. Thus, even with the development of a vaccine, chickenpox is still a disease that Hungarian citizens contract and pass to each other at alarming rates, considering how transmissible chickenpox is. Thus, modeling chickenpox in Hungary will be useful for health officials in the country to accurately track and predict outbreaks and examine how chickenpox spreads. 
+
+Using chickenpox case data from each of the counties in Hungary from 2005 to 2014, we will construct a SEIR model with an additional component consisting of individuals who are vaccinated, therefore going directly from the susceptible population to recovered. Our analysis seeks to answer the question: can we successfully model Hungarian chickenpox cases using an SEIR model?
+
+# Exploratory Data Analysis 
+
+The [Hungarian Chickenpox data](https://www.kaggle.com/datasets/impapan/hungarian-chickenpox-cases) used in the analysis is available on Kaggle. The data spans across 10 years from 2005 to 2014, with cases reported on a weekly basis in 20 Hungarian counties. There are no missing values in the data.
+
+The [population](https://www.macrotrends.net/countries/HUN/hungary/population) and [birthrate](https://www.macrotrends.net/countries/HUN/hungary/birth-rate) data are found on Macrotrends. 
+
+
+We first look at the time series plot of total Chickenpox cases in Hungary. We observe some clear seasonality of data on a yearly basis as the peak can be as high as over 2000 cases, and the lowest is around 100 cases. We notice that there are some inconsistent trends in the data as the number of cases suddenly skyrockets or dips. We attribute them to the data entry errors and remove them from the data as we construct models. These outliers are highlighted with red circles in the plot.
+
+```{r}
+# load the data
+cpox_original = read.csv("hungary_chickenpox.csv")
+
+# rowsum and create date object
+cpox = cpox_original %>% mutate(cases = rowSums(.[-1]),date = as.Date(Date,format="%d/%m/%Y"))
+
+
+# separate month/day/year
+cpox = cpox %>% select(date,Date,cases) %>% separate(Date,c("day","month","year"),sep = "/")
+
+cpox %>% mutate( time=  julian(date, origin = as.Date("2005-01-03"))/365.25 + 2005) %>%
+  filter(time>=2005 & time<2015) %>%
+  select(time,cases) -> cpox
+
+
+# Plot the data
+plot(cpox$time,cpox$case,type='l',xlab = "time",ylab="case", 
+                        main="Hungarian chickenpox outbreak")
+
+# highlight outlier (possible data entry error)
+cpox = cpox %>% mutate(row_idx = 1:522)
+cpox_outlier = cpox %>% filter(row_idx %in% c(122,159,469,486,487,493)) %>% select(-row_idx)
+points(x=cpox_outlier$time,y=cpox_outlier$cases,col="red",cex=2)
+
+
+
+# remove outlier 
+cpox = cpox %>% filter(!row_idx %in% c(122,159,469,486,487,493)) %>% select(-row_idx)
+
+
+```
+
+
+We plot the number of national Chickenpox cases against month. The cases are around 40,000-60,000 from January to May with peak of 60,000 cases in May. The number of cases decreases and reaches a low at 3,000 in September. It is on an increasing trend from October to December.
+
+
+```{r,echo=FALSE}
+cpox_month = cpox_original %>% mutate(cases=rowSums(.[-1]),date=as.Date(Date,format="%d/%m/%Y"))%>% separate(Date,c("day","month","year"),sep = "/") %>% mutate(month=as.factor(month)) %>% group_by(month) %>% summarise(total_cases = sum(cases))
+
+ggplot(cpox_month) + geom_col(aes(x = month, y= total_cases)) +
+                     labs(y = "cases",title="Chickenpox cases by month") +
+                     scale_y_continuous(breaks = c(seq(10000,60000,10000))) +
+                     theme(plot.title = element_text(hjust = 0.5))
+```
+
+
+
+Below are the times series plot of Chickenpox cases for the 3 most densely populated counties and the 3 least densely populated counties in the data. The seasonality pattern seems identical across 6 different counties.
+
+
+```{r}
+cpox_town = cpox_original %>% gather(key="town",value="case",2:21) %>% 
+            mutate(town = as.factor(town))
+cpox_town_summary = cpox_town %>% 
+                    group_by(town) %>% 
+                    summarise(cases = sum(case))
+
+# largest and smallest
+cpox_town_summary_LS = (cpox_town_summary %>% arrange(-cases))[c(1,2,3,18,19,20),]
+
+#
+cpox_LS = cpox_town %>% filter(town %in% c("BUDAPEST","PEST","BORSOD","NOGRAD","TOLNA","ZALA")) %>% mutate(Date = as.Date(Date,format="%d/%m/%Y"))
+
+
+cpox_LS$town <- factor(cpox_LS$town , levels = c("BUDAPEST","PEST","BORSOD","NOGRAD","TOLNA","ZALA"))
+ggplot(cpox_LS) + geom_line(aes(x = Date,y = case)) + facet_wrap(~town,nrow=2)
+```
+
+
+
+
+## Covariates
+
+Below are the scatterplots with smoothed line of Hungarian population and birthrate data from 2005 to 2014. We see that Hungarian population steadily decreases from about 10.5 million to 9.8 million in this time period. The number of newborns stays around 95,000 from 2006 to 2008 and takes a dip to 89,000 in 2013 and increases slightly back to over 90,000. The smoothed line captures the data well and allows us to measure the effect that these covariates have on our models.
+
+
+
+```{r}
+pop = c(10085937,10055653,10024149,9991867,9959439,9927370,9895680,9864358,
+                                                        9833923,9804991,9777923)
+
+birthrate = c(9.437,9.470,9.502,9.534,9.443,9.353,9.262,9.172,9.081,9.163,9.245)
+year = seq(2005,2015)
+
+# convert birthrate to the number of newborns
+hungary_demographic = data.frame(year,pop = pop, birthrate = birthrate,
+                            num_newborn = ceiling(pop/1000 * birthrate))
+
+# add smoothing line (Similar to the past project)
+hungary_covar = hungary_demographic %>% summarise(
+                          time = seq(2005,2014,by=1/52),
+                          pop = predict(smooth.spline(x=year,y=pop),x=time)$y,
+                          birthrate = predict(smooth.spline(x=year,y=num_newborn),x=time)$y
+                    )
+
+par(mfrow=c(1,2))
+# population plot
+plot(x=hungary_covar$time,y=hungary_covar$pop/1000000,type="l",
+     xlab="year",ylab="population (million)",
+     main = "Hungarian population")
+
+points(pop/1000000~year, data=hungary_demographic,col="red")
+
+# birthrate plot
+plot(x=hungary_covar$time,y=hungary_covar$birthrate/1000,type="l"
+     ,xlab="year",ylab="newborns (thousand)",
+     main = "Hungarian number of newborns")
+points(num_newborn/1000~year, data=hungary_demographic,col="red")
+```
+
+
+# POMP Model
+
+
+```{r, include=FALSE, warning=FALSE, message=FALSE}
+library(tidyverse)
+library(recipes)
+library(pomp)
+library(doRNG)
+library(foreach)
+library(doParallel)
+library(reshape2)
+library(plyr)
+library(knitr)
+library(kableExtra)
+```
+
+## Model Set Up
+
+For our analysis, we will use a modified SEIR model shown below. In a normal SEIR model, once an individual is born, they would enter the susceptible population and either become infected with chickenpox or would not. With the added component of a vaccine, individuals are able to move directly from susceptible to recovered without becoming infected with the disease.
+
+![](seirimage.png)
+
+
+Graphic inspired by [3].
+
+Partially observed Markov process (POMP) models are especially useful in modeling diseases and can be helpful tools in epidemiology. In class, we examined a case study with measles using an SEIR model. Modeling chickenpox in a similar way, but including vaccination status within the model, could be an effective way to model chickenpox in Hungary. Our model was created by closely following the POMP model developed by Aaron King in his case study of measles [4]. 
+
+The main difference between King's POMP model and ours is the inclusion of the vaccination rate parameter. The vaccination rate is multiplied by the birth rate to give us the number individuals who will directly move from the susceptible group to the recovered group. This corresponds to them receiving the vaccine. This value is multiplied by 0.92, which represents the vaccine's effectiveness. According to the CDC, the chickenpox vaccine was 92% effective in post-licensure studies [1]. When browsing past final projects, we found a project which also included vaccination in a SEIR POMP model and uses Aaaron King's past measles POMP model as a guide [5]. This project was done on measles data in California. Our project differs from the past final project in many ways even with the similar analysis goal and similar source POMP model.
+
+
+```{r, class.source = 'fold-show'}
+## Process Model --------------------------------------------------------------
+# c-snippets - modeled after project
+
+rproc <- Csnippet("
+                  double beta, br, seas, foi, dw, births, vac;
+                  double rate[6], trans[6];
+
+                  // cohort effect
+                  if (fabs(t-floor(t)-251.0/365.0) < 0.5*dt) 
+                    br = cohort*birthrate/dt + (1-cohort)*birthrate;
+                  else 
+                    br = (1.0-cohort)*birthrate;
+
+                  // term-time seasonality
+                  t = (t-floor(t))*365.25;
+                  if ((t>=7&&t<=100) || 
+                    (t>=115&&t<=199) || 
+                    (t>=252&&t<=300) || 
+                    (t>=308&&t<=356))
+                    seas = 1.0+amplitude*0.2411/0.7589;
+                  else
+                     seas = 1.0-amplitude;
+
+                  // transmission rate
+                  beta = R0*(gamma+mu)*seas;
+
+                  // expected force of infection
+                  foi = beta*pow(I+iota,alpha)/pop;
+
+                  // white noise (extrademographic stochasticity)
+                  dw = rgammawn(sigmaSE,dt);
+
+                  rate[0] = foi*dw/dt;  // stochastic force of infection
+                  rate[1] = mu;			// natural S death
+                  rate[2] = sigma;		// rate of ending of latent stage
+                  rate[3] = mu;			// natural E death
+                  rate[4] = gamma;		// recovery
+                  rate[5] = mu;			// natural I death
+
+                  // Poisson births
+                  births = rpois(br*dt);
+
+                  // Vaccination
+                  vac = nearbyint(vr*br*.92*dt);
+
+                  // transitions between classes
+                  reulermultinom(2,S,&rate[0],dt,&trans[0]);
+                  reulermultinom(2,E,&rate[2],dt,&trans[2]);
+                  reulermultinom(2,I,&rate[4],dt,&trans[4]);
+
+		          if (vac > S - trans[0] - trans[1]){
+		          	vac = S - trans[0] - trans[1];
+		          }
+
+                  S += births   - trans[0] - trans[1] - vac;
+                  E += trans[0] - trans[2] - trans[3];
+                  I += trans[2] - trans[4] - trans[5];
+                  R = pop - S - E - I + vac;
+                  W += (dw - dt)/sigmaSE;  // standardized i.i.d. white noise
+                  C += trans[4];           // true incidence
+                  ")
+
+rinit <- Csnippet("
+  double m = pop/(S_0+E_0+I_0+R_0);
+  S = nearbyint(m*S_0);
+  E = nearbyint(m*E_0);
+  I = nearbyint(m*I_0);
+  R = nearbyint(m*R_0);
+  W = 0;
+  C = 0;
+")
+
+dmeas <- Csnippet("
+  double m = rho*C;
+  double v = m*(1.0-rho+psi*psi*m);
+  double tol = 1.0e-18;
+  if (cases > 0.0) {
+    lik = pnorm(cases+0.5,m,sqrt(v)+tol,1,0)
+            - pnorm(cases-0.5,m,sqrt(v)+tol,1,0)+tol;
+  } else {
+    lik = pnorm(cases+0.5,m,sqrt(v)+tol,1,0)+tol;
+  }
+  if (give_log) lik = log(lik);
+  if (!R_FINITE(lik)) 
+                 Rprintf(\"%lg %lg %lg %lg %lg %lg\\n\",rho,C,m,v,psi,lik);
+")
+
+rmeas <- Csnippet("
+  double m = rho*C;
+  double v = m*(1.0-rho+psi*psi*m);
+  double tol = 1.0e-18;
+  cases = rnorm(m,sqrt(v)+tol);
+  if (cases > 0.0) {
+    cases = nearbyint(cases);
+  } else {
+    cases = 0.0;
+  }
+")
+
+## POMP Construction ----------------------------------------------------------
+cpox %>% 
+  pomp(t0=with(cpox, time[1]),
+       time="time",
+       rprocess=euler(rproc,delta.t=1/365.25),
+       rinit=rinit,
+       dmeasure=dmeas,
+       rmeasure=rmeas,
+       covar=covariate_table(hungary_covar,times="time"),
+       accumvars=c("C","W"),
+       statenames=c("S","E","I","R","C","W"),
+       paramnames=c("R0","mu","sigma","gamma","alpha","iota",
+                    "rho","sigmaSE","psi", "cohort", "amplitude", 
+                    "S_0","E_0","I_0","R_0","vr")
+  ) -> m1
+```
+
+
+## Parameters
+
+There are several parameters in our model that we aim to estimate using a local and a global search.
+                    
+- $R0$- basic reproductive number
+- $\sigma$- rate of ending of latent stage
+- $\gamma$- recovery rate
+- $\alpha$- mixing (how homogeneous the population is)
+- $\iota$- disease import rate
+- $\rho$- reporting rate
+- $\sigma_{SE}$- extrademographic stochasticity
+- $\psi$- overdispersion
+- cohort- cohort effect
+- amplitude- seasonality
+- vr- vaccination rate
+
+
+## Local Search
+
+We selected initial values for our parameters so we could perform a local search using `mif2`. Several of these values were selected based on known facts about chickenpox. These include:
+
+- Vaccination rate = 0.20  
+  - The chickenpox vaccination rate in Hungary is very low, likely due to it not being required or recommended by physicians or schools in the country [2]
+- $R0 = 9$ 
+  - The widely accepted value of $R0$ for chickenpox by epidemiologists is 9-10 [6]
+- Delay = 1
+- $\mu=0.0001$
+- $\rho=0.43$
+  - Calculated by total number of cases divided total number of births in this ten year period
+- Cohort = 0.50
+  - Approximate number of students not entering the susceptible population with the others, our justification for this value being that roughly 50% of students could have older siblings
+
+The other initial values for our parameters in our local search were taken from the measles data from class [3]. In the case study of measles, a dataset containing parameters pertaining to several towns in the United Kingdom was used to perform a local search. Measles is somewhat similar to chickenpox, so we used a city (Birmingham) to fill in our remaining initial parameter values in order to conduct our local search.
+
+```{r, eval=FALSE}
+## Initial Parameter Selection (MLEs) -----------------------------------------
+# Some were selected based on feasible values, others taken from Measles/Polio 
+# data in class
+read_csv("
+  town,loglik,loglik.sd,mu,delay,sigma,gamma,rho,R0,amplitude,alpha,iota,cohort,psi,S_0,E_0,I_0,R_0,sigmaSE
+  Birmingham,-3239.3,1.55,0.02,4,45.6,32.9,0.544,43.4,0.428,1.01,0.343,0.331,0.178,0.0264,8.96e-05,0.000335,0.973,0.0611
+  ") -> mles
+
+paramnames <- c("R0","mu","sigma","gamma","alpha","iota",
+                "rho","sigmaSE","psi","cohort","amplitude",
+                "S_0","E_0","I_0","R_0", "vr")
+
+mles$vr <- 0.2 # vaccination rate
+mles$R0 <- 9 # we know this R_0
+mles$delay <- 1
+mles$mu <- 0.0001
+mles$rho <- 0.43 # reporting rate
+mles$cohort <- 0.5
+
+mles[paramnames] %>% unlist() -> theta
+mles %>% select(-S_0,-E_0,-I_0,-R_0)
+
+
+library(doParallel); library(doRNG)
+
+registerDoParallel()
+registerDoRNG(998468235L)
+
+foreach(i=1:4, .combine=c) %dopar% {
+  library(pomp)
+  pfilter(m1,Np=5000,params=theta)
+} -> pfs
+
+pfs %>% logLik() %>% logmeanexp(se=TRUE) -> L_pf
+
+pfs[[1]] %>% coef() %>% bind_rows() %>%
+  bind_cols(loglik=L_pf[1],loglik.se=L_pf[2]) %>%
+  write_csv("cpox_params_2.csv")
+
+## Estimating POMP parameters -------------------------------------------------
+
+cpox_Np      <- c(1000, 5e3, 1e4)
+cpox_Nmif    <- c(  10, 200, 400)
+cpox_Neval   <- c(   2,  10,  20)
+cpox_Nlocal  <- c(  10,  20,  40)
+cpox_Nglobal <- c(  10,  20, 100)
+cpox_Nsim    <- c(  50, 100, 500)
+
+
+## Add initial parameters to POMP model
+m1 <- pomp(m1, params=theta)
+
+
+## LOCAL SEARCH ---------------------------------------------------------------
+
+cpox_rw.sd <- 0.02
+cpox_cooling.fraction.50 <- 0.1
+
+pt <- parameter_trans(
+  log=c("sigma","gamma","sigmaSE","psi","R0"),
+  logit=c("cohort","amplitude", "vr", "rho"),
+  barycentric=c("S_0","E_0","I_0","R_0")
+)
+
+m1 %>% pomp(partrans=pt,
+      statenames=c("S","E","I","R","C","W"),
+       paramnames=c("R0","mu","sigma","gamma","alpha","iota",
+                    "rho","sigmaSE","psi", "cohort", "amplitude",
+                    "S_0","E_0","I_0","R_0","vr")) -> m1
+
+estpars <- setdiff(names(theta),c("sigmaSE","mu","alpha","rho","iota"))
+
+theta["alpha"] <- 1
+
+theta.t <- partrans(m1, theta, "toEst")
+
+theta.t.hi <- theta.t.lo <- theta.t
+theta.t.lo[estpars] <- theta.t[estpars] - log(2)
+theta.t.hi[estpars] <- theta.t[estpars] + log(2)
+
+profile_design(
+  sigmaSE = seq(from=log(0.02), to=log(0.2), length=20),
+  lower = theta.t.lo,
+  upper = theta.t.hi,
+  nprof = 40
+) -> pd
+
+pd <- as.data.frame(t(partrans(m1,t(pd),"fromEst")))
+
+pairs(~sigmaSE+R0+mu+sigma+gamma+S_0+E_0, data=pd)
+
+library(doRNG)
+
+
+
+bake(file="local_search_2.rds",{
+  registerDoRNG(482947940)
+  foreach(i=1:20,.combine=c) %dopar% {
+    library(pomp)
+    library(tidyverse)
+    m1 %>%
+      mif2(
+        Np=cpox_Np[run_level],
+        Nmif=cpox_Nmif[run_level],
+        cooling.type="geometric",
+        cooling.fraction.50=cpox_cooling.fraction.50,
+        rw.sd=rw.sd(
+          R0=cpox_rw.sd,
+          gamma=cpox_rw.sd,
+          alpha=cpox_rw.sd,
+          iota=cpox_rw.sd,
+          rho=cpox_rw.sd,
+          psi=cpox_rw.sd,
+          sigma=cpox_rw.sd,
+          sigmaSE=cpox_rw.sd,
+          cohort=cpox_rw.sd,
+          vr=cpox_rw.sd,
+          amplitude=cpox_rw.sd,
+          S_0=ivp(0.02),
+          E_0=ivp(0.02),
+          I_0=ivp(0.02),
+          R_0=ivp(0.02)
+          )
+        )
+  } -> mifs_local
+  attr(mifs_local,"ncpu") <- getDoParWorkers()
+  mifs_local
+}) -> mifs_local
+
+t_loc <- attr(mifs_local,"system.time")
+ncpu_loc <- attr(mifs_local,"ncpu")
+
+# mifs_local = readRDS("local_search_3.rds")
+mifs_local %>%
+  traces() %>%
+  melt() %>%
+  ggplot(aes(x=iteration,y=value,group=L1,color=factor(L1)))+
+  geom_line()+
+  guides(color="none")+
+  facet_wrap(~variable,scales="free_y")
+
+bake(file="lik_local_2.rds",{
+  registerDoRNG(900242057)
+  foreach(mf=mifs_local,.combine=rbind) %dopar% {
+    library(pomp)
+    library(tidyverse)
+    evals <- replicate(10, logLik(pfilter(mf,Np=5000)))
+    ll <- logmeanexp(evals,se=TRUE)
+    mf %>% coef() %>% bind_rows() %>%
+      bind_cols(loglik=ll[1],loglik.se=ll[2])
+  } -> results
+  attr(results,"ncpu") <- getDoParWorkers()
+  results
+}) -> results
+t_local <- attr(results,"system.time")
+ncpu_local <- attr(results,"ncpu")
+
+# results=readRDS("lik_local_3.rds")
+pairs(~loglik+gamma+alpha+iota+rho+psi+sigma+sigmaSE+cohort+vr+amplitude,data=results,pch=16)
+
+
+results_local <- data.frame(logLik=liks_local[,1],logLik_se=liks_local[,2],t(sapply(mifs_local,coef)))
+summary(results_local$logLik,digits=5)
+```
+
+
+### Model Diagnostics
+
+We will use parameter estimation plots and likelihood estimation plots to show the results of our local search. These model diagnostic plots are shown below.
+
+```{r, include=FALSE}
+this<-readRDS("lik_local_3_runagain.rds")
+
+results_local<-as.data.frame(this)
+
+```
+
+```{r}
+pairs(~loglik+gamma+alpha+iota+rho+psi+sigma+sigmaSE+cohort+vr+amplitude, data=results_local, pch=16, cex=0.3)
+
+```
+
+```{r, echo=FALSE}
+mifs_local_hm<-readRDS("local_search_3_runagain.rds")
+```
+
+
+
+```{r}
+plot(mifs_local_hm)
+```
+
+The diagnostic plots above show the results of our local search. The effective sample size (ESS) appears to be around 10,000 for the majority of time. There are some very small effective sample sizes between ~2007-2010. These dips in ESS correspond to the potential issues we see with the conditional log likelihood plot. 
+
+Looking at the convergence diagnostic plots for our parameters, many appear to converge (R0, $\rho$, $\alpha$, $\sigma_{SE}$, vr, amplitude, and cohort) with others roughly converging ($\gamma$ and $\psi$). R0 converges to approximately 100, $\rho$ converges to around 0.5, $\alpha$ converges to approximately 1, $\sigma_{SE}$ converges to a value very close to 0. Our vaccination rate (vr) appears to converge close to 0.08, amplitude appears to converge to 0.1, and cohort appears to converge to 0.70. It appears that $S_0$, $E_0$, $I_0$, and $R_0$ do not converge, but looking at the scale of the y-axis, we can see that they do converge. This implies good initial guesses for these parameters.
+
+There is one mif that stands out among the parameters that otherwise do converge. This mif is indicated by a dashed red line on the convergence diagnostic plots. The other mifs do converge for these parameters, so we are not concerned with this one separate run. Many mifs have a log likelihood near -4000, though there does appear to be a split. 
+
+### Local Model Evaluation
+
+
+Now, we will fit our model, setting the parameters to the values specified by our local search. These values correspond to the highest likelihood obtained by our local search. Below is a table showing the highest 6 likelihoods and their corresponding parameters [7]. The parameters we will use in our model specification are those that maximize our likelihood function, which in this case would be those in the first row of the table with a log likelihood of -3400.71.
+
+```{r}
+results_local<-results_local[order(-results_local$loglik),]
+head(results_local) %>% kable(digits = 2, table.attr = "style='width:40%;'" ) %>% kable_classic(full_width = T, position = "center")
+
+```
+
+
+
+
+```{r, warning=FALSE}
+set.seed(64)
+m1 %>%
+  simulate(
+    params=c(R0=82.66675,mu=0.0001,sigma=113.1839,gamma=84.15982,
+      alpha=.9368112,iota=2.226594, rho=0.4653628, sigmaSE=0.0326778, psi=0.2114993, cohort=0.8319678, amplitude=0.06208627, S_0=0.02200799, E_0=.00007463659, I_0=.0003000659, R_0=.9776173, vr=.1033231),
+    nsim=1,format="data.frame",include.data=TRUE
+  ) -> sims
+
+sims %>%
+  ggplot(aes(x=time,y=cases,group=.id,color=.id=="data"))+
+  geom_line() + 
+  scale_color_discrete(name="Legend",
+                         labels=c("Model", "Data"))
+
+```
+
+The fit of this model is fairly good, the model has captured the seasonality well though some peaks of cases of the model are much higher than the corresponding data, especially in 2014. While this is a promising start, hopefully our global search will yield parameters that more closely fit our data and accurately model chickenpox cases in Hungary.
+
+
+## Global Search
+
+For our global search for parameter specifications, we specified ranges for each parameter.
+
+```{r, eval=FALSE}
+runif_design(
+  lower=c(R0=6,gamma=60,alpha=0.7, cohort= 0.4, iota=0, rho=0.2, psi = 0.15, sigma=41, sigmaSE=0.03, vr=0.1,amplitude=0.1),
+  upper=c(R0=14,gamma=170,alpha=1,cohort=1, iota=0.4, rho=0.9, psi=0.5, sigma=56, sigmaSE=0.09, vr=0.3, amplitude=0.5),
+  nseq=200
+) -> guesses
+
+# mifs_local=readRDS("local_search_2.rds")
+
+mf1 <- mifs_local[[1]]
+
+fixed_params <- c(mu=0.0001, S_0=0.00477, E_0=2.66e-05, I_0=2.081e-05, R_0=.9522)
+coef(m1,names(fixed_params)) <- fixed_params
+
+bake(file="global_search_2_new.rds",
+  dependson=guesses,{
+    registerDoRNG(1270401374)
+    foreach(guess=iter(guesses,"row"), .combine=rbind) %dopar% {
+      library(pomp)
+      library(tidyverse)
+      mf1 %>%
+        mif2(params=c(guess,fixed_params)) %>%
+        mif2(Nmif=cpox_Nmif[run_level]) -> mf
+      replicate(
+        10,
+        mf %>% pfilter(Np=cpox_Np[run_level]) %>% logLik()
+      ) %>%
+        logmeanexp(se=TRUE) -> ll
+      mf %>% coef() %>% bind_rows() %>%
+        bind_cols(loglik=ll[1],loglik.se=ll[2])
+    } -> results
+    attr(results,"ncpu") <- getDoParWorkers()
+    results
+  }) %>%
+  filter(is.finite(loglik)) -> results
+t_global <- attr(results,"system.time")
+ncpu_global <- attr(results,"ncpu")
+
+results = readRDS("global_search_1.rds")
+
+read_csv("cpox_params_1.csv") %>%
+  bind_rows(results) %>%
+  filter(is.finite(loglik)) %>%
+  arrange(-loglik) %>%
+  write_csv("cpox_params_1.csv")
+
+read_csv("cpox_params_1.csv") %>%
+  filter(loglik>max(loglik)-50) %>%
+  bind_rows(guesses) %>%
+  mutate(type=if_else(is.na(loglik),"guess","result")) %>%
+  arrange(type) -> all
+
+pairs(~loglik+gamma+alpha+iota+rho+psi+sigma+sigmaSE+cohort+vr+amplitude, data=all, pch=16, cex=0.3,
+  col=ifelse(all$type=="guess",grey(0.5),"red"))
+
+all %>%
+  filter(type=="result") %>%
+  filter(loglik>max(loglik)-10) %>%
+  ggplot(aes(x=vr,y=loglik))+
+  geom_point()+
+  labs(
+    x=expression(vr),
+    title="poor man's profile likelihood"
+  )
+
+read_csv("cpox_params_1.csv") %>%
+  filter(loglik>max(loglik)-20,loglik.se<2) %>%
+  sapply(range) -> box
+box
+
+results_global <- data.frame(logLik=liks_global[,1],logLik_se=liks_global[,2],t(sapply(mifs_global,coef)))
+summary(results_global$logLik,digits=5)
+
+# mifs_global = readRDS("global_search_1.rds")
+
+bake(file="lik_global_1.rds",{
+  registerDoRNG(900242057)
+  foreach(mf=mifs_global,.combine=rbind) %dopar% {
+    library(pomp)
+    library(tidyverse)
+    evals <- replicate(10, logLik(pfilter(mf,params=coef(mifs_global[[i]]),Np=cpox_Np[run_level])))
+    ll <- logmeanexp(evals,se=TRUE)
+    mf %>% coef() %>% bind_rows() %>%
+      bind_cols(loglik=ll[1],loglik.se=ll[2])
+  } -> results
+  attr(results,"ncpu") <- getDoParWorkers()
+  results
+}) -> results
+t_local <- attr(results,"system.time")
+ncpu_local <- attr(results,"ncpu")
+```
+
+
+```{r, echo=FALSE}
+results_global<-readRDS("global_search_1.rds")
+```
+
+
+### Model Diagnostics
+
+We will use the pairwise scatterplot matrix to show the results of our global search.
+
+```{r, include=FALSE}
+
+runif_design(
+  lower=c(R0=6,gamma=60,alpha=0.7, cohort= 0.4, iota=0, rho=0.2, psi = 0.15, sigma=41, sigmaSE=0.03, vr=0.1,amplitude=0.1),
+  upper=c(R0=14,gamma=170,alpha=1,cohort=1, iota=0.4, rho=0.9, psi=0.5, sigma=56, sigmaSE=0.09, vr=0.3, amplitude=0.5),
+  nseq=400
+) -> guesses
+
+results = readRDS("global_search_1.rds")
+
+read_csv("cpox_params_1.csv") %>%
+  bind_rows(results) %>%
+  filter(is.finite(loglik)) %>%
+  arrange(-loglik) %>%
+  write_csv("cpox_params_1.csv")
+
+read_csv("cpox_params_1.csv") %>%
+  filter(loglik>max(loglik)-50) %>%
+  bind_rows(guesses) %>%
+  mutate(type=if_else(is.na(loglik),"guess","result")) %>%
+  arrange(type) -> all
+
+
+```
+
+```{r}
+pairs(~loglik+gamma+alpha+iota+rho+psi+sigma+sigmaSE+cohort+vr+amplitude, data=all, pch=16, cex=0.3,
+  col=ifelse(all$type=="guess",grey(0.5),"red"))
+```
+
+Shown in the pair plot above are the outputs from the global search. The grey points display the guesses provided to the search, while the red points show the most accurate parameters in terms of maximizing the likelihood. Any point that obtained a likelihood much lower than our threshold was discarded, leading the the dispersion of points shown. Although the number of parameter sets with a higher likelihood are limited, most of the parameters that produce a convincing likelihood converge to a value.
+
+Unfortunately, the maximum likelihood is higher for our local search than it is for the global. This is likely due to the computational complexity of our model, which forced a lower run level when computing the global search compared to the local. Due to runtime constraints, we were unable to perform as complex of a search in the global scenario. Although this is a plausible hypothesis, further exploration is needed to fully understand the reasoning behind this issue.
+
+```{r}
+all %>%
+ filter(type=="result") %>%
+ filter(loglik>max(loglik)-50) %>%
+ ggplot(aes(x=vr,y=loglik))+
+ geom_point()+
+ labs(
+  x=expression(vr),
+  title="Poor Man's Profile Likelihood for Vaccination Rate"
+ )
+```
+
+Shown in the Poor Man’s Profile for the `vr` parameter above, it is clear that values between a 2.5% vaccination rate and 12.5% vaccination rate all provide similar higher likelihoods. Although this confirms that the vaccination rate is a weakly identified parameter in the model, it also confirms our original expectations that the vaccination rate in Hungary is extremely low. This is likely due to the fact that the chickenpox vaccination is not required in Hungary.
+
+
+### Global Model Evaluation
+
+Below is a table showing the highest 6 likelihoods from our global search and their corresponding parameters [7]. The parameters we will use in our model specification are those that maximize our likelihood function, which in this case would be those in the first row of the table with a log likelihood of -3478.08.
+
+```{r}
+results_global<-results_global[order(-results_global$loglik),]
+head(results_global) %>% kable(digits=2, table.attr = "style='width:40%;'" ) %>% kable_classic(full_width = T, position = "center")
+```
+
+
+```{r}
+set.seed(64)
+m1 %>%
+  simulate(
+    params=c(R0=202.4856,mu=0.0001,sigma=49.58228,gamma=922.48849,
+      alpha=0.8670919,iota=-0.4295031, rho=0.9680215, sigmaSE=0.0429382, psi=0.2541654, cohort=0.0486995, amplitude=0.1276053, S_0=0.0043367, E_0=.0000279, I_0=.0000199, R_0=0.9956155, vr=0.6245781),
+    nsim=1,format="data.frame",include.data=TRUE
+  ) -> sims
+
+sims %>%
+  ggplot(aes(x=time,y=cases,group=.id,color=.id=="data"))+
+  geom_line() + 
+  scale_color_discrete(name="Legend",
+                         labels=c("Model", "Data"))
+```
+
+The model specified by our global search does appear to fit the Hungarian chickenpox data well. Like the local search model, this model captures the seasonality of our data well but contains a lot more noise. Additionally, although many peaks are still higher than the data, they are less extreme than the peaks of the model fit with the local search parameter specifications. Much like the local search model, the model greatly over predicts the cases for 2014.
+
+# Discussion
+
+
+Although we effectively simulate the chickenpox data, we recognize that there are a few limitations in our analysis. 
+ 
+#### Initial Parameters from Measles 
+
+We borrowed many initial parameters from the measles analysis in England and Wales from the course lecture slides [3]. The reason for this is that some parameters specific to the Hungary Chickenpox outbreak are difficult to directly estimate without extensive research into the behavior of the Chickenpox disease in Hungary. For example, we use the same amplitude parameter from the measles analysis in our SEIR model. As shown in the exploratory data analysis, there is clear seasonality in the chickenpox data. This similar seasonality may be seen in the measles data, with cases increasing during the winter school months. Using the measle’s amplitude parameter provided a good starting point to conduct the local search with confidence that it is partially valid in another disease.
+ 
+#### Estimating initial parameters from literature
+
+In our SEIR model, we seek to estimate parameters specific to Hungary and chickenpox. We estimate $\gamma$ (rate of recovery), $\rho$ (reporting rate), $R0$ and vaccination rate based on results from scientific literature. Many parameter values are applicable to chickenpox in general but might not reflect the reality of the chickenpox outbreak in Hungary. For example, based on research, $R0$ values is approximately 7-12 [8]. In our analysis, $R0$ came out to be extremely high. This is something that requires investigation. This value should not be affected by vaccination rates, so it is unclear why $R0$ would vary so much in our model based on the addition of our vaccination rate parameter. 
+ 
+#### Runtime on Great Lakes
+
+We used many different levels of iterative filtering when conducting the local search and global search. Unfortunately, as we increased the number of particles at the iterative filtering state, the computational complexity became too great. We present our findings using less particles and number of MIF iterations than we would like, but acknowledge these findings may be much more accurate given longer run times. We envision that if we increased the number of particles and iterations, we could expand the grid of candidate parameters and find the maximum likelihood estimate that would get us closer to the true model.
+
+# Conclusion
+
+We fit a modified version of the SEIR model to Hungarian chickenpox cases from 2005 to 2014. By using a local search and performing global maximization with different levels of iterative filtering, we identified the parameters in the SEIR model that maximize the likelihood. Below are the main conclusions of our analysis:
+
+We effectively model the chickenpox data and our simulations using maximum likelihood estimators follow closely with the true data. Both simulations from local search and global search capture the seasonality of chickenpox data. Specifically, we see that the simulated data has a dip in cases in late Winter every year. The pattern is also observed in the true data. THis is likely due to students being on break from school for the holidays. The small difference between both simulations is that local search simulation seems to peak and dip earlier than the true data, whereas the global search simulation overestimates the number of cases at certain time periods compared to the true data. 
+ 
+Based on our global search result, the vaccination rate has an effect on the SEIR model. However, when we look at the pair plot, we see that vaccination rate seems to be a weakly identified parameter in the model. Namely, there is a region of parameter space of vaccination rate that produces similar likelihood values. Nonetheless, the global search output suggests that the lower bound of the  parameter space which gives similar likelihood values is 0.025, meaning that vaccination rate still plays a role in our SEIR model.
+ 
+We observe convergence of some parameters in the local search. Specifically, $\rho$ (reporting rate) converges to around 0.5 and alpha (mixing parameter) converges to around 1. In addition, $S_0$ (proportion of the susceptible ), $E_0$ (proportion of the exposed), $I_0$ (proportion of the infected) , and $R_0$ (proportion of the recovered) converge to 0.025, 0.0001, 0.00035, and 0.975 respectively. We observe convergence of other parameters, but many still need further exploration. It suggests that a more robust search is needed. 
+
+
+
+# Sources
+
+Chickenpox data: https://www.kaggle.com/datasets/impapan/hungarian-chickenpox-cases
+
+Hungary population data: https://www.macrotrends.net/countries/HUN/hungary/population
+
+Hungary birth rate data: https://www.macrotrends.net/countries/HUN/hungary/birth-rate
+
+[1] https://www.cdc.gov/vaccines/vpd/varicella/hcp/about-vaccine.html
+
+[2] https://www.sciencedirect.com/science/article/pii/S0264410X20307581
+
+[3] STATS 531 Chapter 17 Slides
+
+[4] https://github.com/kingaa/sbied/tree/master/measles
+
+[5] https://ionides.github.io/531w16/final_project/Project02/stats531_final_project.html
+
+[6] https://www.npr.org/sections/goatsandsoda/2021/08/11/1026190062/covid-delta-variant-transmission-cdc-chickenpox
+
+[7] https://stackoverflow.com/questions/41900335/adjusting-width-of-tables-made-with-kable-in-rmarkdown-documents (Used to help format parameter tables)
+
+[8] https://www.sciencedirect.com/science/article/pii/S0022519399910640
+
+[9] Previous final projects (https://ionides.github.io/531w21/final_project/) were used to get a general idea of the expectations and structure of past projects
+
+

@@ -1,0 +1,779 @@
+---
+title: "Rubella Transmission POMP Model [1966-1967]"
+subtitle: "STATS 531 Final Project"
+date: "4/19/2022"
+output:
+  rmarkdown::html_document:
+    toc: TRUE
+    toc_float:
+      collapsed: True
+      smooth_scroll: True
+    theme: flatly
+    highlight: tango
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(warning=FALSE, message=FALSE)
+library(dplyr)
+library(tidyverse)
+library(ggplot2)
+library(lubridate)
+library(pomp)
+library(doParallel)
+library(doRNG)
+
+
+# load data
+data <- read.csv("https://raw.githubusercontent.com/sbvsweeney/STATS531-TimeSeries-22/main/US.36653000.csv", header = T)
+```
+
+# Introduction
+
+Rubella is a viral contagious disease that was a common and widespread infection in the United States until a measles, mumps, and rubella (MMR) vaccine program was started in 1969.  According to the CDC, during the last major rubella epidemic in 1964-1965 approximately 12.5 million people contracted the disease, 11,000 pregnant women lost their babies, 2,100 newborns died, and 20,000 babies were born with congenital rubella syndrome (CRS).~1~
+
+Similar to measles and mumps, rubella is spread when an infected person coughs or sneezing and generally caused only a moderate reaction.  In fact, 25-50% of people infected may be asympotomatic but still spread the disease to others.  Pregnant women, however, were greatly impacted as they could pass the disease to their unborn child and cause serious harm to that child in the process.  Unborn and newborn babies could develop birth defects such as heart problems, loss of hearing and eyesight, and intellectual disability.~1~
+
+Due to the effective use of the MMR vaccine, rubella (along with measles and mumps) is considered an eliminated disease in the United States, with fewer than 10 case reported per year.~1~  This elimination was aided by deep understanding of the rubella transmission patterns, which we aim to model and illustrate throughout this analysis.  Further because of the similarities in the disease characteristics, we reference analyses and available SEIR model codes for measles~2~ and mumps~3~.
+
+\
+
+# Data 
+
+Data on the reported cases of Rubella in the United States is publicly available via [Project Tycho](https://www.tycho.pitt.edu/) from the University of Pittsburgh.~4~   To keep this initial model building manageable, we reviewed the overall dataset to select a geographic region with consistent data recording for a time frame conducive to a thorough, yet computationally manageable analysis.
+
+```{r table, echo=FALSE}
+table_cases<-table(data$Admin1Name)
+```
+
+Based on the initial data review, this analysis will focus on the weekly rubella reports in California from 1966-1967. 
+
+```{r newdata, echo=FALSE}
+# select CALIFORNIA and necessary columns
+CA <- data %>% filter(Admin1Name == "CALIFORNIA") %>%
+  select(PeriodStartDate, PeriodEndDate, CountValue)
+# generate the lag of column PeriodStartDate
+CA <- CA[order(CA$PeriodStartDate),] %>%
+  mutate(PeriodStartDate_1 = lag(PeriodStartDate))
+# generate the period interval of each row and filter rows without accumulated data
+CA <- CA %>%
+  mutate(minus = difftime(CA$PeriodStartDate, CA$PeriodStartDate_1, units="days")) %>%
+  filter(minus > 0 | is.na(minus))
+# select the first 501 rows (1996-1975)
+CA <- CA[1:501,]
+# generate a new time sequence in weeks starting from 1996 to 1975
+Rubella_CA <- data.frame(PeriodStartDate = as.character(
+  seq.Date(from = as.Date('1966-01-02'),
+           to = as.Date('1975-12-21'),
+           by = 'week')))
+# left join CA(with missing week) on Rubella_CA
+Rubella_CA <- left_join(Rubella_CA, CA, by = "PeriodStartDate") %>%
+  select(PeriodStartDate, PeriodEndDate, CountValue)
+# replace na by the mean of previous and next data
+for (i in 1:nrow(Rubella_CA)){
+  if(is.na(Rubella_CA$CountValue[i]) == TRUE){
+    Rubella_CA$CountValue[i] = round(mean(c(Rubella_CA$CountValue[i - 1],
+                                      Rubella_CA$CountValue[i + 1])), 0)
+  }
+}
+# dataframe used for modeling with columns "week" and "reports"
+Rubella_CA <-  Rubella_CA %>%
+  select(reports = CountValue) %>%
+  mutate(week = 1:nrow(Rubella_CA)) %>%
+  relocate(week, reports)
+# save as a csv file
+write.csv(Rubella_CA, "Rubella_CA.csv", row.names = FALSE)
+
+Rubella_CA <- Rubella_CA[1:105,]
+
+# Rubella_CA <- read.csv("Rubella_CA.csv")
+```
+
+### Variables of Interest
+
+**US State (*Admin1Name*)**
+The US State in which the corresponding rubella cases were reported.
+
+**Week (*PeriodStartDate*/*PeriodEndDate* or *week*)**
+The Period Start Date and Period End Date are used together to identify the time frame in which the reported rubella cases occurred. These dates were selected to include all observations between 1966 to 1967.  
+
+```{r descriptive, echo=FALSE}
+casesmean<-summary(Rubella_CA$reports)
+casessd<-sd(Rubella_CA$reports)
+casestotal<-sum(Rubella_CA$reports)
+```
+
+**Reported Rubella Case Count (*CountValue* or *reports*)**
+The number of reported cases of rubella is the variable of greatest interest. The weekly reported rubella cases in California (1966-1967) range from from `r casesmean[1]` to `r casesmean[6]`, with a mean of `r round(casesmean[4],digits=2)` $\pm$ `r round(casessd,digits=2)` and a median of `r casesmean [3]`.  The total number of reported cases from 1966-1967 was 12,460.
+
+### Missing Data
+
+Missing report values (n=4) were replaced via imputation by taking the mean of the previous and following weeks reports.
+
+### Statistical Software and Packages
+
+The analysis described in this report is conducted in R (Vienna, Austria)~5~.  Packages used for the analysis and report are ggplot2, tidyverse/dplyr, lubridate, doParallel, doRNG, and pomp.
+
+\
+
+# Methods and Analysis
+
+Partially Observed Markov Process (POMP) modelling is useful in building a mechanistic model of disease transmission as it allows for the description of an observed latent (or state) process through the use of incomplete but observable measurements.  In the case of this analysis, the latent process is the full trajectory of rubella transmission which we can only imperfectly observe through reported cases.
+
+We begin with an exploratory data analysis, continue on to model building, select model parameters via simulation, and then interpret those results via profiles.
+
+
+### Exploratory Data Analysis
+
+Plotting the time series data (Figure 1) helps us develop an initial understanding the underlying structure and allows us to look for key characteristics that will be necessary to account for in our model, such as seasonality.
+
+Figure 1. Reported Rubella Cases in California [1966-1967]
+```{r timeplot, echo=FALSE}
+Rubella_CA %>%
+  ggplot(aes(x = week, y = reports))+
+  geom_line(col = "blue")
+```
+
+The timeplot in Figure 1 shows clear evidence of seasonality/waves that occur approximately annually.  We further visualize the time series by decomposing the observations into their trend and seasonal component as shown in Figure 2. The decomposition confirmed our initial observations of a strong seasonal component in rubella transmission. It also appears to illustrate that the rate of rubella transmission did not notably decrease in the first 2 years of the MMR vaccine program, which means this analysis can provide a valuable baseline on the efficacy of that program. 
+
+```{r, echo=FALSE}
+# library(mFilter)
+# hp=hpfilter(Rubella_CA$reports, freq=100,type="lambda",drift=F)
+# trend=ts(hp$trend)
+# cycle=ts(hp$cycle)
+# plot(ts.union(trend,cycle),type="l",xlab="Date",ylab="", main='Decomposition of Rubella cases as trend and cycle')
+```
+
+Figure 2. Decomposition of Reported Rubella Cases - Trend, Seasonality, Random Effect
+```{r decomposition, echo=FALSE}
+ts <- ts(Rubella_CA$reports,
+   freq=365.25/7,
+   start=decimal_date(ymd("1966-01-02")))
+
+plot(decompose(ts))
+```
+
+### SEIR Modeling
+
+SEIR models are a fundamental class of deterministic and stochastic models for disease transmission dynamics.~6~ SEIR is a compartment model that represents the flow of transmission from susceptible (S) to exposed (E), exposed to infected (I), and infected to recovered (R) individuals.  This model well-represents dynamic systems like disease transmission.
+
+An illustration in Figure 3 visually represents the compartments and flow of individuals through a simple SEIR model, including demography (e.g. births and deaths).
+
+Figure 3. Visual representation for the SEIR model
+
+![SEIR Model](https://raw.githubusercontent.com/sbvsweeney/STATS531-TimeSeries-22/main/SEIR%20model.jpg)
+
+For this initial analysis we ignore the demography, shown as $\mu$ in Figure 3.  This will allow us to focus on the flow rates between each disease state for a simple model, which can be refined with future research.
+
+The arrows in the SEIR model (Figure 3) have an associated rate, i.e. how quickly individuals move from Susceptible (S) to Exposed (E) and so on.  For the initial model, we consider flows to be even across the model and fixed.  We also, as noted above, ignore demography.  More formally,
+
+$$ \mu_{\bullet S} = \mu_{S \bullet} = \mu_{E \bullet} = \mu_{I \bullet} = \mu_{r \bullet} = 0 $$
+
+The numbers of each individuals in each compartment can be computed via counting processes and accumulator variables built into the model.  Considering the condition about regarding demography, we have:
+
+$$
+\begin{aligned}
+ S(t) &= S(0) + N_{SE}(t) \\
+ E(t) &= E(0) - N_{SE}(t) - N_{EI}(t) \\
+ I(t) &= I(0) + N_{EI}(t) - N_{IR}(t) \\
+ R(t) &= R(0) - N_{IR}(t) \\
+\end{aligned}
+$$
+, where t is time; S(0), E(0), I(0), and R(0) are initial values for each compartment (i.e. the number of individual who start in that compartment), and the N values represent the movement between compartments.
+
+These equations can also be represented as ordinary differential equations.  To avoid potentially challenging computation, we employ Euler's method to approximate the numerical solutions embedded in this continuous-time model.  Specifically, we use a binomial approximation with exponential transition properties for these stochastic Euler solutions.  This allows us to represent the model well and protect the system from pulling more individuals than are susceptible or encountering convergence issues.  For example, the movement between S and E in time interval t is distributed as:
+
+$$ \Delta N_{SI} \sim Binomial(S, 1-e^{-\beta \frac{E}{N}\Delta t}) $$
+Due to the apparent seasonality in rubella transmission, we must account for a time-varying contact rate ($\beta$).  We define:
+
+$$\beta = exp \left[ b_2 cos \left( \frac{2 \pi t}{52}- \phi \right) + b_1 \right] $$
+, where $b_2$ is the amplitude of the time-varying function, t is time, 52 represents the weekly time interval within a year, and $b_1$ is the mean contact rate.
+
+```{r}
+set.seed(70982)
+
+seir_step <- Csnippet("
+double Beta;
+Beta = exp(b1 + b2 * cos(M_2PI/52*t - Phi));
+double dN_SE = rbinom(S, 1-exp(-Beta*I/N*dt));
+double dN_EI = rbinom(E, 1-exp(-mu_EI*dt));
+double dN_IR = rbinom(I, 1-exp(-mu_IR*dt));
+S -= dN_SE;
+E += dN_SE - dN_EI;
+I += dN_EI - dN_IR;
+R += dN_IR;
+H += dN_IR;
+")
+
+seir_init <- Csnippet("
+S = nearbyint(eta*N);
+E = 14; 
+I = 7;
+R = nearbyint((1-eta)*N);
+H = 0;
+")
+
+dmeas <- Csnippet("
+double tol = 1.0e-25;
+
+if(reports > 0.0 && H > 0.0 && rho != 0)
+{
+lik = dnbinom(reports, H, rho, FALSE) + tol;
+}
+else
+{
+lik = tol;
+}
+if (give_log) lik = log(lik);
+")
+
+rmeas <- Csnippet("
+reports = rnbinom(H, rho);
+")
+
+rubellaSEIR <- Rubella_CA %>%
+  pomp(
+    times = "week",
+    t0 = 0,
+    rprocess = euler(seir_step, delta.t=1/7),
+    rinit = seir_init,
+    rmeasure = rmeas,
+    dmeasure = dmeas,
+    accumvars = "H",
+    partrans = parameter_trans(logit = c("rho", "eta")),
+    statenames = c("S", "E", "I", "R", "H"),
+    paramnames = c("b1", "b2", "Phi", "mu_EI", 
+                   "mu_IR", "eta", "rho", "N")
+  )
+
+  
+```
+
+#### Model Simulation
+
+In setting initial model parameters, we looked to general epidemiological cues and available research on rubella.  
+
+For example, $\Re_0$ is the expected number of secondary infections resulting from one primary infection introduced into a fully susceptible population.  It is approximated by $\Re_0 \approx \frac{L}{A}$, where L is the lifespan of a host and A is the mean age of infection.  The expected lifespan of individuals in 1966-17 was 69.7 years old~7~ and the mean age of infection for rubella is 5-9 years old~8~.  Based on this information we calculated a $\Re_0$ of 9.95.
+
+As noted in the Introduction, 25-50% of individuals infected with rubella are generally asympotomatic.  coupled with individual who are symptomatic but do not seek medical care and/or undocumented cases, we expect that reporting rate ($\rho$) to be low.  We set the initial value at 50% reporting rate.
+
+We find from the Census Bureau~9~ that the population in California in 1960 was 15,717,204 individuals.  we can calculate the total number of expected cases ($\eta$) by doubling the reported cases (50% response rate) and dividing the the population.  With this we set $\eta$ initially to 0.0023.
+
+We run 20 simulations of the model and plot those simulations against our true reported cases.
+
+Figure 4. Initial SEIR model simulation
+```{r}
+rubella_fixed_params = c(N = 15717204, mu_EI = 0.08, 
+                         mu_IR = 0.4)
+
+params = c(b1 = 1.6, b2 = 6.5, Phi = 0.55,
+           rho = 0.5, eta = 0.0023, rubella_fixed_params)
+
+set.seed(123)
+y <- rubellaSEIR %>%
+  simulate(params = params,
+           nsim = 20,
+           format = "data.frame",
+           include.data = TRUE)
+
+y %>%
+  ggplot(aes(x=week,y=reports,group=.id,color=.id=="data"))+
+  geom_line()+
+  guides(color="none")
+```
+
+Based on the plot of case reports to the simulated values, we find that the initial model represents the dynamics of rubella transmission in 1966-1967 well.
+
+
+### Local Likelihood Maximization
+
+```{r}
+run_level = 2
+rubella_Np = switch(run_level, 100, 1e3, 2e3)
+rubella_Nmif = switch(run_level, 10, 100, 150)
+rubella_Nreps_eval = switch(run_level, 2, 10, 20)
+rubella_Nreps_local = switch(run_level, 10, 30, 40)
+rubella_Nreps_global = switch(run_level, 10, 60, 100)
+rubella_Nsim = switch(run_level, 50, 70, 100)
+```
+
+To continue to refine and confirm our SEIR model on rubella transmission, we proceed to iterated particle filtering and local likelihood maximization.
+
+The particle filter utilizes sequential Monte Carlo (SMC) techniques to estimate recursive prediction and filtering calculations which, in turn, enables the calculation of the conditional likelihoods needed for prediction.
+
+In our iterated filtering, flow rates ($\mu_{EI}$ and $\mu_{IR}$) and population are held constant so we can focus on the other optimizing the remaining model parameters (b1, b2, $\Phi$, $\rho$, and $\eta$).  The perturbation size is set at 0.02 and a cooling fraction of 0.5 is used.  This will "perturb" the data slightly to enable the process, but will also slowly reduce that perturbation by half following 50 iterations of the filter.
+
+```{r}
+stew('local_x.rda', {
+  registerDoParallel(8)
+  registerDoRNG(2021531)
+  mifs_local = foreach(i = 1:rubella_Nreps_local,
+                      .packages = c("pomp", "tidyverse"),
+                      .combine = c,
+                      .export = c("rubellaSEIR","params","rubella_Np",
+                                 "rubella_Nreps_eval", "rubella_Nmif")
+                      ) %dopar% { 
+    rubellaSEIR %>%
+      mif2(
+        params = params,
+        Np = rubella_Np, 
+        Nmif = rubella_Nmif,
+        cooling.fraction.50 = 0.5,
+        rw.sd = rw.sd(b1 = 0.02, b2 = 0.02, Phi = 0.02,
+                      rho = 0.02,eta = ivp(0.01)
+                      )
+      )
+  }
+
+  registerDoParallel(8)
+  registerDoRNG(2021531)
+  lik_local = foreach(i = 1:rubella_Nreps_local,
+                      .packages = c("pomp", "tidyverse"),
+                      .combine = rbind,
+                      .export = c("rubellaSEIR", "params",
+                                 "rubella_Np", "rubella_Nreps_eval")
+                      ) %dopar% {
+    logmeanexp(
+      replicate(rubella_Nreps_eval,
+                logLik(pfilter(rubellaSEIR,
+                              params =  coef(mifs_local[[i]]),
+                              Np = rubella_Np)
+                      )
+                ),
+      se = TRUE)
+  }
+})
+```
+
+#### Figure
+
+The results from our iterated filtering show clear convergence for $\Phi$ and $\rho$, though the remaining parameters also have relatively tight scales/ranges for the parameter values. This suggests the parameters are generally well-defined in the model. Additionally, the log likelihood shows the appropriate pattern to suggest the model is behaving as expected.  These finding will be used to inform our next step of a global search.
+
+Figure 5. Initial parameter values based on the model simulation
+```{r}
+mifs_local %>%
+  traces() %>%
+  melt() %>%
+  ggplot(aes(x = iteration,
+             y = value,
+             group = L1,
+             color = factor(L1)
+             )
+         )+
+  geom_line()+
+  guides(color = FALSE)+
+  facet_wrap(~variable,
+             scales = "free_y")
+```
+
+#### Table
+
+
+Table 1. Top 10 parameters based on maximum log-likelihood
+```{r}
+r_local = t(sapply(mifs_local, coef)) %>%
+  as_tibble() %>%
+  bind_cols(tibble(logLik = lik_local[,1],
+                   logLik_se = lik_local[,2])
+  ) %>%
+  arrange(-logLik)  %>%
+  head(10)
+
+r_local %>%
+  knitr::kable(digits = 3)
+```
+
+#### Pairwaise relationships
+
+Before moving forward to the global search, we look at the pairwise patterns to determine if we can further inform that set.  The patterns of log likelihood are not compelling enough to justify limiting the parameter ranges more narrowly in for our global search.
+
+We do start to visualize other important relationships in the model such as the linear relationship between b1 and b2 and a potential preference for lower values of eta.
+
+Figure 6. Pairwise relationship for top 10 parameters based on maximum log-likelihood
+```{r}
+pairs( ~ logLik + b1 + b2 + Phi+ rho + eta ,
+      data = r_local, pch = 16)
+```
+
+#### Local Fit
+
+We again look at simulation compared with our actual reported cases of rubella.  Again, we see a reasonable concordance in transmission pattern between the two.
+
+Figure 7. Original data vs Model simulation based on local fit of parameter
+```{r}
+params_name = c("b1", "b2", "Phi", "rho", "eta")
+local_params = r_local[1,]
+best_local = unlist(c(local_params[params_name], rubella_fixed_params))
+
+set.seed(643345567)
+mod_local = rubellaSEIR %>%
+  simulate(params = best_local,
+           nsim = 1,
+           format = "data.frame",
+           include.data = TRUE)
+
+mod_local %>%
+  ggplot(aes(x = week,
+             y = reports,
+             group = .id,
+             color = .id=="data")
+  ) +
+  geom_line() +
+  labs(x = "Weeks",
+       y = "Reporting Cases",
+       color = "Original Data")
+```
+
+The next step of global search will continue to fine tune the model and attempt to address areas of continued discordance (such as the wave amplitudes).
+
+
+### Global Likelihood Maximation
+
+Although local search simulates the first peak, the second peak is of poor fit, and the simulation has missing values at many time points. Also considering the large dimension of our parameter space, global maximization is still very important here.
+
+For our Rubella model, according to the results of local search, a box containing reasonable parameter values might be $b_1 \in (0,4)$, $b_2 \in (4,8)$, $\Phi \in (-0.4\pi,0.5\pi)$, $\eta \in (0.002,0.0026)$, $\rho \in (0, 0.2)$. The following is the likelihood maximization from diverse starting points.
+
+```{r}
+rubella_box = rbind(
+  b1 = c(0,4), b2 = c(4,8), Phi = c(-0.4*pi, 0.5*pi),
+  eta = c(0.002,0.0026), rho = c(0, 0.2)
+)
+
+stew('global.rda', {
+  registerDoParallel()
+  registerDoRNG(2022531)
+  mifs_global = foreach(i = 1:rubella_Nreps_global,
+                        .packages = 'pomp', 
+                        .combine = c,
+                        .export = c("mifs_local", "rubella_box",
+                                  "rubella_fixed_params")
+                        ) %dopar%{
+    mif2(mifs_local[[1]],
+        params = c(apply(rubella_box,
+                         1,
+                         function(x) runif(1, x[1], x[2])),
+                   rubella_fixed_params
+                   )
+        )
+  }
+  
+  registerDoParallel()
+  registerDoRNG(2022531)
+  lik_global = foreach(i = 1:rubella_Nreps_global,
+                       .packages = 'pomp',
+                       .combine = rbind,
+                       .export = c("rubella_Nreps_eval",
+                                   "rubellaSEIR", "rubella_Np")
+                     ) %dopar% {
+    logmeanexp(
+      replicate(rubella_Nreps_eval, 
+                logLik(pfilter(rubellaSEIR,
+                              params = coef(mifs_global[[i]]),
+                              Np = rubella_Np)
+                      )
+                ),
+      se = TRUE
+    )
+  }
+})
+```
+
+#### Figure
+
+Similar to the local search results, $\Phi$ and $\rho$ show clear convergence, although fluctuations occur during the convergence process. For parameters $b_1, b_2, \eta$, different starting points tends to behave differently. They tend to be stable ever since the first iteration, but the spread of convergence points indicates that the identifiability needs to be improved. But in general, the consistently climbing likelihood is promising.
+
+Figure 8. Initial parameter values based on the model simulation
+```{r}
+mifs_global %>%
+  traces() %>%
+  melt() %>%
+  ggplot(aes(x = iteration,
+             y = value,
+             group = L1,
+             color = factor(L1)
+  )
+  )+
+  geom_line()+
+  guides(color = "none")+
+  facet_wrap(~variable,
+             scales = "free_y")
+```
+
+#### Table
+
+The following table shows the parameters of the top ten models ranked in descending order of log likelihood values for the observed data by the global maximization likelihood function. It can be seen that the likelihoods of these models do not differ much from each other, and the parameters and standard errors vary from case to case, but are roughly within acceptable limits. A higher likelihoods seem to correspond to a very low reporting rate $\left( \rho \sim 6 \% \right)$ and an extreme small susceptible population $\left( \eta \sim 0.2 \% \right)$.
+
+Table 2. Top 10 parameters based on maximum log-likelihood
+```{r}
+r_global = t(sapply(mifs_global, coef)) %>%
+  as_tibble() %>%
+  bind_cols(tibble(logLik = lik_global[,1],
+                   logLik_se = lik_global[,2])
+  ) %>%
+  arrange(-logLik) %>%
+  head(10)
+
+r_global %>%
+  knitr::kable(digits = 3)
+```
+
+#### Pairwaise relationships (not sure if we need to inclue this part)
+
+The pairs plot for the global search for selected parameters is as follows. Although the parameter performance is improved compared to local search, the points are still sparse. A trade-off effect can be found between $b_1$ and $b_2$, this may form a ridge on the likelihood surface.
+
+Figure 9. Pairwise relationship for top 10 parameters based on maximum log-likelihood
+```{r}
+pairs( ~ logLik + b1 + b2 + Phi+ rho + eta ,
+      data = r_global, pch = 16)
+```
+
+#### Global Fit
+
+We choose parameters corresponding to a maximum likelihood of -556.8 with a standard deviation of 2.3 to fit our model and simulate the data to see how reasonable the fit is. The plot suggests that our current model has a significant improvement compared to that of the local search that it simulates the data quite well. The simulated curves have the same transmission pattern as the real situation and it can describe the seasonal characteristics of our data.
+
+Figure 10. Original data vs Model simulation based on global fit of parameter
+```{r}
+global_params = r_global[1,]
+best_global = unlist(c(global_params[params_name], rubella_fixed_params))
+set.seed(238765234)
+mod_global = rubellaSEIR %>%
+  simulate(params = best_global,
+           nsim = 1,
+           format = "data.frame",
+           include.data = TRUE)
+
+mod_global %>%
+  ggplot(aes(x = week,
+             y = reports,
+             group = .id,
+             color = .id=="data")
+  ) +
+  geom_line() +
+  labs(x = "Weeks",
+       y = "Reporting Cases",
+       color = "Original Data")
+```
+
+### Likelihood Profiles
+
+#### Likelihood Profile for Rho
+
+According to CDC, about 25% to 50% of people infected with rubella will not experience any symptoms. Although the actual reported cases of rubella was 12.5 million people from 1964 to 1965, we can assume that there were more patients for Rubella due to under reporting. To find the actual level of reporting rate, we are going to build a likelihood profile for $\rho$ and construct a confidence interval to confirm our finding.
+
+```{r}
+box = t(sapply(mifs_global, coef)) %>%
+  as_tibble() %>%
+  bind_cols(tibble(logLik = lik_global[,1],
+                   logLik_se = lik_global[,2])
+  ) %>%
+  arrange(-logLik) %>%
+  drop_na() %>%
+  filter(logLik > max(logLik) - 10, logLik_se < 2) %>%
+  sapply(range)
+
+guesses = profile_design(
+  rho = seq(0, 0.2, length = 30),
+  lower = box[1, c("b1", "b2", "Phi", "eta")],
+  upper = box[2, c("b1", "b2", "Phi", "eta")],
+  nprof = 15, type = "runif"
+)
+
+stew('profile_rho.rda', {
+
+registerDoParallel(8)
+registerDoRNG(2022531)
+results = foreach(guess = iter(guesses, "row"),
+                  .packages = c("pomp", "tidyverse"),
+                  .combine = rbind,
+                  .export = c("rubella_fixed_params", "mifs_local")
+                  ) %dopar% {
+  mf = mifs_local[[1]] %>%
+    mif2(params = c(unlist(guess),
+                    rubella_fixed_params),
+         rw.sd = rw.sd(b1 = 0.02, b2 = 0.02,
+                       Phi = 0.02, eta = ivp(0.01))
+    ) %>%
+    mif2(Nmif = 40,
+         cooling.fraction.50 = 0.3)
+  ll = replicate(10, mf %>%
+                   pfilter(Np = 1000) %>%
+                   logLik()
+                 ) %>%
+    logmeanexp(se = TRUE)
+  mf %>% 
+    coef() %>% 
+    bind_rows() %>%
+    bind_cols(logLik = ll[1],
+              logLik_se=ll[2]
+    )
+}}
+)
+```
+
+Based on the CDC, we can assume that our $\rho$ is less then 0.2. Therefore, we will sample the $\rho$ from the uniform distribution $U\,(0,0.2)$ and construct likelihood profile by maximizing the log likelihood with all other parameters.
+
+Figure 11. Maximum log likelihood for $\rho$ of top 10 parameters in 95% confidence interval
+```{r}
+maxloglik = max(results$logLik, na.rm=TRUE)
+ci_cutoff = maxloglik - 0.5 * qchisq(df = 1, p = 0.95)
+
+results %>%
+  filter(is.finite(logLik)) %>%
+  mutate(rho = round(rho, 5)) %>%
+  group_by(rho) %>%
+  summarize(maxlogLik = max(logLik)) %>%
+  ggplot(aes(x = rho,
+             y = maxlogLik)
+  ) +
+  geom_point()+
+  geom_smooth(method = "loess",
+              span = 0.3
+  )+
+  geom_hline(color = "red",
+             yintercept = ci_cutoff
+  )+
+  lims(y = maxloglik-c(30,0))
+```
+
+
+Table 3. 95% confidence interval for $\rho$
+```{r}
+# Table
+rho_ci = results %>%
+  drop_na() %>%
+  filter(logLik > max(logLik) - 0.5 * qchisq(df = 1, p = 0.95)) %>%
+  summarize(min = min(rho),max = max(rho)) %>%
+  mutate(lower = sprintf("%.2f%%", 100 * min),
+         upper = sprintf("%.2f%%", 100 * max)) %>%
+  select(lower, upper)
+
+rho_ci %>%
+  knitr::kable()
+```
+
+The figure states that the 95% confidence interval for the $\rho$ would be (4.83%, 5.52%). The reporting rate is lower than we expected. However, since not all the patients, even with symptoms, are not visiting the hospital and reported, this low reporting rate $\rho$ may be acceptable.
+
+#### Likelihood Profile for eta
+
+We also want to build a profile for the $\eta$, the susceptible population to check how many people were actually at the risk of Rubella. Same to the likelihood profile for $\rho$, we build a likelihood profile for $\eta$ and construct a confidence interval to confirm our finding. Based on our previous modeling, we choose the range for eta from (0.002, 0.006) and used the uniform distribution to construct a likelihood profile by maximizing the log likelihood with all other parameters.
+
+
+```{r}
+box = t(sapply(mifs_global, coef)) %>%
+  as_tibble() %>%
+  bind_cols(tibble(logLik = lik_global[,1],
+                   logLik_se = lik_global[,2])
+  ) %>%
+  arrange(-logLik) %>%
+  drop_na() %>%
+  filter(logLik > max(logLik) - 10, logLik_se < 2) %>%
+  sapply(range)
+
+guesses = profile_design(
+  eta = seq(0.002,0.0026, length = 30),
+  lower = box[1, c("b1", "b2", "Phi", "rho")],
+  upper = box[2, c("b1", "b2", "Phi", "rho")],
+  nprof = 15, type = "runif"
+)
+
+stew('profile_eta.rda', {
+
+registerDoParallel(8)
+registerDoRNG(2022531)
+results = foreach(guess = iter(guesses, "row"),
+                  .packages = c("pomp", "tidyverse"),
+                  .combine = rbind,
+                  .export = c("rubella_fixed_params", "mifs_local")
+                  ) %dopar% {
+  mf = mifs_local[[1]] %>%
+    mif2(params = c(unlist(guess),
+                    rubella_fixed_params),
+         rw.sd = rw.sd(b1 = 0.02, b2 = 0.02,
+                       Phi = 0.02, rho = 0.02)
+    ) %>%
+    mif2(Nmif = 40,
+         cooling.fraction.50 = 0.3)
+  ll = replicate(10, mf %>%
+                   pfilter(Np = 1000) %>%
+                   logLik()
+                 ) %>%
+    logmeanexp(se = TRUE)
+  mf %>% 
+    coef() %>% 
+    bind_rows() %>%
+    bind_cols(logLik = ll[1],
+              logLik_se=ll[2]
+    )
+}}
+)
+```
+
+Figure 12. Maximum log likelihood for $\eta$ of top 10 parameters in 95% confidence interval 
+```{r}
+maxloglik = max(results$logLik, na.rm=TRUE)
+ci_cutoff = maxloglik - 0.5 * qchisq(df = 1, p = 0.95)
+
+results %>%
+  filter(is.finite(logLik)) %>%
+  mutate(eta = round(eta, 5)) %>%
+  group_by(eta) %>%
+  summarize(maxlogLik = max(logLik)) %>%
+  ggplot(aes(x = eta,
+             y = maxlogLik)
+  ) +
+  geom_point()+
+  geom_smooth(method = "loess",
+              span = 0.3
+  )+
+  geom_hline(color = "red",
+             yintercept = ci_cutoff
+  )+
+  lims(y = maxloglik-c(20,0))
+```
+
+
+The 95% confidence interval for $\eta$ was (0.19%, 0.24%). However, the graph states that our $\eta$ did not reach the confidence interval cutoff. We already checked that our eta did not converge in the Global likelihood maximization, so the outcome makes sense.
+
+Table 4. 95% confidence interval for $\eta$
+```{r}
+# Table
+eta_ci = results %>%
+  drop_na() %>%
+  filter(logLik > max(logLik) - 0.5 * qchisq(df = 1, p = 0.95)) %>%
+  summarize(min = min(eta),max = max(eta)) %>%
+  mutate(lower = sprintf("%.2f%%", 100 * min),
+         upper = sprintf("%.2f%%", 100 * max)) %>%
+  select(lower, upper)
+
+eta_ci %>%
+  knitr::kable()
+```
+
+# Conclusion
+
+In this paper, we aimed to model and illustrate the Rubella transmission patterns. We can now say that Rubella in California from the 1966 to 1967 can be well modeled by the SEIR model. We used reporting rate and seasonal contract rate to help the SEIR pomp modeling, which was the pattern that real data also showed. In a global search, we confirmed that our phi and rho tended to converge, but eta, b1, and b2 diverged over simulations. Also, we find the likelihood profiles for eta and rho to estimate the 95% confidence interval for each parameter.
+
+# Limitations
+
+ * In the global search, we figured out some parameters that did not converge. This can be interpreted as those parameters did not have a significant impact on the model, which means that we could have made a better model by replacing or deleting/rearrange these parameters to other parameters.
+
+ * The model showed a high computational time, which led us reluctant to analyze more detailed steps. We might be able to reduce the computational time by reducing parameters or trying other methods other than SEIR.
+
+ * Since we used less than 10 years data, our data may not fit to other circumstances. Using different time periods of data in different regions may increase the reliability of the SEIR model.
+
+# References
+
+1. Centers for Disease Control and Prevention. (2020, December 31). Rubella in the United States. Centers for Disease Control and Prevention. Retrieved April 14, 2022, from https://www.cdc.gov/rubella/about/in-the-us.html 
+ https://www.tycho.pitt.edu/dataset/US.36653000/ 
+2. Ionides. (2022, April 8). 531W22/sol07.rmd at main · ionides/531w22. GitHub. Retrieved April 18, 2022, from https://github.com/ionides/531w22/blob/main/hw07/sol07.Rmd 
+3. Stats 531, W21, final project. (2021, April 20). Retrieved April 17, 2022, from https://ionides.github.io/531w21/final_project/project14/blinded.html# 
+4. Panhuis, W. G. V., Cross, A. L., &amp; Burke, D. S. (2018, April 1). Project tycho. United States of America (Rubella) - Project Tycho. Retrieved April 14, 2022, from
+5. R Core Team (2021). R: A language and environment for statistical computing. R Foundation for Statistical Computing, Vienna, Austria. URL https://www.R-project.org/.
+6. Lesson 2: Simulation of stochastic dynamic ... - github pages. (n.d.). Retrieved April 18, 2022, from https://kingaa.github.io/sbied/stochsim/slides.pdf 
+7. Current population reports - shutdown.census.gov. (n.d.). Retrieved April 18, 2022, from https://shutdown.census.gov/content/dam/Census/library/publications/2020/demo/p25-1145.pdf 
+8. Rubella. (2015). Retrieved April 18, 2022, from https://www-ncbi-nlm-nih-gov.proxy.lib.umich.edu/pmc/articles/PMC4514442/ 
+9. Census.gov. (n.d.). Retrieved April 18, 2022, from https://www2.census.gov/library/publications/decennial/1960/population-volume-1/vol-01-06-d.pdf 
+10. Lesson 3: Likelihood-based inference for ... - github pages. (n.d.). Retrieved April 18, 2022, from https://kingaa.github.io/sbied/pfilter/slides.pdf 
+11.  Centers for Disease Control and Prevention., Rubella surveillance no. 1, June 1969
+https://stacks.cdc.gov/view/cdc/58257

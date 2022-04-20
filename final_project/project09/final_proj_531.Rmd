@@ -1,0 +1,460 @@
+---
+title: "Time Series Analysis of COVID-19 Cases in Washtenaw County"
+subtitle: "STATS 531 Final Project (W22)"
+output:
+  html_document:
+    toc: true
+    theme: flatly
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+require(knitr)
+knitr::opts_chunk$set(echo = TRUE, cache.extra = knitr::rand_seed, 
+                      warning = FALSE, message=FALSE, fig.align='center')
+```
+
+## Introduction
+
+In the landscape of the COVID-19 pandemic, people all over the world have been impacted in terms of their work and life. Many variants of COVID-19 have developed since its breakthrough in March 2020, which has resulted in the large number of infections and quick spread among close contacts of infected people. This pandemic has lasted for about 2 years, and it interrupted people's normal life including travel and work.
+
+In our analysis, we focus on the COVID-19 data in Washtenaw county, Michigan from July 1st, 2021 to April 6th, 2022. As University of Michigan students, we were particularly interested in how COVID-19 has spread in our county (Washtenaw). To get an understanding of how COVID-19 cases change over the time, we built a Susceptible-Exposed-Infection-Recovered (SEIR) compartment model. Through local search and global search, we aim to find how the SEIR model can adapt to the real COVID-19 data in Washtenaw County, MI. We also compare to a likelihood benchmark in the context of non-mechanistic models, including a negative binomial model and an ARMA model. This allows us to put the log-likelihoods we obtain through global search in the context of these non-mechanistic benchmarks.
+
+## Exploratory Data Analysis
+
+``` {r read, echo=FALSE, include=FALSE}
+suppressMessages(library(latex2exp))
+suppressMessages(library(tidyverse))
+suppressMessages(library(pomp))
+suppressMessages(library(readxl))
+suppressMessages(library(zoo))
+
+RAW_DATA_FILE = "./Washtenaw Covid19.xlsx"
+PARAMS_FILE = "washtenaw_params.csv"
+
+suppressMessages(read_excel(RAW_DATA_FILE)) %>% 
+  select(Cases, Date) %>%
+  filter (Date >= "2021-07-01") -> washtenaw
+washtenaw %>% as.data.frame() %>% head()
+as.integer(difftime(washtenaw$Date, washtenaw$Date[1], units = "days") + 1) -> washtenaw$Time
+```
+
+The data was collected from the website of the Michigan state government [1], where the dataset has a time frame of March 2020 to April 2022. We chose to focus on just the time frame from July 2021 to April 2022, as a different variant (Omicron) has become the most prevalent and much previous work has been done using the data from March 2020 to 2021 [2]. We saw in particular that another STATS 531 final project from Winter 2021 used COVID-19 data from Washtenaw County [3], so we are curious if using a different time frame of more recent data will lead to different results than this previous work.
+
+Figure 1 shows a time series plot smoothed by the Loess method, where the blue smoothed line displays an increasing trend before January 2022 and a decreasing trend after that. Figure 2 shows the average COVID-19 cases by month, where a peak in January 2022 is very obvious.
+
+```{r EDA1, message=FALSE, warning=FALSE, fig.cap=cap_fig1}
+cap_fig1 =
+  "**Figure 1.** *Cases of COVID-19 in Washtenaw County from July 2021 to April 2022 (smoothed by loess method)*"
+data = washtenaw
+data %>% ggplot(aes(x = Date, y = Cases)) + geom_line()  +
+  geom_smooth(method='loess') +
+  theme_bw() + labs(x = "Date", y = "Cases")
+```
+
+
+```{r EDA11, message=FALSE, warning=FALSE, fig.cap=cap_fig2}
+# monthly average cases
+cap_fig2 = 
+  "**Figure 2.** *The average COVID-19 cases by month*"
+data %>% mutate(year_month = as.yearmon(Date, "%Y %m")) %>% 
+  group_by(year_month) %>% summarize(avg_cases = mean(Cases)) %>% ungroup()%>%
+  ggplot + 
+  geom_line(aes(x =  year_month, y =avg_cases))  +
+  theme_bw()  +
+  labs(x = "Month Year", y = "Monthly Average Cases")
+```
+
+Figure 1 shows a time series plot smoothed by the Loess method, where the blue smoothed line displays an increasing trend before January 2022 and a decreasing trend after that. Figure 2 shows the average COVID-19 cases by month, where a peak in January 2022 is very obvious.
+
+```{r EDA2, message=FALSE, warning=FALSE, fig.cap=cap_fig3}
+cap_fig3 = 
+  "**Figure 3.** *The ACF plot of COVID-19 cases in Washtenaw County*"
+
+acf(data$Cases, main="ACF: Covid-19 Cases")
+```
+
+Figure 3 displays the auto-correlation plot of COVID-19 cases in Washtenaw County, MI. This plot motivates our exploration of the time-dependent relationship of the number of COVID-19 cases.
+
+## Fitting SEIR Model
+
+### Model Assumptions
+
+We chose to use the SEIR model which consists of four compartments including "S", "E", "I" and "R". The "S" compartment represents the susceptible people; the "E" compartment represents the number of exposed individuals in a period of latency before becoming infectious; the "I" compartment represents the infectious people; the "R" represents those recovered or removed from the susceptible population.
+
+![](seir.jpg)
+
+Suppose the number of people in each compartment at time $t$ is $S(t), E(t), I(t), R(t)$, respectively. The model can be specified as follows:
+
+$$
+\begin{split}  
+S(t)&=S(0)-N_{SE}(t)\\  E(t)&=E(0)+N_{SE}(t)-N_{EI}(t)\\  I(t)&=I(0)+N_{EI}(t)-N_{IR}(t)\\  R(t)&=R(0)+N_{IR}(t)  \end{split}
+$$
+
+where the number of people transiting from one compartment to another is given by:
+
+$$
+\begin{split}  \Delta N_{SE}&\sim \mathrm{Binomial}(S,1-e^{\beta\frac{I}{N}\Delta t})\\  \Delta N_{EI}&\sim \mathrm{Binomial}(E,1-e^{-\mu_{EI}\Delta t})\\  \Delta N_{IR}&\sim \mathrm{Binomial}(I,1-e^{^{-\mu_{IR}\Delta t}})  
+   \end{split} 
+$$
+
+As for the parameters, $\beta$ is the contact rate with $b_1$ when time is in the first half of time period and $b_2$ when time is in the second half of time period ,and $\mu_{SI}=\beta I(t)$ denotes the rate at which individuals in S transition to E, $\mu_{EI}$ is the rate at which individuals in E transition to I and $\mu_{IR}$ denotes the transition rate from I to R. The probability of a case being reported is $\rho$.
+
+
+### Initial Guesses
+
+Let's get the initial values based on some statistics:
+
+1. The population of Washtenaw county on the start date: 372,258 (Estimated, retrieved from [5])
+
+2. Initial infected people: 30 (An intuitive value based on the confirmed cases on July 1st.)
+
+We are going to divide the time series into two stages. According to the CDC, the time when Omicron became the primary variant in the US is around the beginning of December [2]. So, we set December 1st as the division of the two stages. Since the speeds of spreading of the Delta and Omicron variants are considered different, we set the parameters of $\beta$ to be $b_1$ and $b_2$ respectively. We expect to see that the estimate of $b_2$ will be larger than $b_1$.
+
+The code we have written for our project is based on/inspired by code we have written for previous homework assignments, course notes, and previous semesters' projects for STATS 531 but modified for the purposes of our project [3] [4]. 
+
+
+``` {r build2, cache=TRUE}
+seir_step <- Csnippet("
+  double Beta = intervention ? b2 : b1;
+
+  double dN_SE = rbinom(S,1-exp(-Beta*I/N*dt));
+  double dN_EI = rbinom(E,1-exp(-mu_EI*dt));
+  double dN_IR = rbinom(I,1-exp(-mu_IR*dt));
+  S -= dN_SE;
+  E += dN_SE - dN_EI;
+  I += dN_EI - dN_IR;
+  R += dN_IR;
+  H += dN_IR;
+
+")
+
+seir_init <- Csnippet("
+  S = nearbyint(eta*N);
+  E = 30;
+  I = 30;
+  H = 0;
+  R = nearbyint((1-eta)*N-E-I) + 1;
+")
+
+seir_dmeas <- Csnippet("
+  double tol=1.0e-25;
+  double mean =rho*H;
+  double sd =sqrt(pow(tau*H,2)+rho*H);
+  if(Cases>0.0){
+    lik=pnorm(Cases+0.5,mean,sd,1,0)-pnorm(Cases-0.5,mean,sd,1,0)+tol;
+  } else {
+    lik=pnorm(Cases+0.5,mean,sd,1,0)+tol;
+  }
+  if(give_log) lik=log(lik);
+")
+
+seir_rmeas <- Csnippet("
+  Cases = rnorm(rho*H, sqrt(pow(tau*H,2)+rho*H));
+  if(Cases>0.0){
+    Cases=nearbyint(Cases);
+  } else {
+    Cases=0.0;
+  }
+")
+
+
+seir_covar <- covariate_table(
+  t = washtenaw$Time,
+  intervention= c(rep(0, 154),
+                  rep(1, 125)),
+  times = "t")
+
+washtenaw %>%
+  select(Time, Cases) %>% 
+  pomp(
+    times="Time", t0=1,
+    rmeasure=seir_rmeas,
+    dmeasure=seir_dmeas,
+    accumvars="H",
+    rprocess=euler(seir_step,delta.t=1),
+    rinit=seir_init,
+    partrans=parameter_trans(
+      log = c("mu_EI", "mu_IR", "b1", "b2", "tau"),
+      logit = c("rho", "eta") 
+    ),
+    paramnames=c("N","b1", "b2", "rho", "mu_EI","mu_IR","eta", "tau"),
+    statenames=c("S","E","I","R","H"),
+    covar = seir_covar
+  ) -> washtenawSEIR
+
+```
+
+
+``` {r pf_pre, echo=FALSE, cahce=TRUE, include=FALSE}
+library(foreach)
+library(doParallel)
+registerDoParallel()
+library(doRNG)
+registerDoRNG(625904618)
+
+washtenawSEIR %>%
+  pomp(
+    params=c(b1=2.3, b2=5.2, rho=0.9, mu_IR=0.2, mu_EI=0.3, tau=0.01, eta=0.1, N=372258)
+  ) -> washtenawSEIR
+```
+
+First, we carry out replicated particle filters at our initial guess. We find the estimated log-likelihood below:
+
+``` {r pf, cache=TRUE}
+foreach(i=1:10,.combine=c) %dopar% {
+  library(pomp)
+  washtenawSEIR %>% pfilter(Np=5000)
+} -> pf
+pf %>% logLik() %>% logmeanexp(se=TRUE) -> L_pf
+L_pf
+```
+
+``` {r pfsave, include=FALSE, cache=TRUE}
+pf[[1]] %>% coef() %>% bind_rows() %>%
+  bind_cols(loglik=L_pf[1],loglik.se=L_pf[2]) %>%
+  write_csv(PARAMS_FILE)
+```
+
+Then we can use simulation and visualization to see how good our initial guesses can fit:
+
+``` {r firstsim, echo=FALSE}
+plot_simulation = function(sim_dat) {
+  sim_dat %>%
+    ggplot() +
+    theme_bw() +
+    geom_line(aes(Time, Cases, group = .id, 
+                  color = (.id == "data"), alpha = (.id == "data"), 
+                  linetype = (.id == "data"))) +
+    scale_color_manual(values = c("#18bc9c", "#c61919")) +
+    scale_alpha_manual(values = c(0.5, 1)) +
+    scale_linetype_manual(values = c(5, 1)) +
+    guides(color = FALSE, linetype = FALSE, alpha = FALSE)
+} # plot_simulation()
+
+washtenawSEIR %>%
+  simulate(
+    nsim = 10, format = "data.frame", include.data = TRUE
+  ) %>%
+  plot_simulation()
+```
+
+Simulations based on our initial starting points are able to capture the general trend of our data as shown below, but improvements can still be made.
+
+### Local Search
+
+First, we specify our initial parameters for our local search starting point. We chose to fix $N=372258$ and $\mu_{IR}=0.2$.
+
+
+``` {r local, cache=TRUE}
+fixed_params <- c(N=372258, mu_IR=0.2)
+coef(washtenawSEIR, names(fixed_params)) <- fixed_params
+
+foreach(i=1:20,.combine=c) %dopar% {
+  library(pomp)
+  library(tidyverse)
+  washtenawSEIR %>%
+  mif2(
+    Np=2000, Nmif=100,
+    cooling.fraction.50=0.5,
+    rw.sd=rw.sd(b1=0.02, b2=0.02, rho=0.02, tau=0.002, mu_EI=0.02, eta=ivp(0.02)),
+  )
+} -> mifs_local
+```
+
+After conducting our search, we take a look at the diagnostic plots as follows:
+
+``` {r local_fin, echo=FALSE, cache=TRUE}
+mifs_local %>%
+  traces() %>%
+  melt() %>%
+  ggplot(aes(x=iteration,y=value,group=L1,color=factor(L1)))+
+  geom_line()+
+  guides(color="none")+
+  facet_wrap(~variable,scales="free_y")
+```
+
+There is fluctuation in the parameters that are not fixed. Additionally, our likelihood does not strictly increase as iterations proceed, which may indicate a problem.
+
+Then we evaluate the likelihood using replicated particle filters at each point estimate.
+
+``` {r eval_lik, echo=FALSE, cache=TRUE}
+bake(file="lik_local.rds",{
+  registerDoRNG(900242057)
+  foreach(mf=mifs_local,.combine=rbind) %dopar% {
+    library(pomp)
+    library(tidyverse)
+    evals <- replicate(10, logLik(pfilter(mf,Np=5000)))
+    ll <- logmeanexp(evals,se=TRUE)
+    mf %>% coef() %>% bind_rows() %>%
+      bind_cols(loglik=ll[1],loglik.se=ll[2])
+  } -> results
+  attr(results,"ncpu") <- getDoParWorkers()
+  results
+}) -> results
+t_local <- attr(results,"system.time")
+ncpu_local <- attr(results,"ncpu")
+local_results <- results
+```
+
+``` {r pairwise, echo=FALSE}
+pairs(~loglik+b1+b2+eta+mu_EI+rho+tau,data=local_results,pch=16)
+```
+
+
+```{r write, include=FALSE}
+suppressMessages(read_csv(PARAMS_FILE)) %>%
+  bind_rows(local_results) %>%
+  arrange(-loglik) %>%
+  write_csv(PARAMS_FILE)
+```
+
+### Global Search
+
+The next step is conducting global search for the parameters $b_1$, $b_2$, $\rho$, $\mu_{EI}$ and $\eta$ using the iterated filtering process. We randomly draw 500 sets of starting values from a multivariate uniform distribution where $b_1\in[0,5], b_2\in[0,10],  \rho\in[0.01,0.9], \eta\in[0,1], \tau\in[0.001,0.2], $ and $\mu_{EI} \in [0.01, 0.5]$.
+
+``` {r global_pre, cache=TRUE}
+set.seed(0)
+
+runif_design(
+  lower=c(b1=0, b2=0, rho=0.01, eta=0, tau=0.001, mu_EI=0.01),
+  upper=c(b1=5, b2=10, rho=0.9, eta=1, tau=0.2, mu_EI=0.5),
+  nseq=500
+) -> guesses
+
+mf1 <- mifs_local[[1]]
+```
+
+``` {r global, cahce=TRUE}
+bake(file="global_search.rds",
+  dependson=guesses,{
+    registerDoRNG(1270401374)
+    foreach(guess=iter(guesses,"row"), .combine=rbind) %dopar% {
+      library(pomp)
+      library(tidyverse)
+      mf1 %>%
+        mif2(params=c(guess, fixed_params)) %>%
+        mif2(Nmif=100) -> mf
+      replicate(
+        10,
+        mf %>% pfilter(Np=5000) %>% logLik()
+      ) %>%
+        logmeanexp(se=TRUE) -> ll
+      mf %>% coef() %>% bind_rows() %>%
+        bind_cols(loglik=ll[1],loglik.se=ll[2])
+    } -> results
+    attr(results,"ncpu") <- getDoParWorkers()
+    results
+  }) %>%
+  filter(is.finite(loglik)) -> results
+t_global <- attr(results,"system.time")
+ncpu_global <- attr(results,"ncpu")
+global_results <- results
+```
+``` {r save2, echo=FALSE}
+suppressMessages(read_csv(PARAMS_FILE)) %>%
+  bind_rows(global_results) %>%
+  filter(is.finite(loglik)) %>%
+  arrange(-loglik) %>%
+  write_csv(PARAMS_FILE)
+```
+
+
+The parameters derived from the global search are:
+
+``` {r printres, echo=FALSE}
+suppressMessages(read_csv(PARAMS_FILE)) %>%
+  head() %>%
+  knitr::kable()
+```
+
+The result shows that $b_2$ is bigger than $b_1$, proving that the Omicron variant is more easily spread among the population.
+
+``` {r simres, echo=FALSE, cache=TRUE}
+optimal_params = read.csv(PARAMS_FILE) %>% 
+  slice(1) %>%
+  select(-starts_with("loglik")) %>% unlist()
+washtenawSEIR %>%
+  simulate(
+    params = optimal_params, nsim = 10, format = "data.frame", include.data = TRUE
+  ) %>%
+  plot_simulation()
+```
+
+We can see that the variance of our fitted time series is slightly large. It may be because of the fluctuation in the original data.
+
+## Likelihood Benchmark
+
+We have shown both local and global search of the mechanistic model above, but many of these parameters do not have meaningful scientific interpretation. In this section, we calculate the log-likelihood in the non-mechanistic models, including a negative binomial model and an ARMA model. This allows us to compare our global search results to a benchmark.
+
+```{r NB model as benchmark}
+nb_lik = function(theta) {- sum(dnbinom(
+  data$Cases, size = exp(theta[1]), prob = exp(theta[2]), log = TRUE
+))}
+nb_mle = optim(c(0, -5), nb_lik)
+-nb_mle$value
+```
+
+The negative binomial model gives a log-likelihood of $-1652.252$. The log-likelihood of $-1547$ attained by global search beats this non-mechanistic model.
+
+In addition, a Gaussian auto-regressive moving-average (ARMA) model as a non-mechanistic model may also provide us with another perspective of log-likelihood. We made use of transformed cases $log(y_n +1)$ in our ARMA model and then calculate the original log-likelihood in an appropriate way, where $y_n$ is the number of cases.
+
+```{r ARMA model as benchmark}
+log_cases = log(1 + data$Cases)
+smoothed = spectrum(log_cases, spans=c(5, 5, 5), main="Periodogram (Smoothed)")
+idx_max = which.max(smoothed$spec)
+idx_max2 = which.max(smoothed$spec[41:length(smoothed$spec)]) + 40
+abline(v=smoothed$freq[idx_max], lty=2, col='red') # freq = 0.003472222, 288 days
+abline(v=smoothed$freq[idx_max2], lty=2, col='red') # freq = 0.1423611, 1 week
+```
+
+The smoothed periodogram of transformed cases above shows us that the first dominant frequency is around $w_1 = 0.003472222$ which corresponds to the cycle of $288$ days, and the second dominant frequency is around $w_2 = 0.1423611$, which corresponds to a cycle of 1 week. Therefore, we explore the best possible seasonal ARMA models $SARIMA(p, 0, q) \times (1, 0, 1)_7$ with the period of 7 days in terms of Akaike Information Criterion (AIC), where $0\leq p\leq 5$, $0\leq q\leq 5.$ 
+
+```{r, warning=FALSE}
+aic_table=function(data, P, Q){
+	table=matrix(NA, (P+1), (Q+1))
+	for(p in 0:P) {
+		for(q in 0:Q) {
+		  model_aic = try(
+		    arima(data, order = c(p, 0, q), seasonal = list(order = c(1, 0, 1), period = 7))$aic, 
+		    silent = TRUE
+		  )
+		  table[p + 1,q + 1] = ifelse(
+		    inherits(model_aic, "try-error"), NA, model_aic
+		  )
+		}
+	}
+	dimnames(table) = list(paste("AR", 0:P, sep=""), paste("MA", 0:Q, sep=""))
+  table
+}
+knitr::kable(aic_table(data = log_cases, P = 5, Q = 5))
+```
+
+```{r}
+arma30= arima(log_cases, order = c(3, 0, 0), 
+                   seasonal = list(order = c(1, 0, 1), period = 7))
+arma30$loglik - sum(log_cases)
+```
+
+The AIC table above shows that $SARIMA(3, 0, 0) \times (1, 0, 1)_7$ is the best model to move forward with based on this metric. The corrected log-likelihood for the original data is $-1308.984$, which is slightly higher than that of global search. The SARIMA model captures the periodic phenomenon which the SEIR model may not take into account, since our SEIR model mainly considers the flow among the compartments.
+
+## Conclusion
+
+In this report, we conduct a time series analysis using an SEIR pomp model on COVID-19 cases from July 2021 to April 2022 in Washtenaw County, MI.
+
+Due to the Omicron variant of the COVID-19 virus, we divide the time series into two stages, where the contact rate $\beta$ has two different parameter values during these two time stages. The results of our model show that the contact rate in the second stage is larger than that in the first stage, which suggests the power of Omicron variant.
+
+Although there is still room to improve the SEIR model, such as using the SEQIR model that takes a quarantine state into consideration, our SEIR model fits the data of COVID-19 cases in Washtenaw County well.
+
+
+## Reference
+
+[1] Michigan Coronavirus Data [here](https://www.michigan.gov/coronavirus/0,9753,7-406-98163_98173---,00.html)
+
+[2] CDC Omicron Variant [here](https://www.cdc.gov/coronavirus/2019-ncov/variants/omicron-variant.html)
+
+[3] Projects from previous semesters of STATS 531 [here](https://ionides.github.io/531w21/final_project/), especially project 15 from W21.
+
+[4] STATS 531 Course Notes [here](https://ionides.github.io/531w22/#class-notes-and-recorded-lectures)
+
+[5] Population in Michigan [here](https://www.census.gov/quickfacts/washtenawcountymichigan)

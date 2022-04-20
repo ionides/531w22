@@ -1,0 +1,1055 @@
+---
+title: 'Volatility Analysis on Ford and Tesla Stock'
+date: "4/19/2020"
+output:
+  html_document:
+    code_folding: hide
+    theme: flatly
+    highlight: tango
+    nember_sections: true
+    toc_depth: 2
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+    toc: yes
+  word_document:
+    toc: yes
+subtitle: STATS 531 FINAL PROJECT
+---
+
+```{r setup, include=FALSE}
+myround<- function (x, digits = 1) {
+  # taken from the broman package
+  if (digits < 1) 
+    stop("This is intended for the case digits >= 1.")
+  if (length(digits) > 1) {
+    digits <- digits[1]
+    warning("Using only digits[1]")
+  }
+  tmp <- sprintf(paste("%.", digits, "f", sep = ""), x)
+  zero <- paste0("0.", paste(rep("0", digits), collapse = ""))
+  tmp[tmp == paste0("-", zero)] <- zero
+  tmp
+}
+
+options(
+  keep.source=TRUE,
+  encoding="UTF-8"
+)
+knitr::opts_chunk$set(echo = TRUE)
+if (!require('MASS')) install.packages('MASS'); library('MASS')
+if (!require('foreign')) install.packages('foreign'); library('foreign')
+if (!require('datasets')) install.packages('datasets'); library('datasets')
+if (!require('FNN')) install.packages('FNN'); library('FNN')
+if (!require('dplyr')) install.packages('dplyr'); library('dplyr')
+if (!require('tidyr')) install.packages('tidyr'); library('tidyr')
+if (!require('ggplot2')) install.packages('ggplot2'); library('ggplot2')
+if (!require('ISLR')) install.packages('ISLR'); library('ISLR')
+if (!require('gam')) install.packages('gam'); library('gam')
+if (!require('forecast')) install.packages('forecast'); library('forecast')
+if (!require('xts')) install.packages('xts'); library('xts')
+if (!require('zoo')) install.packages('zoo'); library('zoo')
+if (!require('fma')) install.packages('fma'); library('fma')
+if (!require('expsmooth')) install.packages('expsmooth'); library('expsmooth')
+if (!require('lmtest')) install.packages('lmtest'); library('lmtest')
+if (!require('tseries')) install.packages('tseries'); library('tseries')
+if (!require('fpp')) install.packages('fpp'); library('fpp')
+if (!require('knitr')) install.packages('knitr'); library('knitr')
+if (!require('ggpubr')) install.packages('ggpubr'); library('ggpubr')
+if (!require('simEd')) install.packages('simEd'); library('simEd')
+if (!require('bibtex')) install.packages('bibtex'); library('bibtex')
+if (!require('knitcitations')) install.packages('knitcitations');
+if (!require('doRNG')) install.packages('doRNG'); library(doRNG)
+if (!require('doParallel')) install.packages('doParallel'); library(doParallel)
+if (!require('plyr')) install.packages('plyr');
+if (!require('reshape2')) install.packages('reshape2');
+if (!require('magrittr')) install.packages('magrittr');
+if (!require('tidyverse')) install.packages('tidyverse');
+if (!require('foreach')) install.packages('foreach');
+if (!require('doMC')) install.packages('doMC');
+if (!require('pomp')) install.packages('pomp'); library(pomp)
+if (!require('fBasics')) install.packages('fBasics');
+if (!require('zoo')) install.packages('zoo');
+if (!require('forecast')) install.packages('forecast');
+if (!require('tseries')) install.packages('tseries'); library(tseries)
+if (!require('fGarch')) install.packages('fGarch'); library(fGarch)
+if (!require('lubridate')) install.packages('lubridate'); library(lubridate)
+theme_set(theme_bw())
+registerDoRNG(3899882)
+```
+
+
+# Introduction
+The automotive industry is one of the greatest economic forces in the world. In
+the United States, Ford and Tesla are the leading brands in this industry[7]. On
+one hand, Tesla has built its reputation rapidly since the brand was founded in
+2003. On the other hand, Ford is rich in the legacy and history of some of the
+most iconic vehicles in the last century. With the new surging demand for
+electric vehicles and Ford's aggressive entrance to the market, investors are
+examining the competition closely.
+
+Stocks are one way to measure and compare growth. The data sets used in this
+analysis contains 1,259 daily observations of stock prices from March 27, 2017
+to March 24, 2022, for each of the two companies. We will use the adjusted close
+prices for each day in the models. The data sets are retrieved from Yahoo!
+Finance.
+
+There are lots of previous projects investigating the volatility of the stock
+price. However, most of them focus on one stock. This study will investigate the
+volatility in Ford's and Tesla's stock prices and observe any trends. The models
+we will use are: ARIMA, GARCH and POMP. We will compare the performance of the 3
+kinds of models for volatility using AIC. We will then compare model performance
+and estimates for the 2 stocks, in which the differences may reflect behaviors
+of the two automotive brands.
+
+```{r}
+Ford_raw = read.csv("F_27Mar2017_24Mar2022.csv")
+Tesla_raw = read.csv("TSLA_27Mar2017_24Mar2022.csv")
+Ford_lreturn = diff(log(Ford_raw$Adj.Close))
+Tesla_lreturn = diff(log(Tesla_raw$Adj.Close))
+Ford = ts(Ford_raw$Adj.Close, start=c(2017, 3, 27), frequency=253)
+Tesla = ts(Tesla_raw$Adj.Close, start=c(2017, 3, 27), frequency=253)
+Ford_LR = ts(Ford_lreturn, start=c(2017, 3, 27), frequency=253)
+Tesla_LR = ts(Tesla_lreturn, start=c(2017, 3, 27), frequency=253)
+```
+
+
+# Exploratory Data Analysis
+From Figure 1, we can tell that both stocks have an apparent increasing trend.
+It is worth noting that the increment of Tesla stock is much faster than Ford
+stock. The stock prices of Ford range from \$4 to \$25 while Tesla range from
+\$35 to over \$1000.
+
+```{r, fig.align="center", fig.cap="Figure 1: Stock Price of Ford vs Tesla"}
+# plot of stock price
+plot(ts(cbind(Ford, Tesla), start=c(2017, 3, 27), frequency=253), 
+      main="Stock Price: Ford vs Tesla")
+```
+
+We want to analysis the volatility of return rates between two stocks. We use
+log return rate of price, and calculated as the following: (why we want to use
+log return instead of return?)
+$$
+\begin{aligned}
+    R_n = \log(y_n) - \log(y_{n-1})
+\end{aligned}
+$$
+where $R_n$ is the return rate at day $n$, and $y_n$ is the stock price at day $n$
+```{r, fig.align="center", fig.cap="Figure 2: Stock Log Return of Ford vs Tesla"}
+# plot of stock return
+plot(ts(cbind(Ford_LR, Tesla_LR), start=c(2017, 3, 27), frequency=253), 
+      main="Log Return Rate: Ford vs Tesla")
+```
+
+From the graph of log return rates between Ford and Tesla (Figure 2), we can
+tell that the volatility of Tesla is greater than Ford, with variance 0.001508
+versus 0.000578. We also notice that the variance of Ford's return increase
+after 2020 where the variance is roughly double. As for Tesla, the variance also
+increase from 0.00136 to 0.00173.
+
+```{r, fig.align="center", fig.cap="Figure 3: Decomposition plot of trend for Ford and Tesla Log Return"}
+# decomposition plot
+decomp_Ford = decompose(Ford_LR)
+decomp_Tesla = decompose(Tesla_LR)
+trends = cbind(Ford_trend=decomp_Ford$trend, Tesla_trend=decomp_Tesla$trend)
+plot(trends, main="Decomposition plot of trend for Ford and Tesla Log Return")
+```
+
+The decomposition plots (Figure 3) for the log return of Ford and Tesla shows
+that the trends are different. Before mid 2019, the trends for both companies
+are flat. After decreasing around mid 2019, the trend of Ford increases and
+keeps around certain level. The trend of Tesla also increases but starts
+decreasing after mid 2020. There is no seasonal pattern for the log returns of
+both companies.
+
+```{r, fig.align="center", fig.cap="Figure 4: ACF plots of Ford and Tesla Log Return"}
+par(mfrow=c(1,2))
+plot(acf(Ford_LR, plot=F), main="ACF of Ford log return")
+plot(acf(Tesla_LR, plot=F), main="ACF of Tesla log return")
+```
+
+We attempted to fit an ARMA model that captures the time series data for both
+Ford and Tesla. The AIC table shows the AIC value for each of the 20 models with
+different auto-regressive and moving average parameters. The lowest AIC value
+comes from the ARMA(0,0) model, which simply models white noise and is not
+particularly useful for the context of stock volatility. Other models with
+competitive AIC values are not invertible or causal, with polynomial roots
+inside of the unit circle. More details and outputs can be found in the appended
+RMarkdown file, but we will not focus on these results in the report as they are
+not useful to our research question.
+
+```{r, warning=F, include=F}
+## ARMA model
+aic_table = function(data, P, Q){
+  table = matrix(NA, P+1, Q+1)
+  for (p in 0:P){
+    for (q in 0:Q){
+      table[p+1, q+1] = Arima(data, order=c(p, 0, q))$aic
+    }
+  }
+  dimnames(table) = list(paste("AR", 0:P, sep=""), paste("MA", 0:Q, sep=""))
+  table
+}
+# ford arima
+ford_aic_table = aic_table(Ford_LR, 5, 5)
+knitr::kable(ford_aic_table, digits=2)
+
+# ARMA root test
+abs(polyroot(c(1,-coef(Arima(Ford_LR, order = c(0,0,1)))[c("ma1")])))
+abs(polyroot(c(1,-coef(Arima(Ford_LR, order = c(1,0,0)))[c("ar1")])))
+abs(polyroot(c(1,-coef(Arima(Ford_LR, order = c(0,0,2)))[c("ma1")])))
+abs(polyroot(c(1,-coef(Arima(Ford_LR, order = c(4,0,0)))[c("ar1")])))
+abs(polyroot(c(1,-coef(Arima(Ford_LR, order = c(4,0,4)))[c("ar1","ar2","ar3","ar4","ma1","ma2","ma3","ma4")])))
+abs(polyroot(c(1,-coef(Arima(Ford_LR, order = c(4,0,5)))[c("ar1","ar2","ar3","ar4","ma1","ma2","ma3","ma4","ma5")])))
+abs(polyroot(c(1,-coef(Arima(Ford_LR, order = c(5,0,4)))[c("ar1","ar2","ar3","ar4","ar5","ma1","ma2","ma3","ma4")])))
+
+# tesla arima
+tesla_aic_table = aic_table(Tesla_LR, 3, 3)
+knitr::kable(tesla_aic_table, digits=2)
+
+# arima diagnoistic
+par(mfrow=c(1,2))
+plot(acf(Arima(Ford_LR, order=c(0,0,1))$residual, plot=F), 
+     main="Residual of ARMA(0,0) Ford")
+plot(acf(Arima(Tesla_LR, order=c(0,0,1))$residual, plot=F), 
+     main="Residual of ARMA(0,0) Tesla")
+par(mfrow=c(1,2))
+qqnorm(Arima(Ford_LR, order=c(0,0,1))$residual, main="Normal Q-Q Plot Ford")
+qqline(Ford_LR)
+qqnorm(Arima(Tesla_LR, order=c(0,0,1))$residual, main="Normal Q-Q Plot Tesla")
+qqline(Tesla_LR)
+```
+
+
+# GARCH models
+
+In financial data, statistics are changing over time. ARCH and GARCH models are
+the widely used solution for this problem. GARCH stands for Generalized
+Auto-Regressive Conditional Heteroskedasticity [2]. The GARCH(p, q) has the form
+$$
+  Y_n = \epsilon\sqrt{V_n}
+$$
+where
+$$
+  V_n = \alpha_0 + \sum_{j=1}^p\alpha_jY_{n-j}^2 + \sum_{k=1}^q\beta_kV_{n-k}
+$$
+and $\epsilon_{1:N}$ is white noise.
+
+## Normal GARCH
+
+First, we try to fit several normal GARCH(p, q) models [6], where
+$$
+\epsilon_{1:N} \overset{iid}{\sim} \mathcal{N}(0, 1)
+$$
+and we use grid search to find the optimal model with highest log likelihood.
+
+```{r, warning=F}
+garch_table = function(data, P, Q){
+  table = matrix(NA, P, Q)
+  for (p in 1:P){
+    for (q in 1:Q){
+      fit.garch = garch(data, order=c(p, q), trace=F, grad="numerical")
+      table[p, q] = tseries:::logLik.garch(fit.garch) ## record log likelihood
+    }
+  }
+  dimnames(table) = list(paste("p", 1:P, sep=""), paste("q", 1:Q, sep=""))
+  table
+}
+
+ford_garch_table = garch_table(Ford_LR, 3, 3)
+knitr::kable(ford_garch_table, digits=2)
+```
+The optimal model for Ford log return is GARCH(2, 1) with highest log likelihood 3087.87
+```{r, warning=F}
+tesla_garch_table = garch_table(Tesla_LR, 3, 3)
+knitr::kable(tesla_garch_table, digits=2)
+```
+
+The optimal model for Tesla log return is GARCH(1, 1) with highest log likelihood 2393.31
+
+```{r, echo=F, warning=F}
+Ford_garch21 = garch(Ford_LR, order=c(2,1), trace=F)
+Tesla_garch11 = garch(Tesla_LR, order=c(1,1), trace=F)
+```
+
+### Normal GARCH Diagnostic
+```{r, fig.align="center", fig.cap="Figure 5: normal GARCH Diagnostic Plots for Ford"}
+par(mfrow=c(2,2))
+qqnorm(Ford_LR)
+qqline(Ford_LR)
+acf(Ford_LR)
+qqnorm(Ford_garch21$residuals)
+qqline(Ford_garch21$residuals)
+acf(Ford_garch21$residuals[-c(1,2)])
+```
+
+From the diagnostic plots for Ford log return (Figure 5), the optimal GARCH(2,1)
+model seems not be a good fit. The Normal QQ-plot of residuals have heavy tails
+on both sides. There is not much improvement by fitting GARCH(1,1), comparing
+with original distribution.
+
+```{r, fig.align="center", fig.cap="Figure 6: normal GARCH Diagnostic Plots for Tesla"}
+par(mfrow=c(2,2))
+qqnorm(Tesla_LR)
+qqline(Tesla_LR)
+acf(Tesla_LR)
+qqnorm(Tesla_garch11$residuals)
+qqline(Tesla_garch11$residuals)
+acf(Tesla_garch11$residuals[-c(1,2)])
+```
+
+According to the diagnostic plots above (Figure 6), the optimal GARCH(1,1) model
+also not a good fit for Tesla log return. The Normal QQ-plot of residuals have
+heavy tails on both sides. Although there is a slight improvement on the right
+tail, comparing with orignal distribution, we still believe that we need to go
+beyong normal GARCH model.
+
+## t-dist GARCH
+
+Next, we try out GARCH model with conditionally $t$-distribution model [5]. The $t$-
+distribution GARCH(1, 1) model is a typical fit for log-return series. Simialr 
+to normal GARCH model, we have the same structure for $Y_n$, $V_n$. $\epsilon_n$
+is still white noise but with $t$-distributed.
+
+We adopt grid search with different $p$ and $q$ to find the optimal model
+```{r, warning=F}
+garcht_table = function(data, P, Q){
+  table = matrix(NA, P, Q)
+  for (p in 1:P){
+    for (q in 1:Q){
+      form = formula(paste("~garch(",p,",",q,")",collapse =" "))
+      fit.garch = garchFit(form, data=data, include.delta=T, 
+                         cond.dist=c("std"), include.mean=T, trace=F,
+                         algorithm=c("nlminb"), hessian=c("ropt"))
+      table[p, q] = -fit.garch@fit$llh ## record log likelihood
+    }
+  }
+  dimnames(table) = list(paste("p", 1:P, sep=""), paste("q", 1:Q, sep=""))
+  table
+}
+
+ford_garcht_table = garcht_table(Ford_LR, 3, 3)
+knitr::kable(ford_garcht_table, digits=2)
+```
+
+The optimal model of Ford based on log likelihood is GARCH(2, 3). But we prefer
+GARCH(1,1) which is relatively simpler and widely used model, given that the
+differences between two log likelihood scores are not significant. Moreover, the
+GARCH(1, 1) model is easier to interpret with fewer parameters. The log
+likelihood for GARCH(1, 1) is 3189.48. We also notice that the conditionally
+$t$-distributed GARCH model performs better than normal GARCH in terms of the
+log likelihood, which increases from 3087.87 to 3189.48.
+
+```{r, warning=F}
+tesla_garcht_table = garcht_table(Tesla_LR, 3, 3)
+knitr::kable(tesla_garcht_table, digits=2)
+```
+
+All 9 models for Tesla have similar log likelihood scores. We prefer GARCH(1, 1)
+since it is more popular and relative easy to interpret. The log likelihood for
+GARCH(1, 1) is 2484.77. Comparing with normal GARCH(1, 1) model, the t-distr
+GARCH(1, 1) increases the log likelihood from 2393.31 to 2484.77.
+
+### t-dist GARCH Diagnostic
+```{r, warning=FALSE, fig.align="center", fig.cap="Figure 7: t-dist GARCH Diagnostic Plots for Ford"}
+# GARCH t-dist Ford
+par(mfrow=c(1,2))
+ford_garcht11 = garchFit(~garch(1,1), data=Ford_LR, include.delta=T, 
+                         cond.dist=c("std"), include.mean=T, trace=F,
+                         algorithm=c("nlminb"), hessian=c("ropt"))
+ford_garcht_res = ford_garcht11@residuals
+quantv = (1/length(ford_garcht_res))*seq(0.5, length(ford_garcht_res)-0.5, 1)
+qqplot(qt(quantv, ford_garcht11@fit$matcoef[6]),
+       ford_garcht11@residuals/ford_garcht11@sigma.t,
+       main="QQ plot for t-dist on residuals",
+       xlab="Theoretical Quantiles", ylab="Sample Quantiles")
+qqline(ford_garcht11@residuals/ford_garcht11@sigma.t, distribution = function(p)
+        qt(p, ford_garcht11@fit$matcoef[6]), prob=c(0.1, 0.9))
+plot(acf(ford_garcht_res, plot=F), main="ACF of Ford t-dist residuals")
+```
+
+The Ford t-distribution QQ-plots of residuals for GARCH(1, 1) shows a much
+better fit than GARCH(2,1) with conditionally normal model. There are only
+several points on the left and right tails are heavier than t-distribution
+(Figure 7). However, the autocorrelation plot shows that there are still some
+correlations between residuals at lag 7 and lag 10. Given that correlations
+between residuals at lag 7 and 10 may be exist, we still believe that for Ford,
+GARCH(1, 1) with conditionally t-distributed model is better than conditionally
+normal one.
+
+```{r, warning=FALSE, fig.align="center", fig.cap="Figure 8: t-dist GARCH Diagnostic Plots for Tesla"}
+# GARCH t-dist Tesla
+par(mfrow=c(1,2))
+tesla_garcht11 = garchFit(~garch(1,1), data=Tesla_LR, include.delta=T, 
+                         cond.dist=c("std"), include.mean=T, trace=F,
+                         algorithm=c("nlminb"), hessian=c("ropt"))
+tesla_garcht_res = tesla_garcht11@residuals
+quantv = (1/length(tesla_garcht_res))*seq(0.5, length(tesla_garcht_res)-0.5, 1)
+qqplot(qt(quantv, tesla_garcht11@fit$matcoef[6]),
+       tesla_garcht11@residuals/tesla_garcht11@sigma.t,
+       main="QQ plot for t-dist on residuals",
+       xlab="Theoretical Quantiles", ylab="Sample Quantiles")
+qqline(tesla_garcht11@residuals/tesla_garcht11@sigma.t, distribution = function(p)
+        qt(p, tesla_garcht11@fit$matcoef[6]), prob=c(0.1, 0.9))
+plot(acf(tesla_garcht_res, plot=F), main="ACF of Tesla t-dist residuals")
+```
+
+The Tesla t-distribution QQ-plots of residuals for GARCH(1, 1) in Figure 8 also
+shows a much better fit than previous GARCH(1, 1). Almost every point fall on or
+near the qqline. There is no significant heavy tails on both sides. The
+autocorrelation plot shows no correlation between residuals. Based on the
+diagnostic plots above, we believe that GARCH(1, 1) with conditionally
+t-distributed model is the better fit for Tesla.
+
+```{r, fig.align="center", fig.cap="Figure 9: Volatility Fit and Prediction for Ford"}
+# prediction plot
+# par(mfrow=c(2,1))
+ford_ahead = ts(predict(ford_garcht11, n.ahead=50), start=c(2022, 3, 20), 
+                   frequency=253)
+ford_pred = ts(cbind(ford_garcht11@sigma.t, -ford_garcht11@sigma.t), 
+               start=c(2017, 3, 27), frequency=253)
+plot(Ford_LR, type="l", xlab="Time", ylab="Ford Log Returns", 
+     ylim=c(-0.2, 0.2), xlim=c(2017, 2022.150))
+lines(ford_pred[,1], lwd=2, lty=1, col="blue")
+lines(ford_pred[,2], lwd=2, lty=1, col="blue")
+lines(ford_ahead[,1], lwd=2, lty=1, col="red")
+lines(ford_ahead[,1]+ford_ahead[,2], lwd=2, lty=1, col="green")
+lines(ford_ahead[,1]-ford_ahead[,2] , lwd=2, lty=1, col="green")
+legend("topleft", legend=c("log returns", "fitted volatility", 
+                           "predicted log returns", "predicted volatility"), 
+       col=c("black", "blue", "red", "green"), lty=1)
+```
+```{r, fig.align="center", fig.cap="Figure 10: Volatility Fit and Prediction for Tesla"}
+tesla_ahead = ts(predict(tesla_garcht11, n.ahead=50), start=c(2022, 3, 20), 
+                   frequency=253)
+tesla_pred = ts(cbind(tesla_garcht11@sigma.t, -tesla_garcht11@sigma.t), 
+               start=c(2017, 3, 27), frequency=253)
+plot(Tesla_LR, type="l", xlab="Time", ylab="Tesla Log Returns", 
+     ylim=c(-0.2, 0.2), xlim=c(2017, 2022.150))
+lines(tesla_pred[,1], lwd=2, lty=1, col="blue")
+lines(tesla_pred[,2], lwd=2, lty=1, col="blue")
+lines(tesla_ahead[,1], lwd=2, lty=1, col="red")
+lines(tesla_ahead[,1]+ford_ahead[,2], lwd=2, lty=1, col="green")
+lines(tesla_ahead[,1]-ford_ahead[,2] , lwd=2, lty=1, col="green")
+legend("topleft", legend=c("log returns", "fitted volatility", 
+                           "predicted log returns", "predicted volatility"), 
+       col=c("black", "blue", "red", "green"), lty=1)
+```
+
+With two t-distr GARCH(1, 1) models for Ford and Tesla log return, we plot the
+graphics with log returns as well as fitted volatility (Figure 9 and 10). It is
+clear to see that the fitted volatility for Tesla is wider than Ford, which
+indicates that the Ford tends to be more stable than Tesla. We also fit 50 days
+ahead for both models. The predicted log returns are very close to 0, while the
+predicted volatility increases significantly as time increase.
+
+# Ford POMP
+
+## Model Structure
+
+Financial markets consist of non-stationary behaviors and therefore often
+require models that adequately address the time-varying parameters. The POMP
+model allows us to model volatility as a latent stochastic process, in which the
+volatility in the stock prices are indirectly observed from the returns. In the
+POMP model, we model the state variables $(G_n, H_n, Y_n)$: $G_n$ is the random
+walk component that drives leverage $R_n$, $H_n$ represents the volatility and
+$Y_n$ is the measurement that serves as the perfectly observed latent state. We
+use the same implementation as in Breto (2014)[2]:
+$$G_n = G_{n-1} + \nu_n$$
+$$R_n = \frac{\exp\{2G_N\}-1}{\exp\{2G_N\}-1}$$
+$$H_n = \mu_h(1-\phi)+\phi H_{n-1} + \beta_{n-1} R_n \exp\{-H_{n-1}/2\} + \omega_n$$
+$$Y_n = \exp\{H_n/2\}$$.
+
+```{r}
+ford = read.csv("F_27Mar2017_24Mar2022.csv")
+Y = (log(ford$Adj.Close) - log(lag(ford$Adj.Close)))
+ford$returns_cntr = Y - mean(Y, na.rm = TRUE)
+
+statenames <- c("H","G","Y_state")
+rp_names <- c("sigma_nu","mu_h","phi","sigma_eta")
+ivp_names <- c("G_0","H_0")
+paramnames <- c(rp_names, ivp_names)
+
+rproc1 <- Csnippet("
+  double beta,omega,nu;
+  omega = rnorm(0,sigma_eta * sqrt( 1- phi*phi ) *
+  sqrt(1-tanh(G)*tanh(G)));
+  nu = rnorm(0, sigma_nu);
+  G += nu;
+  beta = Y_state * sigma_eta * sqrt( 1- phi*phi );
+  H = mu_h*(1 - phi) + phi*H + beta * tanh( G )
+  * exp(-H/2) + omega;
+")
+rproc2.sim <- Csnippet("Y_state = rnorm( 0,exp(H/2) );")
+rproc2.filt <- Csnippet("Y_state = covaryt;")
+
+# ford_rproc.sim = paste(rproc1,rproc2.sim)
+rproc.sim = Csnippet("
+  double beta,omega,nu;
+  omega = rnorm(0,sigma_eta * sqrt( 1- phi*phi ) *
+  sqrt(1-tanh(G)*tanh(G)));
+  nu = rnorm(0, sigma_nu);
+  G += nu;
+  beta = Y_state * sigma_eta * sqrt( 1- phi*phi );
+  H = mu_h*(1 - phi) + phi*H + beta * tanh( G )
+  * exp(-H/2) + omega;
+  Y_state = rnorm( 0,exp(H/2) );")
+
+# ford_rproc.filt = paste(rproc1,rproc2.filt) 
+rproc.filt = Csnippet("
+  double beta,omega,nu;
+  omega = rnorm(0,sigma_eta * sqrt( 1- phi*phi ) *
+  sqrt(1-tanh(G)*tanh(G)));
+  nu = rnorm(0, sigma_nu);
+  G += nu;
+  beta = Y_state * sigma_eta * sqrt( 1- phi*phi );
+  H = mu_h*(1 - phi) + phi*H + beta * tanh( G )
+  * exp(-H/2) + omega;
+  Y_state = covaryt;")
+
+rinit <- Csnippet("
+G = G_0;
+H = H_0;
+Y_state = rnorm( 0,exp(H/2) );
+")
+
+rmeasure <- Csnippet("y=Y_state;")
+dmeasure <- Csnippet("lik=dnorm(y,0,exp(H/2),give_log);")
+
+partrans <- parameter_trans(
+  log=c("sigma_eta","sigma_nu"),
+  logit="phi"
+  )
+
+ford_y = ford$returns_cntr[-1]
+ford_filter = pomp(data=data.frame(
+  y = ford_y, time = 1:length(ford_y)),
+  statenames = statenames,
+  paramnames = paramnames,
+  times = "time",
+  t0=0,
+  covar = covariate_table(
+    time = 0:length(ford_y),
+    covaryt = c(0,ford_y),
+    times = "time"),
+  rmeasure = rmeasure,
+  dmeasure = dmeasure,
+  rprocess = discrete_time(step.fun = rproc.filt, delta.t = 1),
+  rinit = rinit,
+  partrans = partrans
+)
+
+params_test = c(sigma_nu = exp(-6.5),
+                mu_h = -0.25,
+                phi = expit(4),
+                sigma_eta = exp(-0.07),
+                G_0 = 0,
+                H_0 = 0)
+
+sim1.sim = pomp(ford_filter,
+                 statenames = statenames,
+                 paramnames = paramnames,
+                 rprocess = discrete_time(step.fun = rproc.sim, delta.t=1))
+
+sim1.sim = simulate(sim1.sim, seed = 531, params = params_test)
+
+sim1.filt = pomp(sim1.sim,
+                 covar = covariate_table(time = c(timezero(sim1.sim), time(sim1.sim)),
+                                         covaryt = c(obs(sim1.sim), NA),
+                                         times = "time"),
+                 statenames = statenames,
+                 paramnames = paramnames,
+                 rprocess = discrete_time(step.fun = rproc.filt, delta.t = 1))
+
+run_level <- 3
+ford_Np = switch(run_level, 100, 1e3, 1e3)
+ford_Nmif = switch(run_level,  10, 100, 100)
+ford_Nreps_eval = switch(run_level,   4,  10, 10)
+ford_Nreps_local = switch(run_level,  10,  10, 20)
+ford_Nreps_global = switch(run_level,  10,  20, 100) # 200 global reps
+```
+
+As an initial surface-level investigation, we replicate the filtering process 20
+times with 2000 particles in each iteration. The unbiased likelihood estimate is
+-1748.8 with a Monte Carlo standard error of 0.0964. This estimate can serve as
+our rough benchmark, but we should continue with more in-depth iterated
+filtering to see the geometry of the likelihood surface.
+
+```{r, cache = TRUE, warning = FALSE}
+cores <- as.numeric(Sys.getenv('SLURM_NTASKS_PER_NODE', unset=NA))
+if(is.na(cores)) cores <- detectCores()  
+registerDoParallel(cores)
+registerDoRNG(34118892)
+stew(file = sprintf("pf1-%d.rda", run_level), {
+  t.pf1 = system.time(pf1 <- foreach(i=1:ford_Nreps_eval,
+                                     .packages = 'pomp') %do%
+                        pfilter(sim1.filt, Np = ford_Np))})
+loglik1 = logmeanexp(sapply(pf1,logLik),se=TRUE)
+loglik1 %>% print()
+```
+
+## Local Search
+
+For the repeated stochastic local maximization, we fit 20 local filtering
+objects, each with 2000 particles. Then we find the log likelihood estimate
+using 40 replications of the `pfilter` function [1]. The maximum log likelihood
+value from this search is 3154.3 with a Monte Carlo standard error of 0.103. The
+pair-wise scatterplot shows the geometry of the likelihood surface and its
+relationship with each of the parameters. The iterated filtering process did not
+yield useless results, but the level of success is not particularly exceptional
+either. The log likelihood values are relatively spread out, and few are within
+10 log units of the maximum. The plot still shows some patterns in the log
+likelihood surface, such as the cluster of high log likelihood values with log
+$\sigma_\eta$ and $\mu_h$ values. The convergence plots show that the log
+likelihood valued do converge with relatively few iterations. Variables that
+show some rough convergence are $G_0$ and $\sigma_\nu$. These observations must
+be further investigated with a global search beyond this local neighborhood.
+
+```{r, cache = TRUE, eval = FALSE}
+ford_rw.sd_rp = 0.02
+ford_rw.sd_ivp = 0.1
+ford_cooling.fraction.50 = 0.5
+ford_rw.sd = rw.sd(sigma_nu = ford_rw.sd_rp,
+                   mu_h = ford_rw.sd_rp,
+                   phi = ford_rw.sd_rp,
+                   sigma_eta = ford_rw.sd_rp,
+                   G_0 = ivp(ford_rw.sd_ivp),
+                   H_0 = ivp(ford_rw.sd_ivp))
+
+registerDoParallel(cores)
+registerDoRNG(34118892)
+stew(file = sprintf("mif1-%d_2.rda", run_level),{
+  t.if1 <- system.time({
+    if1 <- foreach(i=1:ford_Nreps_local,
+                   .packages = 'pomp', .combine = c) %dopar%
+      mif2(ford_filter, params = params_test,
+           Np = ford_Np, Nmif = ford_Nmif,
+           cooling.fraction.50 = ford_cooling.fraction.50,
+           rw.sd = ford_rw.sd)
+    L.if1 = foreach(i=1:ford_Nreps_local,
+                    .packages='pomp', .combine = rbind) %dopar%
+      logmeanexp(replicate(ford_Nreps_eval,
+                           logLik(pfilter(ford_filter, params = coef(if1[[i]]),
+                                          Np = ford_Np))), se = TRUE)
+    })
+  })
+
+local_results = data.frame(logLik = L.if1[,1], logLik_se = L.if1[,2], t(sapply(if1,coef)))
+if (run_level>1) {
+  write.table(local_results, file = "ford_params2.csv", append = TRUE,
+              col.names = FALSE, row.names = FALSE)
+  }
+```
+
+```{r}
+load("mif1-3_3.rda")
+results_local = read.table("ford_params2.csv", sep = " ")
+colnames(results_local) = c("logLik", "logLik_se", "sigma_nu", "mu_h",
+                      "phi", "sigma_eta", "G_0", "H_0")
+```
+
+```{r, echo = FALSE, fig.align="center", fig.cap="Figure 11: Log likelihood surface for Ford local search"}
+pairs(~logLik + sigma_nu + mu_h + phi + sigma_eta,
+      data = results_local)
+```
+
+```{r, echo = FALSE, fig.align="center", fig.cap="Figure 12: Filter Diagnostics and Convergence for Ford local search"}
+plot(if1)
+```
+
+## Global Search
+
+For the global search, we fit 100 repeated iterations with 2000 particles each.
+Like in the local search, the unbiased log likelihood estimate here is also
+calculated from 20 replications of `pfilter` function. The maximum log
+likelihood value from this search is 3150.9 with standard error of 0.318. This
+value is comparable with the local search, which are both much higher than the
+initial benchmark value. However, the 75th percentile of the log likelihood from
+the searches is about 30 log units below the maximum. The discrepancy does not
+provide great confidence in the estimations. The convergence plots show that the
+log likelihood converged nicely after just a few iterations (Figure 12). Some
+variables like $\sigma_\nu$, $\sigma_\eta$ and $G_0$ showed good convergence,
+though there is one filter that shows a different behavior than others for
+$\sigma_\eta$. The convergence diagnostics for $\phi$ is quite strange, with
+most filters converging to 1 but few others showing a different set of behavior.
+The 2 variables that clearly do not converge are $H_0$ and $\mu_h$. This
+indicates that $H_0$ and $\mu_h$ are weakly identified in the model. The gradual
+spread in $\mu_h$ even though the log likelihood does converge shows that
+$\mu_h$ does not play an important role in maximizing likelihood. With these
+observations in mind, we turn to the same analysis on the data set with Tesla
+stock prices.
+
+```{r, eval = FALSE}
+ford_box <- rbind(
+  sigma_nu=c(0.005,0.05),
+  mu_h =c(-1,0),
+  phi = c(0.95,0.99),
+  sigma_eta = c(0.5,1),
+  G_0 = c(-2,2),
+  H_0 = c(-1,1))
+
+stew(file=sprintf("box_eval-%d.rda",run_level),{
+  t.box <- system.time({
+    if.box <- foreach(i=1:ford_Nreps_global,
+                      .packages ="pomp",.combine=c) %dopar%
+      mif2(if1[[1]], params=apply(ford_box,1,function(x)runif(1,x)))
+    L.box <- foreach(i=1:ford_Nreps_global,
+                     .packages = "pomp",.combine=rbind) %dopar% {
+                       logmeanexp(replicate(ford_Nreps_eval,
+          logLik(pfilter(ford_filter,params=coef(if.box[[i]]),
+                         Np=ford_Np))), se=TRUE)}
+    })
+  })
+
+r.box <- data.frame(logLik=L.box[,1],logLik_se=L.box[,2], t(sapply(if.box,coef)))
+if(run_level>1) write.table(r.box,file="ford_global.csv",
+append=TRUE,col.names=FALSE,row.names=FALSE)
+summary(r.box$logLik, digits=5)
+```
+
+```{r}
+load("box_eval-2.rda")
+r.box = data.frame(logLik = L.box[,1], logLik_se = L.box[,2], t(sapply(if.box, coef)))
+summary(r.box$logLik, digits=5)
+```
+
+```{r, echo = FALSE, fig.align="center", fig.cap="Figure 13: Log likelihood surface for Ford global search"}
+pairs(~logLik + sigma_nu + mu_h + phi + sigma_eta, data = r.box)
+```
+
+```{r, echo = FALSE, fig.align="center", fig.cap="Figure 14: Filter Diagnostics and Convergence for Ford global search"}
+plot(if.box)
+```
+
+
+# Tesla POMP
+
+## Model Structure
+
+Given above background, we now construct our volatility model for Tesla to
+compare the Tesla and Ford.
+We will define a recursive particle filter by defining particle $j$ at time n-1:
+
+$$X_{n-1, j}^{F}=\left(G_{n-1, j}^{F}, H_{n-1, j}^{F}, y_{n-1}\right)$$
+
+Then we can build prediction particles:
+
+$$\left(G_{n, j}^{P}, H_{n, j}^{P}\right) \sim f_{G_{n}, H_{n} | G_{n-1}, H_{n-1}, Y_{n-1}}\left(g_{n} | G_{n-1, j}^{F}, H_{n-1, j}^{F}, y_{n-1}\right)$$ 
+with weight 
+$$w_{n, j}=f_{Y_{n} | G_{n}, H_{n}}\left(y_{n} | G_{n, j}^{P}, H_{n, j}^{P}\right)$$
+
+The notations follows the class notes introduced in [class note](https://kingaa.github.io/sbied/pfilter/notes.pdf). To combine the above idea
+with Monte Carlo, we start with specifying the POMP model parameters and
+volatility model, we would have two pomp objects (filter and simulation). The
+model is built on the lecture node and with our own parameters choice for
+fine-tuning the results.
+```{r, echo = FALSE, fig.align='center', fig.cap="Figure 1: Original Data", echo=F}
+TeslaData = read.csv2(file = "TSLA_27Mar2017_24Mar2022.csv", sep = ",", header = TRUE)
+TeslaData = tail(TeslaData,365)
+head(TeslaData)
+```
+```{r, echo = FALSE, warning=FALSE,fig.align='center', fig.cap="Figure 1: Adjusted Closing Price of Apple from 2017 to 2022 (Daily)", echo=F}
+par(mfrow=c(2,1))
+closingPrice = as.numeric(as.character(TeslaData$Adj.Close))
+basicStats(closingPrice)
+```
+```{r, echo = FALSE, warning=FALSE, fig.align='center', fig.cap="Figure 2: LogDiffTeslaDmean Closing Price from 2017 to 2022 (Daily)", echo=F}
+LogDiffTesla = diff(log(as.numeric(as.character(TeslaData$Adj.Close))))
+LogDiffTeslaDmean=LogDiffTesla - mean(LogDiffTesla) ##Dmean
+```
+Moreover, we need to initialize Y, G, and H for the pomp model, then we could
+define the initializing value of rmeasure and dmeasure.
+Here we build the main body of the POMP model based on above parameters.
+```{r, warning=FALSE}
+Tesla.filt <- pomp(data=data.frame(
+  y=LogDiffTeslaDmean,time=1:length(LogDiffTeslaDmean)),
+  statenames=statenames,
+  paramnames=paramnames,
+  times="time",
+  t0=0,
+  covar=covariate_table(
+    time=0:length(LogDiffTeslaDmean),
+    covaryt=c(0,LogDiffTeslaDmean),
+    times="time"),
+  rmeasure= rmeasure,
+  dmeasure= dmeasure,
+  rprocess=discrete_time(step.fun=rproc.filt,
+                         delta.t=1),
+  rinit = rinit,
+  partrans = partrans
+)
+```
+
+## Local Search
+
+
+```{r, warning=FALSE,echo=TRUE}
+params_test <- c(
+  sigma_nu = exp(-6.5),  
+  mu_h = -0.25,    
+  phi = expit(4),  
+  sigma_eta = exp(-0.07),
+  G_0 = 0,
+  H_0=0
+)
+
+sim1.sim <- pomp(Tesla.filt, 
+                 statenames=statenames,
+                 paramnames=paramnames,
+                 rprocess=discrete_time(
+                   step.fun=rproc.sim,delta.t=1)
+)
+
+sim1.sim <- simulate(sim1.sim,seed=531,params=params_test)
+
+sim1.filt <- pomp(sim1.sim, 
+                  covar=covariate_table(
+                    time=c(timezero(sim1.sim),time(sim1.sim)),
+                    covaryt=c(obs(sim1.sim),NA),
+                    times="time"),
+                  statenames=statenames,
+                  paramnames=paramnames,
+                  rprocess=discrete_time(
+                    step.fun=rproc.filt,delta.t=1)
+)
+
+run_level <- 3
+Tesla_Np <-           switch(run_level, 100, 1e3, 2e3)
+Tesla_Nmif <-         switch(run_level,  10, 100, 200)
+Tesla_Nreps_eval <-   switch(run_level,   4,  10,  20)
+Tesla_Nreps_local <-  switch(run_level,  10,  20,  20)
+Tesla_Nreps_global <- switch(run_level,  10,  20, 100)
+stew(file=sprintf("p1f1-%d.rda",run_level),{
+  t.pf1 <- system.time(
+    pf1 <- foreach(i=1:Tesla_Nreps_eval,
+                   .packages='pomp') %do% pfilter(sim1.filt,Np=Tesla_Np))
+},seed = 4292020, kind = "L'Ecuyer")
+L.pf1 <- logmeanexp(sapply(pf1,logLik),se=TRUE)
+```
+
+Here we show the fixed parameter choices of our self and also we build the
+simulation pomp object. Similarly, we build up the filter pomp object based on
+those parameter set. First, we conduct the particle filter as a baseline with
+running level 3. The unbiased likelihood estimate is -1610.31 with a standard
+error of 0.0983. Then, we tried a local search on a fixed-parameter model. 
+
+```{r, eval = FALSE, warning=FALSE}
+Tesla_rw.sd_rp <- 0.02
+Tesla_rw.sd_ivp <- 0.1
+Tesla_cooling.fraction.50 <- 0.5
+Tesla_rw.sd <- rw.sd(
+  sigma_nu  = Tesla_rw.sd_rp,
+  mu_h      = Tesla_rw.sd_rp,
+  phi       = Tesla_rw.sd_rp,
+  sigma_eta = Tesla_rw.sd_rp,
+  G_0       = ivp(Tesla_rw.sd_ivp),
+  H_0       = ivp(Tesla_rw.sd_ivp)
+)  
+stew(file=sprintf("m1if1-%d.rda",run_level),{
+  t.if1 <- system.time({
+    if1 <- foreach(i=1:Tesla_Nreps_local,
+                   .packages='pomp', .combine=c) %do% mif2(Tesla.filt,
+                                                              params=params_test,
+                                                              Np=Tesla_Np,
+                                                              Nmif=Tesla_Nmif,
+                                                              cooling.fraction.50=Tesla_cooling.fraction.50,
+                                                              rw.sd = Tesla_rw.sd)
+    L.if1 <- foreach(i=1:Tesla_Nreps_local,
+                     .packages='pomp', .combine=rbind) %do% logmeanexp(
+                       replicate(Tesla_Nreps_eval, logLik(pfilter(Tesla.filt,
+                                                                  params=coef(if1[[i]]),Np=Tesla_Np))), se=TRUE)
+  })
+},seed = 4292020, kind = "L'Ecuyer")
+r.if1 <- data.frame(logLik=L.if1[,1],logLik_se=L.if1[,2],
+                    t(sapply(if1,coef)))
+if (run_level>1) write.table(r.if1,file="Tesla_params.csv",
+                             append=TRUE,col.names=FALSE,row.names=FALSE)
+```
+
+```{r, warning=FALSE}
+load("m1if1-3.rda")
+results_local = read.table("Tesla_params.csv",sep = " ")
+colnames(results_local) = c("logLik", "logLik_se", "sigma_nu", "mu_h",
+                      "phi", "sigma_eta", "G_0", "H_0")
+```
+
+Let's evaluate the fixed parameter models with likelihood and diagnostic plots.
+We could see the maximum likelihood is 707.6 with a maximum standard error of
+0.22389.
+
+```{r, echo = FALSE, warning=FALSE, fig.align='center', fig.cap="Figure 15: Pair Plot for Stochastic Leverge Model"}
+pairs(~logLik+sigma_nu+mu_h+phi+sigma_eta,
+      data=results_local)
+```
+
+From **Figure 15**, we could analyze the geometry of the likelihood surface. It
+can be seen that the $\sigma_{\nu}$ is around 0.005, which is away from our
+start value of exp(-6.5); $\mu$ is distributed around our initial value of
+-0.25; $\phi$ is distributed sparsely as two groups, which is not a good for
+comparing to our preset value; $\sigma_{\eta}$ is distributed around 1, which is
+close to our start point $exp(-0.07)$.
+
+```{r, echo = FALSE, warning=FALSE, fig.align='center', fig.cap="Figure 16: Trajectory of Parameter Convergence over Iterations"}
+plot(if1)
+```
+
+**Figure 16** illustrates that not all parameters converged well in the local
+search. Overall, $\sigma_{\nu}$ , $\sigma_{\eta}$, $G_{0}$ and $H_{0}$ get
+converged roughly except some deviations. However, $\mu_{h}$ did not converge
+well as iterations goes up. As our findings from the **Figure 15**, $\phi$ tends
+to converge into two separate parts, which indicates there are two different
+modes. Moreover, we could see some random dips in effective sample sizes along
+the iterations, but the average levels seems good. With these observations, we
+moved to a global search for more precise analysis of model validation.
+
+## Global Search
+
+
+```{r, eval=FALSE,echo=TRUE}
+Tesla_box <- rbind(
+  sigma_nu=c(0.001,0.1),
+  mu_h    =c(-1,0),
+  phi = c(0.95,0.99),
+  sigma_eta = c(0.5,1),
+  G_0 = c(-2,2),
+  H_0 = c(-1,1)
+)
+stew(file=sprintf("box1_eval-%d.rda",run_level),{
+  t.box<- system.time({
+    if.box <- foreach(i=1:Tesla_Nreps_global,
+                      .packages='pomp',.combine=c) %do% mif2(if1[[1]],
+                                params=apply(Tesla_box,1,function(x)runif(1,x)))
+    L.box <- foreach(i=1:Tesla_Nreps_global,
+                     .packages='pomp',.combine=rbind) %do% {
+                       logmeanexp(replicate(Tesla_Nreps_eval, logLik(pfilter(
+                         Tesla.filt,params=coef(if.box[[i]]),Np=Tesla_Np))), 
+                         se=TRUE)
+                     }
+  })
+},seed = 4292020, kind = "L'Ecuyer")
+r.box <- data.frame(logLik=L.box[,1],logLik_se=L.box[,2],
+                    t(sapply(if.box,coef)))
+```
+
+```{r}
+load("box1_eval-3.rda")
+results_global = read.table("Tesla_params1.csv",sep = " ")
+colnames(results_global) = c("logLik", "logLik_se", "sigma_nu", "mu_h",
+                      "phi", "sigma_eta", "G_0", "H_0")
+```
+
+To run the global search, we firstly establish a set of random start parameters.
+Compared to the previous stochastic leverage model, our new model has improved a
+little on maximum likelihood, which reaches 709.6.
+
+```{r, echo = FALSE, warning=FALSE, fig.align='center', fig.cap="Figure 17: Pair Plot for Global Search"}
+pairs(~logLik+log(sigma_nu)+mu_h+phi+sigma_eta+H_0,
+      data=results_global)
+```
+
+However, from **Figure 17**, it should be noticed that the projected convergence
+looks bad on $\mu_{h}$, $H_0$, and $\phi$. Unconvergent patterns are shown in
+the plots.
+
+```{r, echo = FALSE, warning=FALSE, fig.align='center', fig.cap="Figure 18: Trajectory of Parameter Convergence over Iterations for Global Search"}
+plot(if.box)
+```
+
+Nevertheless, we could see from **Figure 18** that the our parameters except
+$\mu_{h}$ and $\phi$ have converged well as iteration grows. The plot of
+$\mu_{h}$ and $\phi$ are similar to the previous local search. It also should be
+noticed that $H_0$ and $\mu_{h}$ also are weakly identified in POMP model of
+Tesla though the likelihood keep increasing with iterations. This is because the
+goal of the Monte Carlo optimizer is to get close to the MLE, measured by
+likelihood, rather than to obtain it exactly. Independent Mont Carlo searches
+can be combined via a profile likelihood to get a more exact point estimate and
+a confidence interval. From the [HW8](https://ionides.github.io/531w22/hw08/sol08.pdf) 
+we can know, wide confidence intervals, also called weak identifiability, are
+not necessarily a problem for the scientific investigation. Some parameters may
+be imprecisely estimable. Therefore, it makes sense that some parameters are not
+identified well. Moreover, we could see some random dips in effective sample
+sizes along the iterations, but the average levels seems good.
+
+# Conclusion
+
+Based on our analysis, the GARCH with conditionally t-distributed models
+performed much better than the ones with conditionally normal models. The
+improvements of log likelihood were not significant, but the diagnostic plots of
+residuals suggested that conditional t-distributed model was more suitable for
+log returns. For both Ford and Tesla, we conclude that t-distributed GARCH(1,1)
+best captures the stock volatility while preserving the interpretability.
+Moreover, we observed that the fitted volatility for Tesla was wider than Ford,
+which indicates that the Ford tends to be more stable than Tesla. We also fitted
+50 days ahead for both models. The predicted log returns were very close to 0,
+while the predicted volatility increases significantly as time increase. The
+prediction actually was not ideal. Prediction for a shorter time period, like 5
+to 10 days in the future, may be more accurate.
+
+Some parameters in the POMP models for both Ford and Tesla did not perform very
+well, as there is no real consistency in terms of log-likelihood among the
+iterations. In the results, we saw that the 75th percentile log-likelihood is
+many log units away form the maximum log-likelihood estimate, suggesting that
+the estimates are inconsistent and provide weak confidence to our MLE even after
+trying several different initial values. In both Ford and Tesla POMP models,
+$\sigma_\nu$ and $G_0$ converged but $H_0$ and $\mu_h$ are weakly identified.
+This is not a weakness of our model but a statistical fact. Therefore, the
+spread in the parameter estimates reflects uncertainty about the parameter given
+the data, rather than a lack of convergence.
+
+The POMP models perform much better than the GARCH for both Ford and Tesla. Some
+potential improvements to the POMP models are trying more different initial
+guesses to optimize the fit or we could subset the data set to observations
+before the COVID-19 pandemic to exclude the dramatic shock to the market that
+may be hard for the model to explain without context. There are endless possible
+variables and shocks that can impact the stock market, and while countless
+analysts have tried to model and predict stock prices and volatility, the
+unpredictability remains a major characteristic and attraction to the stock
+market.
+
+# Scholarships
+
+--------------------------------------------------------------------------------
+
+## In-Class References
+
+[1] Ch.14 Lecture notes with likelihood maximization material
+
+[2] Ch.16 Lecture notes with financial case study
+
+[3] Past STATS 531 final project from W20 "Volatility Analysis on Apple Stock" as reference: 
+https://ionides.github.io/531w20/final_project/Project5/final.html
+
+[4] The format of the RMD layout is learned from
+https://github.com/ionides/531w18/blob/master/final_project/21/final.Rmd
+
+--------------------------------------------------------------------------------
+
+## Out-Class References
+
+[5] D. Ruppert, D. Matteson, Statistics and Data Analysis for Financial Engineering
+: with R examples, Springer, 2015
+
+[6] M. Ghahramani, A. Thavaneswaran, A note on GARCH model identification, Computers
+& Mathematics with Applications, Volume 55, Issue 11, 2008, Pages 2469-2475,
+https://doi.org/10.1016/j.camwa.2007.10.001
+
+[7] Ford vs. Tesla: Which Stock Is A Better Buy?
+https://www.thestreet.com/memestocks/reddit-trends/ford-vs-tesla-which-stock-is-better
+
+--------------------------------------------------------------------------------
+
+## Data
+
+Historical Stock Price for Ford from [Yahoo! Finance](https://finance.yahoo.com/quote/F/history)
+
+Historical Stock Price for Tesla from [Yahoo! Finance](https://finance.yahoo.com/quote/TSLA/history)
+
+--------------------------------------------------------------------------------
+
+## Packages
+
+All packages used are from
+[cran.r-project.org](https://cran.r-project.org/web/packages/available_packages_by_nam)
+
+
+

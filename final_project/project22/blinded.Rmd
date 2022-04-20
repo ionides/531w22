@@ -1,0 +1,1088 @@
+---
+title: "Volatility Analysis on Ethereum"
+output:  
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 5
+    code_folding: hide
+    theme: united
+    highlight: pygments
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning=FALSE, message=FALSE)
+```
+
+
+## Introduction
+
+A cryptocurrency is a digital currency designed to work as a medium of exchange through a computer network that is not reliant on any central authority, such as a government or bank, to uphold or maintain it. Since the release of Bitcoin, many other cryptocurrencies have been created.[1][5]
+
+Ethereum(ETH), a cryptocurrency which is second only to Bitcoin in market capitalization, outperformed Bitcoin in 2021. The price of ETH rose 404.4% in 2021, while the price of BTC only rose 57.4%. The supporters of ETH believe that ETH has greater utility, is attracting more developers, and the future of cryptocurrency is going toward ETH.[2][3][4][5] 
+
+Understanding the volatility is important for quantifying the risk of investments and managing the risk[7]. In this project, we investigate the variability of the returns of ETH by fitting ARCH, GARCH, and POMP model, and analyzing the results.
+
+
+## Exploratory Data Analysis
+
+
+
+
+```{r, include=FALSE}
+library(tidyverse)
+library(lubridate)
+library(knitr)
+library(fpp2)
+library(tseries)
+library(pomp)
+library(doParallel)
+library(doRNG)
+library(ggplot2)
+#Rscript --vanilla -e "knitr::knit(\\"xxx.Rmd\\")"
+```
+
+
+```{r}
+set.seed(1)
+eth <- read.csv('Ethereum daily.csv')
+colnames(eth)[1] <- "Date"
+eth$Date=dmy(eth$Date)
+eth$Price = as.numeric(gsub(",","",eth$Price))
+eth=arrange(eth, Date)
+
+test = eth[1807:2171,]
+train = eth[1:1806,]
+logd = diff(log(train$Price))-mean(diff(log(train$Price)))
+
+plot(train$Price~train$Date,type="l",xlab="Years",ylab="ETH($)")
+```
+
+
+The ETH was initial released on 2015-07-30, and the data consist of the daily price of ETH from 2016-03-10 to 2021-02-17. The time series plot above shows that there is a increase around 2018 and a sharper increase starting in 2021. From the plot, we can see the price is unstable, and we apply the logarithmic transformation.
+
+```{r}
+plot(log(train$Price)~train$Date,type="l",xlab="Years",ylab="Log(ETH)")
+
+```
+
+After the logarithmic transformation, the data become much more stable in the plot. However, there are still some peaks might be caused by societal, political, and other factors, which make the price of ETH difficult to predict, but we can investigate the volatility of the price. To investigate the volatility, we use the returns, which is the difference of the log of the price
+
+$y^{*}_n=log(z_n)-log(z_{n-1})$
+
+where $z_n$ is the daily price of ETH. And the plot is shown below.
+
+```{r}
+plot(logd~train$Date[-1],type="l",xlab="Years",ylab="Demeaned return of ETH")
+
+```
+
+
+## GARCH
+
+
+For financial time series modeling, generalized autoregressive conditional heteroskedasticity model, known as GARCH model, is widely used[7]. GARCH(p,q) model takes the following form:
+
+$$Y_n = \epsilon_n\sqrt{V_n}$$ is the demeaned returns and where $$V_n=\alpha_0+\sum^q_{j=1}\alpha_jY_{n-j}^2+\sum_{k=1}^p\beta_kV_{n-k}$$
+
+and $\epsilon_{n}$ is white noise. 
+
+When $p = 0$, it is a ARCH(q) model.
+
+We use Garch(1,1), which is a popular choice[7] and has the form $$Y_n = \epsilon_n\sqrt{V_n}$$ where $$V_n=\alpha_0+\alpha_1Y_{n-1}^2+\beta_1V_{n-1}$$  
+
+and use AIC table to choose some other values of (p, q).
+
+```{r}
+# For the R function garch, the order of p and q is different from the definition of lecture notes, so we change the order of p and q in our definition
+garch_aic = function(data,P,Q){
+  table = matrix(NA,P+1,Q)
+  for(p in 0:P) {
+    for(q in 1:Q) {
+      fit = garch(x = data, order = c(p,q),
+                  grad = "numerical", trace = FALSE)
+      table[p+1,q] = 2 * length(fit$coef) - 2 * tseries:::logLik.garch(fit)
+    }
+  }
+  dimnames(table) = list(paste("p = ",0:P, sep=""),paste("q = ",1:Q,sep=""))
+  table
+}
+set.seed(2)
+aic_table = garch_aic(logd, 4, 4)
+kable(aic_table, digits=2)
+```
+
+
+We can see when (p, q) = (3, 4), the model has the lowest AIC. And GARCH(1,4) has the lowest AIC among the models such that $p + q \leq 5$, ARCH(4) has the lowest AIC among the ARCH models. We pick them for further analysis.
+
+
+```{r}
+
+garch04 <- garch(logd, order = c(0,4), grad = "numerical", trace = FALSE)
+L.garch <- tseries:::logLik.garch(garch04)
+
+
+garch11 <- garch(logd, order = c(1,1), grad = "numerical", trace = FALSE)
+L.garch11 <- tseries:::logLik.garch(garch11)
+
+
+garch14 <- garch(logd, order = c(1,4), grad = "numerical", trace = FALSE)
+L.garch14 <- tseries:::logLik.garch(garch14)
+
+
+garch34 <- garch(logd, order = c(3,4), grad = "numerical", trace = FALSE)
+L.garch34 <- tseries:::logLik.garch(garch34)
+
+table = matrix(NA,1,4)
+dimnames(table)=list("log Lik.",c("ARCH(4)","GARCH(1,1)","GARCH(1,4)","GARCH(3,4)"))
+table[1,1]=L.garch
+table[1,2]=L.garch11
+table[1,3]=L.garch14
+table[1,4]=L.garch34
+kable(table, digits=2)
+```
+
+
+We can see the maximized log likelihood of ARCH(4) and GARCH(1,1) are close to each other, and GARCH(1,1) has less fitted parameters than ARCH(4) and AIC favors GARCH(1,1), which shows that GARCH(1,1) performs well as a popular model. GARCH(1,4) and GARCH(3,4) have larger log likelihood, which is not surprising since they have more parameters.
+
+
+```{r}
+par(mfrow=c(2,4))
+plot(garch04$residuals, type="l", ylab="Residuals for ARCH(4)")
+qqnorm(garch04$residuals)
+qqline(garch04$residuals)
+
+plot(garch11$residuals, type="l", ylab="Residuals for GARCH(1,1)")
+qqnorm(garch11$residuals)
+qqline(garch11$residuals)
+
+plot(garch14$residuals, type="l", ylab="Residuals for GARCH(1,4)")
+qqnorm(garch14$residuals)
+qqline(garch14$residuals)
+
+plot(garch34$residuals, type="l", ylab="Residuals for GARCH(3,4)")
+qqnorm(garch34$residuals)
+qqline(garch34$residuals)
+```
+
+Then we do model diagnosis on them, and the plots above show no obvious patterns in the residuals, the residuals are symmetrically distributed on both sides of 0 and are roughly homoscedastic. But the Q-Q plot demonstrates that the residuals have heavy tails comparing to the normal distribution. And we move on to find out if there is a better model.
+
+
+
+## POMP
+
+We learned that volatility can be modeled as a latent stochastic process, partially observed via the returns. And negative shocks will bring a subsequent increase in volatility, the phenomenon is called leverage. And we can use these assumptions to build a POMP model[7]. 
+
+
+
+### Model Structure
+
+We try the model we learned from the lecture first[7], and we will use the results to change the model and analyze it further. We model the leverage $R_n$, the correlation between return on day n−1 and the increase in the log volatility from day n−1 to day n, as the following random walk on a transformed scale:
+$$R_n=\frac{exp(2G_n)-1}{exp(2G_n)+1}$$
+
+where \(G_n\) is a Gaussian random walk.
+
+And the model is:
+$$Y_n=exp(H_n/2)\epsilon_n$$
+
+
+$$H_n = \mu_h(1-\phi)+\phi H_{n-1}+\beta_{n-1}R_nexp(-H_{n-1}/2)+\omega_n \\
+G_n = G_{n-1}+v_n$$
+where \(Y_n\) is still the demeaned returns, \(\beta_n=Y_n\sigma_\eta \sqrt{1-\phi^2}\), \(\{\epsilon_n\}\) is an i.i.d. \(N(0,1)\) sequence, \(\{\nu_n\}\) is an i.i.d. \(N(0,\sigma_{\nu}^2)\) sequence and \(\{\omega_n\}\) is an i.i.d. \(N(0,\sigma_{\omega,n}^2)\) sequence with \(\sigma_{\omega,n}^2=\sigma_\eta^2(1-\phi^2)(1-R_n^2)\). \(H_n\) is the log volatility. Then the latent state is $(G_n,H_n)$.[7][9]
+
+
+```{r}
+statenames <- c("H","G","Y_state")
+rp_names <- c("sigma_nu","mu_h","phi","sigma_eta")
+ivp_names <- c("G_0","H_0")
+paramnames <- c(rp_names,ivp_names)
+
+rproc1 <- "
+double beta,omega,nu;
+omega = rnorm(0,sigma_eta * sqrt( 1- phi*phi ) *
+sqrt(1-tanh(G)*tanh(G)));
+nu = rnorm(0, sigma_nu);
+G += nu;
+beta = Y_state * sigma_eta * sqrt( 1- phi*phi );
+H = mu_h*(1 - phi) + phi*H + beta * tanh( G )
+* exp(-H/2) + omega;
+"
+rproc2.sim <- "
+Y_state = rnorm( 0,exp(H/2) );
+"
+rproc2.filt <- "
+Y_state = covaryt;
+"
+rproc.sim <- paste(rproc1,rproc2.sim)
+rproc.filt <- paste(rproc1,rproc2.filt)
+
+rinit <- "
+G = G_0;
+H = H_0;
+Y_state = rnorm( 0,exp(H/2) );
+"
+
+rmeasure <- "
+y=Y_state;
+"
+
+dmeasure <- "
+lik=dnorm(y,0,exp(H/2),give_log);
+"
+
+partrans <- parameter_trans(
+log=c("sigma_eta","sigma_nu"),
+logit="phi"
+)
+
+
+filt <- pomp(data=data.frame(
+y=logd,time=1:length(logd)),
+statenames=statenames,
+paramnames=paramnames,
+times="time",
+t0=0,
+covar=covariate_table(
+time=0:length(logd),
+covaryt=c(0,logd),
+times="time"),
+rmeasure=Csnippet(rmeasure),
+dmeasure=Csnippet(dmeasure),
+rprocess=discrete_time(step.fun=Csnippet(rproc.filt),
+delta.t=1),
+rinit=Csnippet(rinit),
+partrans=partrans
+)
+```
+
+
+### Initial Simulation
+
+
+Firstly, we try to guess the initial values of the parameters. The financial pomp models is not as easy to interpret as the infectious disease POMP models, and we cannot easily guess the appropriate initial values using our knowledge and information.
+
+After conducting several simulations with different parameters, we find that when $\sigma_\nu=exp(-7), \mu_h=-7, \phi=expit(1.5), \sigma_\eta=exp(0.05), G_0=0,H_0=0$, the model fits the data well, and they seem to be good starting points of the local search.[12] 
+
+
+```{r}
+params_test <- c(
+sigma_nu = exp(-7),
+mu_h = -7,
+phi = expit(1.5),
+sigma_eta = exp(0.05),
+G_0 = 0,
+H_0=0
+)
+
+sim1.sim <- pomp(filt,
+statenames=statenames,
+paramnames=paramnames,
+rprocess=discrete_time(
+step.fun=Csnippet(rproc.sim),delta.t=1)
+)
+sim1.sim <- simulate(sim1.sim,seed=1,params=params_test)
+
+
+plot(Y_state~time, data=sim1.sim, type='l', col='blue', main="Observed returns and simulated returns", ylab="Returns")
+lines(logd,col='black')
+legend('topright' , c("Observed Returns","Simulated Returns"), col=c("black","blue"), lty=c(1,1),cex = 0.5)
+
+plot(Y_state~time, data=sim1.sim, type='l', col='blue', main="Observed returns and simulated returns", ylab="Returns",xlim=c(500,600))
+lines(logd,col='black')
+legend('topright' , c("Observed Returns","Simulated Returns"), col=c("black","blue"), lty=c(1,1),cex = 0.5)
+```
+
+We can see the model fits the volatility well. And we randomly choose a time interval (500,600), seems the model also fits the data well.
+
+
+
+```{r}
+sim1.filt <- pomp(sim1.sim,
+covar=covariate_table(
+time=c(timezero(sim1.sim),time(sim1.sim)),
+covaryt=c(obs(sim1.sim),NA),
+times="time"),
+statenames=statenames,
+paramnames=paramnames,
+rprocess=discrete_time(
+step.fun=Csnippet(rproc.filt),delta.t=1)
+)
+
+
+run_level <- 2
+Np <- switch(run_level, 100, 1e3, 2e3)
+Nmif <- switch(run_level, 10, 100, 200)
+Nreps_eval <- switch(run_level, 4, 10, 20)
+Nreps_local <- switch(run_level, 10, 20, 20)
+Nreps_global <- switch(run_level, 10, 20, 100)
+
+cores <- as.numeric(Sys.getenv('SLURM_NTASKS_PER_NODE', unset=NA))
+if(is.na(cores)) cores <- detectCores()
+registerDoParallel(cores)
+registerDoRNG(34118892)
+
+
+pf1 <- foreach(i=1:Nreps_eval,
+.packages='pomp') %dopar% pfilter(sim1.filt,Np=Np)
+
+(L.pf1 <- logmeanexp(sapply(pf1,logLik),se=TRUE))
+
+```
+
+
+Then we check the pfilter with the simulated data to see whether we can filter and re-estimate parameters. Seems the log likelihood above is large enough and we can investigate further.
+
+### Local Search
+
+Then we use IF2 algorithm to investigate the neighborhood of the initial point. 
+
+
+```{r}
+registerDoRNG(34118892)
+
+rw.sd_rp <- 0.02
+rw.sd_ivp <- 0.1
+cooling.fraction.50 <- 0.5
+rw.sd <- rw.sd(
+sigma_nu = rw.sd_rp,
+mu_h = rw.sd_rp,
+phi = rw.sd_rp,
+sigma_eta = rw.sd_rp,
+G_0 = ivp(rw.sd_ivp),
+H_0 = ivp(rw.sd_ivp)
+)
+
+
+
+
+if1 <- foreach(i=1:Nreps_local,
+.packages='pomp', .combine=c) %dopar% mif2(filt,
+params=params_test,
+Np=Np,
+Nmif=Nmif,
+cooling.fraction.50=cooling.fraction.50,
+rw.sd = rw.sd(
+sigma_nu = rw.sd_rp,
+mu_h = rw.sd_rp,
+phi = rw.sd_rp,
+sigma_eta = rw.sd_rp,
+G_0 = ivp(rw.sd_ivp),
+H_0 = ivp(rw.sd_ivp)
+))
+L.if1 <- foreach(i=1:Nreps_local,
+.packages='pomp', .combine=rbind) %dopar% logmeanexp(
+replicate(Nreps_eval, logLik(pfilter(filt,
+params=coef(if1[[i]]),Np=Np))), se=TRUE)
+
+
+
+
+r.if1 <- data.frame(logLik=L.if1[,1],logLik_se=L.if1[,2],
+                    t(sapply(if1,coef)))
+
+
+summary(r.if1$logLik,digits=5)
+```
+
+
+
+We can see the maximized log likelihood is 2870, which is larger than the log likelihood of GARCH(3,4). And the number of fitted parameters is 6, which is less than the number of fitted parameters of GARCH(3,4), so AIC favors POMP model.
+
+
+```{r}
+pairs(~logLik+sigma_nu+mu_h+phi+sigma_eta,
+data=subset(r.if1,logLik>max(logLik)-20))
+
+table=subset(r.if1,logLik==max(logLik))
+dimnames(table)[[1]][1]=''
+kable(table)
+```
+
+
+We can see there exist clusters roughly centered around the MLE.
+
+
+```{r}
+plot(if1)
+```
+
+
+Seems $\sigma_\nu$ converges to 0, and $\phi$, $G_0$ also converge, but the other parameters doesn't seem to converge, and the loglik is still fluctuating around 2865 after 100 iterations. So we carry out the global search to see whether starting randomly throughout a large box can make them converge.
+
+### Global Search
+
+Based on the results we get in our local search, we construct the box for the parameters as follows[12]: $$\sigma_\nu=c(0.00001,0.0025)$$ $$\mu_h=c(-7,-6)$$ $$\phi=c(0.7,0.9)$$ $$\sigma_\eta=c(0.9,1.1)$$ $$G_0=c(-2,2)$$$$H_0=c(-1,1)$$
+
+
+```{r}
+registerDoRNG(34118892)
+
+box <- rbind(
+sigma_nu=c(0.00001,0.0025),
+mu_h
+=c(-7,-6),
+phi = c(0.7,0.9),
+sigma_eta = c(0.9,1.1),
+G_0 = c(-2,2),
+H_0 = c(-1,1)
+)
+
+
+
+if.box <- foreach(i=1:Nreps_global,
+.packages='pomp',.combine=c) %dopar% mif2(if1[[1]],
+params=apply(box,1,function(x)runif(1,x)))
+L.box <- foreach(i=1:Nreps_global,
+.packages='pomp',.combine=rbind) %dopar% {
+logmeanexp(replicate(Nreps_eval, logLik(pfilter(filt,params=coef(if.box[[i]]),Np=Np))),
+se=TRUE)}
+
+r.box <- data.frame(logLik=L.box[,1],logLik_se=L.box[,2],
+t(sapply(if.box,coef)))
+
+summary(r.box$logLik,digits=5)
+```
+
+
+The maximized log likelihood doesn't change a lot. 
+
+
+
+```{r}
+pairs(~logLik+sigma_nu+mu_h+phi+sigma_eta+H_0+G_0,
+data=subset(r.box,logLik>max(logLik)-10))
+
+best=subset(r.box,logLik==max(logLik))
+```
+
+
+We can still see clusters for $\sigma_\nu$, $\mu_h$, and $\phi$, but they are not centered around the MLE like we see in local search. And there are no obvious clusters for other parameters. 
+
+
+```{r}
+plot(if.box)
+```
+
+
+The effective sample size reached the maximum most of the time, if we increase the sample size the model may work better.[11] The maximized log likelihood seems doesn't go up anymore after 100 iterations. $\phi$ is still fluctuating, and $H_0$ doesn't converge, but all other parameters converge. We notice that $\sigma_\nu$ converges to 0 again, and $G_0$ is also close to 0, it motivates us to change and simplify the model in the next section.
+
+
+
+
+
+```{r}
+params_test <- c(
+sigma_nu = best$sigma_nu,
+mu_h = best$mu_h,
+phi = best$phi,
+sigma_eta = best$sigma_eta,
+G_0 = best$G_0,
+H_0= best$H_0
+)
+
+sim1.sim <- pomp(filt,
+statenames=statenames,
+paramnames=paramnames,
+rprocess=discrete_time(
+step.fun=Csnippet(rproc.sim),delta.t=1)
+)
+sim1.sim <- simulate(sim1.sim,seed=1,params=params_test)
+
+plot(Y_state~time, data=sim1.sim, type='l', col='blue', main="Observed returns and simulated returns", ylab="Returns")
+lines(logd,col='black')
+legend('topright' , c("Observed Returns","Simulated Returns"), col=c("black","blue"), lty=c(1,1),cex = 0.5)
+
+plot(Y_state~time, data=sim1.sim, type='l', col='blue', main="Observed returns and simulated returns", ylab="Returns",xlim=c(500,600))
+lines(logd,col='black')
+legend('topright' , c("Observed Returns","Simulated Returns"), col=c("black","blue"), lty=c(1,1),cex = 0.5)
+```
+
+
+We can see that the simulated data is close to the real data, but we still want to explore further.
+
+
+## Simplified POMP Model
+
+### Model Structure and Initial Simulation
+
+In the last section, we find that $\sigma_\nu$ will converge to 0, and $G_0$ will also converge to a small number, so we decide to simplify our POMP model and see the results.
+
+We set $\sigma_\nu=0$ and $G_0=0$, then since $R_n$ will be 0, we can remove $\beta$ in our model, then our model become this:
+
+$$Y_n=exp(H_n/2)\epsilon_n$$
+
+
+$$H_n = \mu_h(1-\phi)+\phi H_{n-1}+\omega_n$$
+
+where \(\{\omega_n\}\) is an i.i.d. \(N(0,\sigma_{\omega}^2)\) sequence with \(\sigma_{\omega}^2=\sigma_\eta^2(1-\phi^2)\). 
+
+
+
+```{r}
+statenames <- c("H","Y_state")
+rp_names <- c("mu_h","phi","sigma_eta")
+ivp_names <- c("H_0")
+paramnames <- c(rp_names,ivp_names)
+
+rproc1 <- "
+double omega;
+omega = rnorm(0,sigma_eta * sqrt( 1- phi*phi ));
+H = mu_h*(1 - phi) + phi*H + omega;
+"
+rproc2.sim <- "
+Y_state = rnorm( 0,exp(H/2) );
+"
+rproc2.filt <- "
+Y_state = covaryt;
+"
+rproc.sim <- paste(rproc1,rproc2.sim)
+rproc.filt <- paste(rproc1,rproc2.filt)
+
+rinit <- "
+H = H_0;
+Y_state = rnorm( 0,exp(H/2) );
+"
+
+rmeasure <- "
+y=Y_state;
+"
+
+dmeasure <- "
+lik=dnorm(y,0,exp(H/2),give_log);
+"
+
+partrans <- parameter_trans(
+log=c("sigma_eta"),
+logit="phi"
+)
+
+
+filt <- pomp(data=data.frame(
+y=logd,time=1:length(logd)),
+statenames=statenames,
+paramnames=paramnames,
+times="time",
+t0=0,
+covar=covariate_table(
+time=0:length(logd),
+covaryt=c(0,logd),
+times="time"),
+rmeasure=Csnippet(rmeasure),
+dmeasure=Csnippet(dmeasure),
+rprocess=discrete_time(step.fun=Csnippet(rproc.filt),
+delta.t=1),
+rinit=Csnippet(rinit),
+partrans=partrans
+)
+```
+
+
+We set the initial values as $\mu_h=-7, \phi=expit(1.5), \sigma_\eta=exp(0.05), H_0=0$.
+
+
+```{r}
+params_test <- c(
+mu_h = -7,
+phi = expit(1.5),
+sigma_eta = exp(0.05),
+H_0=0
+)
+
+sim1.sim <- pomp(filt,
+statenames=statenames,
+paramnames=paramnames,
+rprocess=discrete_time(
+step.fun=Csnippet(rproc.sim),delta.t=1)
+)
+sim1.sim <- simulate(sim1.sim,seed=1,params=params_test)
+
+plot(Y_state~time, data=sim1.sim, type='l', col='blue', main="Observed returns and simulated returns", ylab="Returns")
+lines(logd,col='black')
+legend('topright' , c("Observed Returns","Simulated Returns"), col=c("black","blue"), lty=c(1,1),cex = 0.5)
+
+
+```
+
+
+Seems these initial values work well, then we do the local search.
+
+
+
+
+```{r}
+
+sim1.filt <- pomp(sim1.sim,
+covar=covariate_table(
+time=c(timezero(sim1.sim),time(sim1.sim)),
+covaryt=c(obs(sim1.sim),NA),
+times="time"),
+statenames=statenames,
+paramnames=paramnames,
+rprocess=discrete_time(
+step.fun=Csnippet(rproc.filt),delta.t=1)
+)
+
+
+run_level <- 2
+Np <- switch(run_level, 100, 1e3, 2e3)
+Nmif <- switch(run_level, 10, 100, 200)
+Nreps_eval <- switch(run_level, 4, 10, 20)
+Nreps_local <- switch(run_level, 10, 20, 20)
+Nreps_global <- switch(run_level, 10, 20, 100)
+
+cores <- as.numeric(Sys.getenv('SLURM_NTASKS_PER_NODE', unset=NA))
+if(is.na(cores)) cores <- detectCores()
+registerDoParallel(cores)
+registerDoRNG(34118892)
+
+
+pf1 <- foreach(i=1:Nreps_eval,
+.packages='pomp') %dopar% pfilter(sim1.filt,Np=Np)
+
+
+```
+
+
+### Local Search
+
+
+```{r}
+registerDoRNG(34118892)
+
+rw.sd_rp <- 0.02
+rw.sd_ivp <- 0.1
+cooling.fraction.50 <- 0.5
+rw.sd <- rw.sd(
+mu_h = rw.sd_rp,
+phi = rw.sd_rp,
+sigma_eta = rw.sd_rp,
+H_0 = ivp(rw.sd_ivp)
+)
+
+
+
+
+if1 <- foreach(i=1:Nreps_local,
+.packages='pomp', .combine=c) %dopar% mif2(filt,
+params=params_test,
+Np=Np,
+Nmif=Nmif,
+cooling.fraction.50=cooling.fraction.50,
+rw.sd = rw.sd(
+mu_h = rw.sd_rp,
+phi = rw.sd_rp,
+sigma_eta = rw.sd_rp,
+H_0 = ivp(rw.sd_ivp)
+))
+L.if1 <- foreach(i=1:Nreps_local,
+.packages='pomp', .combine=rbind) %dopar% logmeanexp(
+replicate(Nreps_eval, logLik(pfilter(filt,
+params=coef(if1[[i]]),Np=Np))), se=TRUE)
+
+
+
+
+r.if1 <- data.frame(logLik=L.if1[,1],logLik_se=L.if1[,2],
+                    t(sapply(if1,coef)))
+
+
+summary(r.if1$logLik,digits=5)
+```
+
+
+Surprisingly, the maximized log likelihood becomes larger than the original model. And the number of fitted parameters is 4, so AIC favors the simplified POMP model.
+
+
+```{r}
+pairs(~logLik+mu_h+phi+sigma_eta,
+data=subset(r.if1,logLik>max(logLik)-20))
+
+table=subset(r.if1,logLik==max(logLik))
+dimnames(table)[[1]][1]=''
+kable(table)
+```
+
+
+There are no obvious clusters as the original model. And we can see the value of the parameters are close to the original model but the log likelihood is larger and the SE is smaller.
+
+
+```{r}
+plot(if1)
+```
+
+Seems that all the parameters are still fluctuating after 100 iterations, we will do the global search to see whether they will converge.
+
+
+### Global Search
+
+Based on the results we get in our local search, we construct the box for the parameters as follows[12]:  $$\mu_h=c(-7,-6)$$ $$\phi=c(0.7,0.9)$$ $$\sigma_\eta=c(0.9,1.1)$$ $$H_0=c(-1,1)$$
+
+```{r}
+registerDoRNG(34118892)
+
+box <- rbind(
+mu_h
+=c(-7,-6),
+phi = c(0.7,0.9),
+sigma_eta = c(0.9,1.1),
+H_0 = c(-1,1)
+)
+
+
+
+if.box <- foreach(i=1:Nreps_global,
+.packages='pomp',.combine=c) %dopar% mif2(if1[[1]],
+params=apply(box,1,function(x)runif(1,x)))
+L.box <- foreach(i=1:Nreps_global,
+.packages='pomp',.combine=rbind) %dopar% {
+logmeanexp(replicate(Nreps_eval, logLik(pfilter(filt,params=coef(if.box[[i]]),Np=Np))),
+se=TRUE)}
+
+r.box <- data.frame(logLik=L.box[,1],logLik_se=L.box[,2],
+t(sapply(if.box,coef)))
+
+summary(r.box$logLik,digits=5)
+```
+
+
+The maximized log likelihood of global search is also larger than the original model.
+
+
+
+```{r}
+pairs(~logLik+mu_h+phi+sigma_eta+H_0,
+data=subset(r.box,logLik>max(logLik)-10))
+
+best=subset(r.box,logLik==max(logLik))
+
+plot(if.box)
+```
+
+
+
+
+
+```{r}
+params_test <- c(
+mu_h = best$mu_h,
+phi = best$phi,
+sigma_eta = best$sigma_eta,
+H_0= best$H_0
+)
+
+sim1.sim <- pomp(filt,
+statenames=statenames,
+paramnames=paramnames,
+rprocess=discrete_time(
+step.fun=Csnippet(rproc.sim),delta.t=1)
+)
+sim1.sim <- simulate(sim1.sim,seed=1,params=params_test)
+
+plot(Y_state~time, data=sim1.sim, type='l', col='blue', main="Observed returns and simulated returns", ylab="Returns")
+lines(logd,col='black')
+legend('topright' , c("Observed Returns","Simulated Returns"), col=c("black","blue"), lty=c(1,1),cex = 0.5)
+
+plot(Y_state~time, data=sim1.sim, type='l', col='blue', main="Observed returns and simulated returns", ylab="Returns",xlim=c(500,600))
+lines(logd,col='black')
+legend('topright' , c("Observed Returns","Simulated Returns"), col=c("black","blue"), lty=c(1,1),cex = 0.5)
+```
+
+
+Seems the parameters are more difficult to converge than the original model, and in some cases, the log likelihood can't reach MLE and is stuck at a lower value. Based on our results, the simplified model may perform better than the original modol, but it's less stable.
+
+
+
+
+## Force Negative POMP Model
+
+
+### Model Structure and Initial Simulation
+
+In the original model, large negative value of $Y_n$ will lead to increase in $H_n$ when $R_n$ is negative, which is consistent with the assumption that negative shocks are associated with a subsequent
+increase in volatility.[7] But when $R_n$ is positive, it's not. So we are interested in forcing $R_n$ to be negative and seeing the results.
+
+We force $R_n$ to be negative by setting $\sigma_\nu=0$ and $G_0=-0.05$ and leave the other parts of the original model unchanged. And we use the same initial values as the original model.
+
+
+```{r}
+statenames <- c("H","Y_state")
+rp_names <- c("mu_h","phi","sigma_eta")
+ivp_names <- c("H_0")
+paramnames <- c(rp_names,ivp_names)
+
+rproc1 <- "
+double beta,omega,nu;
+omega = rnorm(0,sigma_eta * sqrt( 1- phi*phi ) *
+sqrt(1-tanh(-0.05)*tanh(-0.05)));
+beta = Y_state * sigma_eta * sqrt( 1- phi*phi );
+H = mu_h*(1 - phi) + phi*H + beta * tanh( -0.05 )
+* exp(-H/2) + omega;
+"
+rproc2.sim <- "
+Y_state = rnorm( 0,exp(H/2) );
+"
+rproc2.filt <- "
+Y_state = covaryt;
+"
+rproc.sim <- paste(rproc1,rproc2.sim)
+rproc.filt <- paste(rproc1,rproc2.filt)
+
+rinit <- "
+H = H_0;
+Y_state = rnorm( 0,exp(H/2) );
+"
+
+rmeasure <- "
+y=Y_state;
+"
+
+dmeasure <- "
+lik=dnorm(y,0,exp(H/2),give_log);
+"
+
+partrans <- parameter_trans(
+log=c("sigma_eta"),
+logit="phi"
+)
+
+
+filt <- pomp(data=data.frame(
+y=logd,time=1:length(logd)),
+statenames=statenames,
+paramnames=paramnames,
+times="time",
+t0=0,
+covar=covariate_table(
+time=0:length(logd),
+covaryt=c(0,logd),
+times="time"),
+rmeasure=Csnippet(rmeasure),
+dmeasure=Csnippet(dmeasure),
+rprocess=discrete_time(step.fun=Csnippet(rproc.filt),
+delta.t=1),
+rinit=Csnippet(rinit),
+partrans=partrans
+)
+```
+
+
+
+
+
+```{r}
+params_test <- c(
+mu_h = -7,
+phi = expit(1.5),
+sigma_eta = exp(0.05),
+H_0=0
+)
+
+sim1.sim <- pomp(filt,
+statenames=statenames,
+paramnames=paramnames,
+rprocess=discrete_time(
+step.fun=Csnippet(rproc.sim),delta.t=1)
+)
+sim1.sim <- simulate(sim1.sim,seed=1,params=params_test)
+
+plot(Y_state~time, data=sim1.sim, type='l', col='blue', main="Observed returns and simulated returns", ylab="Returns")
+lines(logd,col='black')
+legend('topright' , c("Observed Returns","Simulated Returns"), col=c("black","blue"), lty=c(1,1),cex = 0.5)
+
+
+```
+
+
+Seems our initial values work well on our new model.
+
+
+```{r}
+sim1.filt <- pomp(sim1.sim,
+covar=covariate_table(
+time=c(timezero(sim1.sim),time(sim1.sim)),
+covaryt=c(obs(sim1.sim),NA),
+times="time"),
+statenames=statenames,
+paramnames=paramnames,
+rprocess=discrete_time(
+step.fun=Csnippet(rproc.filt),delta.t=1)
+)
+
+
+run_level <- 2
+Np <- switch(run_level, 100, 1e3, 2e3)
+Nmif <- switch(run_level, 10, 100, 200)
+Nreps_eval <- switch(run_level, 4, 10, 20)
+Nreps_local <- switch(run_level, 10, 20, 20)
+Nreps_global <- switch(run_level, 10, 20, 100)
+
+cores <- as.numeric(Sys.getenv('SLURM_NTASKS_PER_NODE', unset=NA))
+if(is.na(cores)) cores <- detectCores()
+registerDoParallel(cores)
+registerDoRNG(34118892)
+
+
+pf1 <- foreach(i=1:Nreps_eval,
+.packages='pomp') %dopar% pfilter(sim1.filt,Np=Np)
+
+```
+
+
+### Local Search 
+
+
+```{r}
+registerDoRNG(34118892)
+
+rw.sd_rp <- 0.02
+rw.sd_ivp <- 0.1
+cooling.fraction.50 <- 0.5
+rw.sd <- rw.sd(
+mu_h = rw.sd_rp,
+phi = rw.sd_rp,
+sigma_eta = rw.sd_rp,
+H_0 = ivp(rw.sd_ivp)
+)
+
+
+
+
+if1 <- foreach(i=1:Nreps_local,
+.packages='pomp', .combine=c) %dopar% mif2(filt,
+params=params_test,
+Np=Np,
+Nmif=Nmif,
+cooling.fraction.50=cooling.fraction.50,
+rw.sd = rw.sd(
+mu_h = rw.sd_rp,
+phi = rw.sd_rp,
+sigma_eta = rw.sd_rp,
+H_0 = ivp(rw.sd_ivp)
+))
+L.if1 <- foreach(i=1:Nreps_local,
+.packages='pomp', .combine=rbind) %dopar% logmeanexp(
+replicate(Nreps_eval, logLik(pfilter(filt,
+params=coef(if1[[i]]),Np=Np))), se=TRUE)
+
+
+
+
+r.if1 <- data.frame(logLik=L.if1[,1],logLik_se=L.if1[,2],
+                    t(sapply(if1,coef)))
+
+
+summary(r.if1$logLik,digits=5)
+```
+
+
+The maximized log likelihood is close to the original model but less than the simplified model.
+
+
+```{r}
+pairs(~logLik+mu_h+phi+sigma_eta,
+data=subset(r.if1,logLik>max(logLik)-20))
+
+table=subset(r.if1,logLik==max(logLik))
+dimnames(table)[[1]][1]=''
+kable(table)
+```
+
+
+There are no obvious clusters, which is the same as the simplified model. And we can see the log likelihood is close to the original model, but has larger SE. The MLE of most of the parameters are close to the original model but the MLE of $H_0$ changed a lot.
+
+
+```{r}
+plot(if1)
+```
+
+
+In the convergence plot, $H_0$ does not converge after 100 iterations, which may cause the log likelihood hard to converge. 
+
+
+### Global Search
+
+Based on the results we get in our local search, we construct the box for the parameters as follows[12]:  $$\mu_h=c(-7,-6)$$ $$\phi=c(0.7,0.9)$$ $$\sigma_\eta=c(0.9,1.1)$$ $$H_0=c(-1,1)$$
+
+
+```{r}
+registerDoRNG(34118892)
+
+box <- rbind(
+mu_h
+=c(-6.6,-6.2),
+phi = c(0.7,0.9),
+sigma_eta = c(0.9,1.1),
+H_0 = c(-1,1)
+)
+
+
+
+if.box <- foreach(i=1:Nreps_global,
+.packages='pomp',.combine=c) %dopar% mif2(if1[[1]],
+params=apply(box,1,function(x)runif(1,x)))
+L.box <- foreach(i=1:Nreps_global,
+.packages='pomp',.combine=rbind) %dopar% {
+logmeanexp(replicate(Nreps_eval, logLik(pfilter(filt,params=coef(if.box[[i]]),Np=Np))),
+se=TRUE)}
+
+r.box <- data.frame(logLik=L.box[,1],logLik_se=L.box[,2],
+t(sapply(if.box,coef)))
+
+summary(r.box$logLik,digits=5)
+#
+pairs(~logLik+mu_h+phi+sigma_eta+H_0,
+data=subset(r.box,logLik>max(logLik)-10))
+
+best=subset(r.box,logLik==max(logLik))
+
+plot(if.box)
+```
+
+
+
+Seems this model is the most unstable one, one interpretation is that if a large negative value of $Y_n$ will always lead to increase in $H_n$, since the $H_n$ becomes larger, there will be more likely to have a large negative $Y_n$ again. Therefore the model will become unstable.
+
+
+## Conclusions
+
+We applied ARCH, GARCH, and POMP models in this project to analyze the volatility of ETH. GARCH(1,1) has lower AIC than ARCH(q) models with q < 5, and GARCH(3,4) has the lowest AIC among the GARCH models we tried. Our POMP models have higher maximized log likelihood than the GARCH models and AIC favors POMP models. The simplified POMP models has the largest maximized log likelihood, and the number of fitted parameters is 4, it's the best model we have found. Moreover, the simpler POMP model will be easier to interpret in financial studies.[8]
+
+For future work, we can change the structure of the POMP model and investigate further to find better models for the volatility of ETH and other cryptocurrencies.
+
+
+## References
+
+
+[1] Wikipedia. https://en.wikipedia.org/wiki/Ethereum
+
+[2] Wikipedia. https://en.wikipedia.org/wiki/Cryptocurrency
+
+[3] Examples of the supporters of ETH. https://www.fool.com/investing/2021/12/31/why-ethereum-will-beat-bitcoin-in-2022/
+
+[4] Examples of the supporters of ETH. https://www.cnbctv18.com/cryptocurrency/explained-why-is-ether-outperforming-bitcoin-will-the-trend-continue-11677842.htm
+
+[5] This final project uses part of the results and the descriptions of our midterm project. 
+https://ionides.github.io/531w22/midterm_project/project02/blinded.html
+
+[6] The data can be found here. https://www.investing.com/crypto/ethereum/historical-data
+
+
+[7] Analysis of Time Series lecture notes. The models and methods we used can be found in the lecture notes. And some of the codes can be found in the lecture notes, too. Especially the lecture notes of Chapter 16. https://ionides.github.io/531w22/
+
+
+We use the following previous projects to learn how to write a report and do volatility analysis. We learned the format of them, the analysis of the results they got, and some coding skills they used.
+
+[8] https://ionides.github.io/531w21/final_project/project16/blinded.html
+
+[9] https://ionides.github.io/531w21/final_project/project12/blinded.html
+
+[10] https://ionides.github.io/531w21/final_project/project06/blinded.html#fitting-garchpq-model
+
+[11] https://ionides.github.io/531w18/final_project/35/final.html
+
+[12] https://ionides.github.io/531w21/final_project/project15/blinded.html
+
+[13] https://ionides.github.io/531w21/final_project/project13/blinded.html
+
+[14] We use the previous homework when doing the analysis. https://ionides.github.io/531w22/
+

@@ -1,0 +1,665 @@
+---
+title: "An Analysis of the Omicron variant of COVID-19 Cases in Wayne County"
+subtitle: "Stats 531, W22, Final Project"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 5
+    code_folding: hide
+---
+
+```{css, include = TRUE, echo = FALSE}
+body{ /* Normal */
+  font-size: 14.5px;
+}
+```
+
+```{r setup, include=FALSE}
+require(knitr)
+knitr::opts_chunk$set(message = FALSE, echo = TRUE)
+suppressPackageStartupMessages({
+  library(tidyverse)
+  library(pomp)
+  library(doParallel)
+  library(doRNG)
+  library(forecast)
+})
+```
+
+## Introduction 
+
+[COVID-19](#ref)$^{[1]}$ (coronavirus disease 2019) is a disease caused by a virus named SARS-CoV-2 and was discovered in December 2019 in Wuhan, China. It is very contagious and has quickly spread around the world. Now, COVID-19 has taken over the world and become the main focus for any concerned citizen. According to [WHO](#ref)$^{[2]}$, COVID-19 has caused 500, 186, 525 confirmed cases, including 6, 190, 349 deaths as of 3:01am CEST, 16 April 2022. The figure below shows its [worldwide distribution](#ref)$^{[2]}$.
+
+There are many variants of this virus. The most popular variant at this time is [the Omicron variant](#ref)$^{[3]}$. The Omicron variant spreads more easily than earlier variants of the virus that cause COVID-19, including the Delta variant. Omicron infection generally causes less severe disease than infection with prior variants. However, some people may still have severe disease, need hospitalization, and could die from the infection with this variant.
+
+```{r COVID-19, fig.align = 'center', out.width="80%"}
+# directories: ----------------------------------------------------------------
+path = './'
+covid_distribution = sprintf('%s/covid_19.jpg', path)
+knitr::include_graphics(covid_distribution)
+```
+
+In this project, we want to analyze the Omicron variant (Omicron B.1.1.529 SARS-CoV-2 Variant) cases of [Wayne County](#ref)$^{[4]}$, Michigan, with different models. We choose Wayne County because it's the most populous county in the U.S. state of Michigan and it also has the highest daily number of new cases of COVID-19 in Michigan. We prefer to focus on Michigan because it is always more important to focus on the situation around us.
+
+### Data Description
+
+Our data for Wayne County is from [the Michigan State Government](#ref)$^{[5]}$. It includes daily confirmed and probable cases and deaths. In this project, we focused on data from *12/01/2021(day 1)* to *03/31/2022(day 121)*. The reason why we choose this time interval is that due to its faster spread rate than the other variants, the flatted curve was again exponentially increasing from December 2021, when the Omicron variant is first reported in the United State. Hence, we assume the new confirmed case pattern during this time interval tells us the behavior of the Omicron variants.
+
+
+## Exploratory Data Analysis
+
+The following plots show the daily confirmed cases for *03/01/2020 ~ 04/13/2022*, and *12/01/2021 ~ 03/31/2022*. The first time interval indicates the starting date of data records to the time when we analyze. The second time interval is of interest in this report because we focus on analyzing the behavior of the Omicron variant of COVID-19. 
+
+From *12/01/2021* to *03/31/2022*, there are many peaks in the number of confirmed cases. We interpret that this up-and-down pattern is the weekly effect of the testing/reporting pattern (e.g., many people visit testing centers on Friday and confirmed cases are comprehensively reported on Monday, etc.), but it is obvious it shows a big mountain ever since the start of COVID-19 outbreak. 
+
+```{r, echo=FALSE, out.width="50%"}
+original <- read.csv("covid_data.csv")
+
+
+# wayne total
+data_wayne <- original[original$COUNTY == "Wayne" & original$CASE_STATUS == "Confirmed",]
+data_wayne <- data_wayne[,colnames(data_wayne) %in% c("Date","Cases","Deaths")] 
+data_wayne$Date <- as.Date(data_wayne$Date,origin="1899/12/30")
+colnames(data_wayne) <- c("date","case","death")
+rownames(data_wayne) <- NULL
+plot(data_wayne$date,data_wayne$case,type="l",xlab="date",ylab="confirmed case",
+     main="Daily confirmed cases in Wayne County (03/01/2020 ~ 04/13/2022)")
+abline(h=mean(data_wayne$case),col="red")
+
+# wayne of interest 
+data_wayne1 = data_wayne[data_wayne$date >= '2021-12-01' & data_wayne$date <= '2022-02-28',]
+rownames(data_wayne1) <- NULL
+plot(data_wayne1$date,data_wayne1$case,type="l",xlab="date",ylab="confirmed case",
+     main="Daily confirmed cases in Wayne County (12/01/2021 ~ 03/31/2022)")
+abline(h=mean(data_wayne1$case),col="red")
+```
+
+The following shows the summary statistics of daily confirmed cases in Wayne County during the time interval when the Omicron variant spreads. 
+
+```{r}
+summary(data_wayne1$case)
+```
+
+With the plot below, we can see that there is substantial autocorrelation between daily confirmed cases and their previous data. We can also see that ACFs are outside the band and decrease as lag increases. Thus difference data may be preferable in modeling. Indeed, the plot of daily confirmed cases tells the data shows non-stationary. 
+
+
+```{r, echo=FALSE, fig.align = 'center', out.width="60%"}
+acf(data_wayne1$case,main = "Daily confirmed cases in Wayne County (12/01/2021 to 03/31/2022)")
+```
+
+## Spectrum Analysis
+The periodograms are shown below.
+
+```{r, echo=FALSE, out.width="50%"}
+#Spectrum Analysis
+spec = spectrum(data_wayne1$case,main = "Unsmoothed periodogram (daily confirmed)")
+smooth_spec = spectrum(data_wayne1$case,spans = c(3,5,3), main = "Smoothed periodogram (daily confirmed)")
+```
+
+The dominant frequency is:
+```{r, echo=TRUE}
+smooth_spec$freq[which.max(smooth_spec$spec)]
+```
+
+So there is a 90-day cycle. We only have 121 data, which is not enough to confirm the cycle. However, from the periodogram, we still can see there are some small periods. And we can calculate the frequency of the peaks, which is:
+
+```{r, echo=TRUE}
+smooth_spec$freq[13]
+```
+
+That means there is a 7-day cycle. This conclusion is consistent with our previous conjecture of "there is a weekly effect".
+
+
+## Model Selection and Analysis
+
+### ARIMA Model
+
+The following is the plot using differenced data for daily confirmed cases. From the various difference $d$, we select $d=1$ since it shows a fairly stationary behavior.
+
+```{r, echo=FALSE, fig.align = 'center', out.width="60%"}
+diff_data = diff(data_wayne1$case)
+plot(data_wayne1$date[-1],diff_data,type="l",xlab="date",ylab="confirmed case",
+     main="Difference of confirmed cases in Wayne County(12/01/2021-03/31/2022)")
+abline(h=0,col="red")
+
+```
+
+The following shows the summary statistics of difference data. 
+
+```{r}
+summary(diff_data)
+```
+
+
+It is reasonable to fit a stationary auto regressive integrated moving average model **ARIMA(p,d,q)** with original data and see further if our model assumptions are appropriate or not. A stationary Gaussian ARIMA(p,d,q) model is given by 
+
+\begin{equation}
+ \phi(B)(1-B)^dY_n = \theta(B)\epsilon_n,
+\end{equation}
+where $\epsilon_n \sim N(0,\sigma^2)$, which is a white noise process.
+
+#### Choosing a model using AIC
+With $d=1$, we choose the ARIMA model by AIC criterion as follows. The table is shown below.
+
+```{r, echo=FALSE}
+aic_table <- function(data,P,Q){
+    table <- matrix(NA,(P+1),(Q+1))
+    for(p in 0:P) {
+    for(q in 0:Q) {
+    table[p+1,q+1] <- arima(data,order=c(p,1,q))$aic
+    }
+  }
+  dimnames(table) <- list(paste("AR",0:P, sep=""),
+  paste("MA",0:Q,sep=""))
+  table
+}
+AIC_diff <- aic_table(data_wayne1$case,4,4)
+kable(AIC_diff,digits=2)
+```
+
+We choose $p=4$ and $q=4$ so that the model is ARIMA(4,1,4) since it gives fairly small AIC value while it does not lose too much model's parsimony.
+
+The result of ARIMA(4,1,4) model is shown as below.
+
+```{r}
+arima414 <- arima(data_wayne1$case,order=c(4,1,4))
+arima414
+```
+
+
+#### Diagnostics
+
+Based on the assumption, the residuals are Gaussian white noise series, which indicate uncorrelated, normality and mean zero. We will check these properties in this section.
+
+The null hypothesis is:
+$$H_0: \epsilon_n \sim i.i.d \quad N(0,\sigma^2)$$
+which means they are simple random samples from the Gaussian white noise.
+
+First, we create the plot of residual and ACF plot for ARIMA(4,1,4) to see whether the residuals are uncorrelated.
+
+```{r resid, fig.align = 'center', out.width="60%"}
+plot(arima414$residuals, main="Plot of residuals of ARIMA(4,1,4)")
+```
+
+```{r, fig.align = 'center', out.width="60%"}
+acf(arima414$residuals, main="ARIMA(4,1,4) Residuals autocorelation plot")
+```
+
+According to the ACF plot above, we observe that most of lags are inside the band, so we can not reject $H_0$ and can believe that the uncorrelated assumption holds. The residuals look like white noise, and there is no significant signs of autocorrelation between lags. Therefore, we can see that it is appropriate to model the residuals as white noise.
+
+And then, we want to test causality and invertibility of model.
+
+Causality requires having roots of AR and MA polynomials outside the unit circle in the complex plane, which is equivalent to having the inverse characteristic roots in the unit circle. We plot the inverse roots below. 
+
+All inverse roots lie within the unit circle implying the model is both causal and invertible. However, there is concern that the inverse AR and MA roots are nearly at the edge of the circle. This suggest we might need a smaller model, which may be more appropriate. Despite of this concern, we stick to ARIMA(4,1,4) model for the time being. 
+
+```{r, fig.align = 'center',echo=FALSE, warning=FALSE, message = FALSE}
+arma414 = Arima(data_wayne1$case,order = c(4,1,4))
+autoplot(arma414, main="ARIMA(4,1,4) characteristic roots")
+```
+
+We use the QQ-plot for residuals to check normality. 
+
+```{r, echo=FALSE, fig.align = 'center', out.width="60%"}
+qqnorm(arima414$residuals, main="ARIMA(4,1,4) Q-Q plot")
+qqline(arima414$residuals)
+```
+
+If the distribution is close to normal, the QQ plot should be a line. However, We cannot clearly see that the QQ plot is a line. So, we can use the Shapiro-Wilks test to test for normality of the residuals, with a null hypothesis that the residuals are normal.
+
+```{r}
+shapiro.test(arima414$residuals)
+```
+
+The p-value is smaller than the critical value of $\alpha=0.05$. So, we reject the null hypothesis and conclude that the residuals are not normally distributed. 
+
+Therefore, the equation of ARIMA(4,1,4) model can be represented as:
+$$(1 - 0.8268B + 1.1975B^2 - 0.7871B^3 + 0.7989B^4)(Y_n - Y_{n-1}) = (1 - 0.8630B + 0.7204B^2 - 0.7641B^3 + 0.7562B^4)\epsilon_n$$.
+
+### SEIR Model
+
+```{r}
+covid <- read.csv("covid_wayne_winter.csv")
+```
+
+#### Model description & assumption
+COVID-19 is found to have an incubation period, thus SEIR model is chosen  to model the epidemic. The following diagram outlines components of the SEIR model. 
+
+```{r SEIR model, fig.align = 'center', out.width="60%"}
+# directories: ----------------------------------------------------------------
+path = './'
+seir_model = sprintf('%s/seir_model.jpg', path)
+knitr::include_graphics(seir_model)
+```
+
+Our measurement(the arrow pointing downward) differs from the binomial distribution in homework(we would omit the rest notations): an integral normal distribution truncated at $0$
+$$
+H=\max\{\lfloor H_n\rfloor,0\},\qquad H_n\sim \mathcal{N}(\rho H_n,(\tau H_n)^2+\rho H_n)
+$$
+
+is used.
+
+```{r, echo = FALSE}
+run_level <- 2
+NP <- switch(run_level,
+    50,
+    1e3
+) # number of particles
+NMIF_S <- switch(run_level,
+    5,
+    50
+) # number of filtering iterations - small
+NMIF_L <- switch(run_level,
+    10,
+    100
+) # - large
+NREPS_EVAL <- switch(run_level,
+    5,
+    20
+) # number of replications in likelihood evaluation
+NREPS_LOCAL <- switch(run_level,
+    10,
+    20
+) # number of replications in local search
+NSTART <- switch(run_level,
+    50,
+    500
+) # number of starting points in the global search
+NSIM <- switch(run_level,
+    50,
+    100
+) # number of simulations
+suppressPackageStartupMessages({
+    library(foreach)
+    library(doParallel)
+    library(doRNG)
+    library(tidyverse)
+    library(pomp)
+})
+registerDoParallel()
+```
+
+As previously done in homework, both birth rate and death rate are assumed to be $0$. These assumptions are justified in that children are less susceptible to [COVID](#ref)$^{[6]}$, and  the census shows deaths caused by COVID are magnitudes of orders smaller than total population. Anyway, we would see the error of our model comes from other perspective. 
+
+Our model also deviates from basic SEIR model in that the transmission rate $\beta$ isn't held constant throughout the simulation, instead, two different $\beta$'s are chosen. This is reasonable since the Omicron variant is believed to be more contagious than its predecessors. The first Omicron case in Michigan State was reported on *12/09/2021* and [the first case in Wayne County](#ref)$^{[7]}$ was reported on *12/17/2021*. 
+Thus to account for the beginning of Omicron variant spreading, for the first $17$ day, we assume the transmission rate is $\beta_1$, and $\beta_2$ for the rest of $104$ days. 
+
+```{r, echo = TRUE}
+seir_step <- Csnippet("
+  double Beta = (intervention == 1 ? beta1 : beta2);
+
+  double dN_SE = rbinom(S, 1 - exp(-Beta * I / N * dt));
+  double dN_EI = rbinom(E, 1 - exp(-mu_EI * dt));
+  double dN_IR = rbinom(I, 1 - exp(-mu_IR * dt));
+  S -= dN_SE;
+  E += dN_SE - dN_EI;
+  I += dN_EI - dN_IR;
+  H += dN_IR;
+")
+seir_rinit <- Csnippet("
+  S = nearbyint(eta * N);
+  E = 6000;
+  I = 15000;
+  H = 0;
+")
+dmeas <- Csnippet("
+  double tol = 1.0e-25;
+  double mean = rho*H;
+  double sd = sqrt(pow(tau*H,2) + mean);
+  lik = pnorm(reports+0.5,mean,sd,1,0)-pnorm(reports-0.5,mean,sd,1,0) +tol;
+  if(give_log)
+    lik = log(lik);
+")
+rmeas <- Csnippet("
+  reports = rnorm(rho*H, sqrt(pow(tau*H,2)+rho*H));
+  if(reports>0.0) {
+    reports=nearbyint(reports);
+  } else {
+    reports=0.0;
+  }
+")
+
+seir_covar <- covariate_table(
+    t = covid$day,
+    intervention = c(
+        rep(1, 17),
+        rep(2, 104)
+    ),
+    times = "t"
+)
+covidSEIR <- covid %>%
+    pomp(
+        times = "day", t0 = 1,
+        rprocess = euler(seir_step, delta.t = 1), 
+        rinit = seir_rinit,
+        rmeasure = rmeas,
+        dmeasure = dmeas,
+        partrans = parameter_trans(
+            log = c("mu_EI", "mu_IR", "tau", "beta1", "beta2"),
+            logit = c("rho", "eta")
+        ),
+        statenames = c("S", "E", "I", "H"),
+        accumvars = "H",
+        paramnames = c(
+            "beta1", "beta2", "mu_EI", "mu_IR",
+            "eta", "rho", "N", "tau"
+        ),
+        covar = seir_covar
+    )
+```
+
+#### Starting points 
+
+From the 2021 [census](#ref)$^{[8]}$, the population of Wayne County $N$ is $1,734,013$, and this number is assumed to be fixed throughout the analysis. According to [CDC](#ref)$^{[9]}$, the incubation period of COVID is $2-14$ days, thus $\mu_{EI}$ is expected to fall in  $[0.07,0.5]$. For infected individuals, it takes usually $14$ days to fully recover, yet after $10$ days of infection it's unlikely to them to infect others. Thus we also expect $\mu_{IR}\in[0.07, 0.1]$.  
+
+Several preliminary simulations are conducted resulting in the following set of parameters that serves as a good starting points of the local search:
+$$
+\beta_1=4,\beta_2=7.5,\mu_{EI} = 0.1,\mu_{IR}=0.08, \rho=0.5,\eta=0.08,\tau=0.1,N=1,734,013.
+$$
+
+To simplify the search, we fix $\mu_{EI}$ and $\mu_{IR}$. 
+
+```{r, echo = TRUE}
+pop_wayne <- 1734013
+params <- c(
+    beta1 = 4, beta2 = 7.5,
+    mu_EI = 0.1, mu_IR = 0.08, rho = 0.5, eta = 0.08,
+    tau = 0.1, N = pop_wayne
+)
+fixed_params <- params[c("N", "mu_EI", "mu_IR")]
+params_rw.sd <- rw.sd(
+    beta1 = 0.05, beta2 = 0.05,
+    rho = 0.04, tau = 0.01, eta = ivp(0.02)
+)
+```
+
+The initial guess is able to capture the plateau in the beginning of the data and the peak afterwards. 
+
+```{r, echo = FALSE, warning=FALSE, fig.align = 'center', out.width="60%"}
+plot_simulation <- function(sim_dat) {
+    sim_dat %>%
+        ggplot() +
+        theme_bw() +
+        geom_line(aes(day, reports,
+            group = .id,
+            color = (.id == "data"), alpha = (.id == "data"),
+            linetype = (.id == "data")
+        )) +
+        scale_color_manual(values = c("#18bc9c", "#c61919")) +
+        scale_alpha_manual(values = c(0.5, 1)) +
+        scale_linetype_manual(values = c(5, 1)) +
+        guides(color = FALSE, linetype = FALSE, alpha = FALSE)
+}
+set.seed(409)
+bake(file = "writeup_sim_start.rds", {
+  covidSEIR %>%
+    simulate(
+      params = params, nsim = 20,
+      format = "data.frame", include.data = TRUE
+    )
+}) %>%
+  plot_simulation()
+```
+
+The initial log-likelihood estimate is $-1487.2$, with a standard error of $6.8$.  
+
+```{r}
+registerDoRNG(730)
+bake(file = "writeup_lik_start.rds", {
+  foreach(i = 1:10, .combine = c) %dopar% {
+      library(pomp)
+      covidSEIR %>% pfilter(params = params, Np = NP)
+  }
+}) -> pf
+pf %>%
+    logLik() %>%
+    logmeanexp(se = TRUE)
+```
+
+#### Local search
+Now iterated filter is used to maximize the likelihood. We first search around the initial guess, thus the term  "local"; and in the next subsection we search globally and maximize over the full parameter space. 
+
+In the local search, the iterated filtering consists of $50$ iterations. From the trace plot, we can see that the likelihood, despite showing strong oscillations, is increasing in most of the runs and most saturate an stuck around $-1000$, except one run capable of exceeding $-900$ (see below cell). The reporting rate $\rho$ and $\tau$ are also both clearly increasing, while $\eta$ is clearly decreasing. However, local search cannot reveal whether transmission rate $\beta_1$ and $\beta_2$ are increasing or decreasing. 
+
+```{R, warning=FALSE, fig.align = 'center', out.width="60%"}
+registerDoRNG(409)
+bake(file = "writeup_local_search.rds", {
+    foreach(i = 1:NREPS_LOCAL, .combine = c) %dopar% {
+        suppressPackageStartupMessages({
+            library(tidyverse)
+            library(pomp)
+        })
+        covidSEIR %>%
+            mif2(
+                params = params,
+                Np = NP, Nmif = NMIF_S,
+                cooling.fraction.50 = 0.5,
+                rw.sd = params_rw.sd
+            )
+    }
+}) -> mifs_local
+
+mifs_local %>%
+    traces() %>%
+    melt() %>%
+    ggplot(aes(x = iteration, y = value, group = L1, color = factor(L1))) +
+    theme_bw() +
+    geom_line() +
+    guides(color = FALSE) +
+    facet_wrap(~variable, scales = "free_y")
+```
+
+Note the best likelihood estimate from local search is $-884$, with standard error of $0.01$. Also it's found $\beta_2 > \beta_1$ holds for most of the runs, suggesting stronger transmission rate of the Omicron variant.  
+
+```{r}
+# likelihood est. for local search results
+registerDoRNG(730)
+bake(file = "writeup_lik_local.rds", {
+  foreach(mf = mifs_local, .combine = rbind) %dopar% {
+    suppressPackageStartupMessages({
+      library(tidyverse)
+      library(pomp)
+    })
+    ll <- replicate(NREPS_EVAL, logLik(pfilter(mf, Np = NP))) %>%
+         logmeanexp(se = TRUE)
+    coef(mf) %>% bind_rows() %>% bind_cols(loglik = ll[1], loglik.se = ll[2])
+  }
+}) %>% arrange(-loglik) %>% select(-N, -mu_EI, -mu_IR) %>% head %>%
+  knitr::kable(digits = 3)
+```
+
+#### Global search 
+
+Now, we run a global search from random starting points. $500$ sets of starting values are drawn from  uniform distribution with 
+$$
+\beta_1\in[0, 8],\quad\beta_2\in[0, 10],\quad\rho\in[0,1],\quad\eta\in[0, 0.16],\quad\tau\in[0, 0.9].
+$$ 
+
+Multiple stages of iterated filtering process are adopted, with longer iterations first and a gradual decrease magnitude of perturbations. 
+
+```{r}
+# create a box of starting values (for parameters)
+set.seed(436871520)
+guesses <- runif_design(
+  lower = c(beta1 = 0, beta2 = 0,
+            rho = 0, eta = 0, tau = 0),
+  upper = c(beta1 = 8, beta2 = 10,
+            rho = 1, eta = 0.16, tau = 0.9),
+  nseq = NSTART
+)
+mf1 <- mifs_local[[1]] # take the output of previous IF process (local search)
+registerDoRNG(409)
+bake(file = "writeup_global_search.rds", {
+  foreach(guess=iter(guesses, "row"), .combine = rbind) %dopar% {
+    suppressPackageStartupMessages({
+      library(tidyverse)
+      library(pomp)
+    })
+    mf = mf1 %>% # cooling.fraction.50 = 0.5
+      mif2(params = c(unlist(guess), fixed_params), Nmif = NMIF_L) %>%
+      mif2(Nmif = NMIF_L) %>%
+      mif2(Nmif = NMIF_L)
+    mf = mf %>%
+      mif2(Nmif = NMIF_L, cooling.fraction.50 = 0.3) %>%
+      mif2(Nmif = NMIF_L, cooling.fraction.50 = 0.3) %>%
+      mif2(Nmif = NMIF_L, cooling.fraction.50 = 0.1) %>%
+      mif2(Nmif = NMIF_L, cooling.fraction.50 = 0.1)
+    ll = replicate(NREPS_EVAL, mf %>% pfilter(Np = NP) %>% logLik()) %>%
+      logmeanexp(se = TRUE)
+    coef(mf) %>% bind_rows() %>%
+      bind_cols(loglik = ll[1],loglik.se = ll[2])
+  } 
+}) %>%
+  filter(is.finite(loglik)) -> results_global
+```
+
+Despite the best log-likelihood increases to $-861$ (with a standard error of $0.02$), the estimated parameters are not stable as expected. What's more, the global search results in $\beta_2 < \beta_1$, indicating that the Omicron variant isn't contagious as expected.  
+
+```{r}
+results_global %>%
+  arrange(-loglik) %>%
+  select(-N, -mu_EI, -mu_IR) %>%
+  head %>%
+  knitr::kable(digits = 3)
+```
+
+The simulation at global maximum also fits better from first look. However, the peak from simulation arrives earlier than what actually happens. We account this phenomena to the long tail of observations: the simulation from initial guess gives smaller estimate in the tail region (after day $80$), and larger estimate before it, thus in order to maximize likelihood globally the tail must be made longer, resulting in early peak. 
+
+```{r, warning=FALSE, fig.align = 'center', out.width="60%"}
+set.seed(409)
+optimal_params <- results_global %>%
+  arrange(-loglik) %>%
+  slice(1) %>%
+  select(-starts_with("loglik")) %>%
+  unlist()
+bake(file = "writeup_best_shot_sim.rds",{
+  covidSEIR %>%
+    simulate(
+      params = optimal_params, nsim = 30,
+      format = "data.frame", include.data = TRUE
+    )
+  }) %>%
+  plot_simulation()
+```
+
+Now we investigate  the likelihood surface: the starting points are depicted in grey and the filtered estiamtes are depicted in red. Indeed, the filter process is capable of "pressing" parameters into a small region. Yet we note that $\rho$'s are pushed towards $1$. This is due to the ``logit`` parameter transform for $\rho$: this would limit $\rho$ to $(0,1)$. It might be better to use ``log`` transform for this parameter just to loosen the limit to $(0,\infty)$, but this would make reporting process senseless. 
+
+```{r, fig.align = 'center', out.width="60%"}
+all <- results_global %>%
+  filter(loglik > max(loglik) - 60) %>%
+  bind_rows(guesses) %>%
+  mutate(type = if_else(is.na(loglik), "guess", "result")) %>%
+  arrange(type)
+pairs(~loglik + beta1 + beta2, data = all,
+      col = ifelse(all$type == "guess", grey(0.7), "#db5c5c"), pch = 16)
+
+pairs(~loglik + eta + rho + tau, data = all,
+      col = ifelse(all$type == "guess", grey(0.7), "#db5c5c"), pch = 16)
+```
+
+#### Profile likelihood for parameter $\tau$
+
+As the final analysis, we perform a profile likelihood test for the parameter $\tau$. The idea is perform local search around optimal parameters found by global search but with fixed $\tau$. The starting points are those with high likelihoods from the global search. 
+
+```{r, fig.align = 'center', out.width="60%"}
+guesses <- results_global %>%
+  group_by(cut = round(tau, 2)) %>%
+  filter(rank(-loglik) <= 1) %>%
+  ungroup() %>%
+  select(-cut, -loglik, -loglik.se)
+rw.sd_tau_fixed <- rw.sd(
+    beta1 = 0.05, beta2 = 0.05,
+    rho = 0.01, tau = 0.0, eta = ivp(0.02)
+)
+mf1 <- mifs_local[[1]]
+registerDoRNG(409)
+bake(file = "writeup_profile_tau.rds", {
+  foreach(guess = iter(guesses, "row"), .combine = rbind) %dopar% {
+    suppressPackageStartupMessages({
+      library(tidyverse)
+      library(pomp)
+    })
+    mf <- mf1 %>%
+      mif2(params = guess, rw.sd = rw.sd_tau_fixed) %>%
+      mif2(Nmif = NMIF_L, cooling.fraction.50 = 0.5) %>%
+      mif2(Nmif = NMIF_L, cooling.fraction.50 = 0.3) %>%
+      mif2(Nmif = NMIF_L, cooling.fraction.50 = 0.1)
+    ll <- replicate(NREPS_EVAL, mf %>% pfilter(Np = NP) %>% logLik()) %>%
+      logmeanexp(se = TRUE)
+    coef(mf) %>% bind_rows() %>% bind_cols(loglik = ll[1],loglik.se = ll[2])
+  } 
+}) -> results
+```
+
+The likelihood over $\tau$ is overall smooth, and the $95\%$ confidence interval of $\tau$ is $[0.669, 0.706]$. However, only two points are above the threshold resulting in dubious interval. 
+
+```{r, fig.align = 'center', out.width="60%"}
+all <- results %>% filter(is.finite(loglik))
+all %>%
+  filter(loglik > max(loglik) - 60) %>%
+  ungroup() %>%
+  ggplot(aes(x = tau, y = loglik)) +
+  theme_bw() +
+  geom_point() +
+  geom_hline(
+    color = "red",
+    yintercept = max(all$loglik) - 0.5 * qchisq(df = 1, p = 0.95)
+  )
+
+tau_ci <- all %>%
+  drop_na() %>%
+  filter(is.finite(loglik)) %>%
+  filter(loglik > max(loglik) - 0.5 * qchisq(df = 1, p = 0.95)) %>%
+  summarize(min = min(tau), max = max(tau)) %>%
+  mutate(lower = sprintf("%.2f%%", 100 * min),
+         upper = sprintf("%.2f%%", 100 * max)) %>%
+  select(lower, upper)
+
+tau_ci %>%
+  knitr::kable()
+```
+
+### Model comparison
+
+We use log likelihood as the selection criterion. The log likelihoods of these two models, ARIMA Model and SEIR Model, are shown below.
+
+| Models | Log likelihood | 
+| :---: | :---: | 
+| ARIMA(4,1,4) Model | -618.74 | 
+| SEIR Model | -861.13(from the global search) | 
+
+The log likelihood of ARIMA(4,1,4) Model is higher than SEIR Model. As we discussed in Section Spectrum Analysis, there is a 7-day cycle in our data. However, the SEIR model does not take into account the cyclical pattern, which could lead to worse performance.
+
+## Conclusion
+
+Thinking back to the question we considered at the beginning of the report, we want to analyze the Omicron variant cases of Wayne County, Michigan with different models. After building ARIMA Model and SEIR Model, we found the ARIMA model performed better than the SEIR model as indicated by the log likelihoods estimates. But there are still some limitations, such as the limited amount of data we can use because the Omicron variant appeared very late. 
+
+In theory, we could adjust the report rate $\rho$ based on the seven-day period we found. Because we believe that periodicity may come from administrative issues, maybe we can potentially improve the SEIR model performance by adjusting the coefficient. However, it takes about an hour for each of the runs because of so many parameters. Finally, due to time constraints, we did not attempt to improve the model.
+
+
+## References {#ref}
+
+[1] COVID-19, https://www.cdc.gov/coronavirus/2019-ncov/your-health/about-covid-19.html
+
+[2] WHO Coronavirus (COVID-19) Dashboard, https://covid19.who.int/
+
+[3] the Omicron variant of COVID-19, https://www.cdc.gov/coronavirus/2019-ncov/variants/omicron-variant.html
+
+[4] Introduction of Wayne County, https://en.wikipedia.org/wiki/Wayne_County,_Michigan
+
+[5] Data released by the Michigan Government，https://www.michigan.gov/coronavirus/0,9753,7-406-98163_98173---,00.html
+
+[6] Information for Pediatric Healthcare Providers, https://www.cdc.gov/coronavirus/2019-ncov/hcp/pediatric-hcp.html
+
+[7]Omicron variant cases detected in Wayne, Oakland and Washtenaw counties, https://www.freep.com/story/news/local/michigan/2021/12/17/michigan-omicron-variant-covid-wayne-oakland-washtenaw/8942276002/
+
+[8] Wayne County, Michigan Population 2022, https://worldpopulationreview.com/us-counties/mi/wayne-county-population
+
+[9] Clinical Questions about COVID-19: Questions and Answers, https://www.cdc.gov/coronavirus/2019-ncov/hcp/faq.html
+
+
+
+## Acknowledgements
+
+The topic we are interested in just happens to be the similar as two previous projects, which are [Project 13 W21](https://ionides.github.io/531w21/final_project/project13/blinded.html) and [Project 15 W21](https://ionides.github.io/531w21/final_project/project15/blinded.html). I think this may be because COVID-19 has become very popular in the past two years, attracting everyone's attention and it is closely related to our life. However, our focus is on the Omicron variant. The first known case of it was reported on  November 2021, so it's a new variant. And we found the periodicity, which was not reported by the other two projects.

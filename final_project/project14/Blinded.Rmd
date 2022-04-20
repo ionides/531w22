@@ -1,0 +1,629 @@
+---
+title: "Analysis of Stochastic Volatility Models for Ethereum Returns"
+output:  
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 5
+    code_folding: hide
+    theme: united
+    highlight: pygments
+date: "19 April 2022"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, fig.width=10, cache = TRUE, warning=FALSE, message=FALSE, fig.align="center", error=FALSE)
+require(knitr)
+require(tseries)
+library(forecast)
+library(fGarch)
+library(ggplot2)
+library(plyr)
+library(dplyr)
+library(broom)
+library(boot)
+library(pacman)
+library(tidyverse)
+library(pomp)
+library(foreach)
+library(doParallel)
+library(doRNG)
+registerDoParallel()
+registerDoRNG(0)
+```
+
+## 1. Exploratory Analysis
+
+Cryptocurrency (or crypto) seems to be one of those word that is always buzzing around, and has really blown up in recent years. Broadly speaking, crypto is a digital form of currency, but one that carries its own certificate of who has created the unit of currency, who has owned it, and where it has come from. This differs greatly from the early days of the internet, when piracy was much more rampant than now (i.e. Napster and music rights) ^[https://www.nytimes.com/2021/10/15/opinion/ezra-klein-podcast-katie-haun.html?showTranscript=1]. One of the main attractions of crypto is that it is not maintained or reliant on a central banking authority^[https://en.wikipedia.org/wiki/Cryptocurrency]., which is meant to make crypto more egalitarian and less gate-keepy, but we live in a world where large companies already dominate the technology market. Understanding the way that this technology is utilized in markets will be important for understanding the way it will shape our economy and society in coming years. 
+
+Our research question of interest is how can we best model cryptocurrency returns? We have three possible models to analyze: the GARCH-ARIMA model, stochastic volatility with leveraged returns (based on Breto and work done in class) and a simple stochastic volatility model based on the Black-Scholes stochastic differential equation (SDE). Work with the Black-Scholes model was previously done for a final project in 2018 by group 16.
+
+```{r echo=FALSE, include=TRUE}
+eth <- read.csv("ETH.csv")
+eth<-eth[-which(is.na(eth$Return)),]
+str(eth$TimeStamp)
+eth$time<-as.Date(eth$TimeStamp)
+acf(ts(eth$Return))
+#not much sample autocorrelation in returns.
+```
+
+```{r echo=FALSE}
+plot(eth$Return~eth$time, type="l", xlab="Time", ylab="Return", main="Ethereum Crypto Returns")
+abline(a=0, b=0, col="red")
+#seems like we have evidence of staitonarity?
+which(abs(eth$Return)>.1)
+
+
+eth[3325,]
+#what happened on May 19th at 11am?
+# Trump probe official
+# Violence in Palestine
+# high number of daily deaths in India
+# Russian hackers got 90 million in bitcoin from ppl it hacked!
+# source: https://theweek.com/10things/983399/10-things-need-know-today-may-19-2021
+
+```
+
+Notice that there is a large negative spike in returns on May 19th, 2021. That corresponds to the day that Russian hackers stole 90 million in Bitcoin. While this is not Ethereum, both are forms of crypto currency, and it is likely that they are highly linked. There does not seem to be much evidence of a trend, and therefore stationarity seems to be holding. At least, we don't have much evidence that stationarity is not holding. We also will leave that data point in, because it is not a typo, and such a random even as Russian hackers stealing crypto that day is good to have in the model because hackers will continue to hack.
+
+The analysis of the Ethereum data (a type of cryptocurrency) will continue mid-term project #2.
+
+The Ethereum data are incredibly noisy, with very frequent measurements, and low autocorrelation. This is one of the advantages of working with crypto data because unlike traditional stock markets, we don't have to wait until closing to get an idea of returns. We can get hourly data quite easily!
+
+## 2. Benchmarks based on simple time-series models 
+
+Benchmarks can be very helpful for our analysis since they can provide a baseline for comparison. Their simplicity and interpretability can give us a basic understanding about the data and its characteristics. In this section, we'll apply the basic time-seris models that we've learned from this course to our data, and provide a reasonable benchmark for the analysis of more complex models.
+
+#### 2.1 ARMA
+ARMA model is one of the most basic models in time series ^[https://ionides.github.io/531w22/04/slides.pdf]. Although its performance is limited for financial data, a simple, stable and invertible ARMA model still can capture some characteristics of the data and serve a useful benchmark. This code is a continuation of the code written by Group 2 for the mid-term project (coded by Chongdan Pan) ^[https://ionides.github.io/531w22/midterm_project/project21/blinded.html].
+
+```{r fig.height=5, echo=FALSE, cache=TRUE}
+plot(as.Date(eth$TimeStamp),eth$ClosePrice, xlab="TimeStamp",ylab="ETH",type="l")
+eth_ret = na.omit(eth$Return)
+eth_demeaned = (eth_ret - mean(eth_ret))[1:9000]
+
+arima_aic <- function(data, P, Q, I){
+  table <- matrix(NA, P+1, Q+1)
+  for(p in 0:P){
+    for(q in 0:Q){
+      tryCatch({
+          model = arima(data, order=c(p, 0, q))
+          table[p+1, q+1] <- model$aic
+      }, error = function(e) {})
+    }
+  }
+  dimnames(table) <- list(paste("AR", 0:P, sep=""), paste("MA", 0:Q, sep=""))
+  table
+}
+eth_arma_aic <- arima_aic(eth_demeaned, 4, 4, 0)
+kable(eth_arma_aic, digits=2, format="markdown", caption="AIC for Ethereum Return")
+```
+
+Based on the AIC table, it turns out that ARMA(2,2), AR(4) and ARMA(4,4) have outstanding performance. For simplicity, we're using AR(4) as a benchmark.
+
+```{r}
+eth_ar4 <- arima(x = eth_demeaned, order = c(4, 0, 0))
+autoplot(eth_ar4, main="AR(4) Characteristic Roots")
+eth_ar4
+```
+
+The inverse of all four characteristic roots are in the unit circle, implying that AR(4) can be a reasonable choice. It's AIC value -54723.34 can be a benchmark for further analysis.
+
+```{r fig.height=4, cache=TRUE}
+plot_resid <- function(residuals){
+  plot(residuals, type="l")
+  acf(residuals)
+  qqnorm(residuals)
+  qqline(residuals)
+}
+plot_resid(eth_ar4$residuals)
+```
+
+Based on the plot of residuals, it turns out that there are still some correlation within it. What's more, the Q-Q plot shows that there are heavy tails in the residuals, which is critical in finance analysis.
+
+#### 2.2 AR-Garch
+Garch models are typically used for volatility analysis, thanks to its assumption that there is an internal time-series correlation within the volatility. What's more, in this section, we seek to combine the AR and Garch model together and see their performance ^[Thelen, Brian. STATS509 Lect9_Intro_ARCH_GARCH_slides. ]. Based on previous result, 
+
+```{r results="hide", cache=TRUE}
+eth_garch <- garch(eth_demeaned,grad="numerical", trace =FALSE)
+eth_ar2garch <- garchFit(~arma(2,0)+garch(1,1), data=eth_demeaned, cond.dist=c("norm"), include.mean=TRUE)
+```
+|      | Garch(1,1) | AR(1) Garch(1,1) | AR(2) Garch(1,1) | AR(3) Garch(1,1) | AR(4) Garch(1,1) |
+| ---- | ---------- | ---------------- | ---------------- | ---------------- | ---------------- |
+| AIC  | -55175.78  | -57161.75        | -57162.84        | -57161.79        | -57161.75        |
+```{r}
+summary(eth_ar2garch)
+```
+
+Based on the AIC table, it turns out that AR(2) works best in our case. More importantly, it turns out that the combination of AR and Garch greatly decrease the AIC value, showing obvious supremacy.
+
+```{r fig.height=4}
+plot_resid(eth_ar2garch@residuals)
+```
+
+However, even with the combination of AR and Garch model, our model still suffers from the same problem of not necessarily normal residuals. We hope that a POMP stochastic volatility model can help to assuage some of these issues, or at least fit better.
+
+## 3. Using Breto model
+We build a modified Stochastic volatility models from Breto ^[Bret´o C (2014). "On idiosyncratic stochasticity of financial leverage effects." Statistics & Probability Letters, 91, 2026. doi: 10.1016/j.spl.2014.04.003.], which introduces leverage to reflect the common phenomenon of the existence of financial markets. The basic setting for the model is the following:
+
+#### 3.1 Implementation Breto's model
+
+$$Y_n=\exp(H_n/2)\epsilon_n$$
+$$H_n = \mu_h(1-\phi)+\phi H_{n-1}+\beta_{n-1}R_n\exp(-H_{n-1}/2)+\omega_n \\
+G_n = G_{n-1}+v_n$$
+$$R_n=\frac{\exp(2G_n)-1}{\exp(2G_n)+1}$$
+
+
+The latent state $X_n = (G_n, H_n)$
+where $Y_n$ is the observed return, $\beta_n=Y_n\sigma_\eta \sqrt{1-\phi^2}$, $\{\epsilon_n\}$ is an i.i.d. $N(0,1)$ sequence, $\{\nu_n\}$ is an i.i.d. $N(0,\sigma_{\nu}^2)$ sequence and \(\{\omega_n\}\) is $N(0,\sigma_{\omega,n}^2)$ sequence where $\sigma_{\omega,n}^2=\sigma_\eta^2(1-\phi^2)(1-R_n^2)$. The $H_n$ in the model is the log volatility, $G_n$ is Gaussian random walk. \
+Building the model ^[https://ionides.github.io/531w22/16/slides.pdf]
+```{r cache=TRUE}
+eth_statenames <- c("H","G","Y_state")
+eth_rp_names <- c("sigma_nu","mu_h","phi","sigma_eta")
+eth_ivp_names <- c("G_0","H_0")
+eth_paramnames <- c(eth_rp_names,eth_ivp_names)
+```
+
+```{r cache=TRUE}
+
+rproc1 <- "
+double beta,omega,nu;
+omega = rnorm(0,sigma_eta * sqrt( 1- phi*phi ) *
+sqrt(1-tanh(G)*tanh(G)));
+nu = rnorm(0, sigma_nu);
+G += nu;
+beta = Y_state * sigma_eta * sqrt( 1- phi*phi );
+H = mu_h*(1 - phi) + phi*H + beta * tanh( G )
+* exp(-H/2) + omega;
+"
+
+rproc2.sim <- "
+Y_state = rnorm( 0,exp(H/2) );
+"
+rproc2.filt <- "
+Y_state = covaryt;
+"
+
+eth_rproc.sim <- paste(rproc1,rproc2.sim)
+eth_rproc.filt <- paste(rproc1,rproc2.filt)
+
+eth_rinit <- "
+G = G_0;
+H = H_0;
+Y_state = rnorm( 0,exp(H/2) );
+"
+
+eth_rmeasure <- "
+y=Y_state;
+"
+eth_dmeasure <- "
+lik=dnorm(y,0,exp(H/2),give_log);
+"
+
+eth_partrans <- parameter_trans(
+  log=c("sigma_eta","sigma_nu"),
+  logit="phi"
+)
+
+
+
+eth.filt <- pomp(data=data.frame(
+  y=eth_demeaned,time=1:length(eth_demeaned)),
+  statenames=eth_statenames,
+  paramnames=eth_paramnames,
+  times="time",
+  t0=0,
+  covar=covariate_table(
+    time=0:length(eth_demeaned),
+    covaryt=c(0,eth_demeaned),
+    times="time"),
+  rmeasure=Csnippet(eth_rmeasure),
+  dmeasure=Csnippet(eth_dmeasure),
+  rprocess=discrete_time(step.fun=Csnippet(eth_rproc.filt),
+                         delta.t=1),
+  rinit=Csnippet(eth_rinit),
+  partrans=eth_partrans
+)
+
+params_test <- c(
+  sigma_nu = exp(-4.5),
+  mu_h = -0.25,
+  phi = expit(4),
+  sigma_eta = exp(-0.07),
+  G_0 = 0,
+  H_0=0
+)
+
+sim1.sim <- pomp(eth.filt,
+                 statenames=eth_statenames,
+                 paramnames=eth_paramnames,
+                 rprocess=discrete_time(
+                   step.fun=Csnippet(eth_rproc.sim),delta.t=1)
+)
+
+#Build a simulated data
+sim1.sim <- simulate(sim1.sim,seed=1,params=params_test)
+
+sim1.filt <- pomp(sim1.sim,
+                  covar=covariate_table(
+                    time=c(timezero(sim1.sim),time(sim1.sim)),
+                    covaryt=c(obs(sim1.sim),NA),
+                    times="time"),
+                  statenames=eth_statenames,
+                  paramnames=eth_paramnames,
+                  rprocess=discrete_time(
+                    step.fun=Csnippet(eth_rproc.filt),delta.t=1)
+)
+```
+
+#### 3.2 Local Search 
+Check that we can indeed filter and re-estimate parameters successfully for the simulated data.
+```{r cache=TRUE}
+run_level <- 3
+eth_Np <- switch(run_level, 50, 100, 1e3)
+eth_Nmif <- switch(run_level, 10, 50, 200)
+eth_Nreps_eval <- switch(run_level, 4, 10, 20)
+eth_Nreps_local <- switch(run_level, 10, 20, 20)
+eth_Nreps_global <- switch(run_level, 10, 20, 50)
+
+pf1 <- bake(file=sprintf("Breto_pf1-%d.rds",run_level),{
+  pf1 <- foreach(i=1:eth_Nreps_eval,
+          .packages='pomp') %dopar% pfilter(sim1.filt,Np=eth_Np)
+  pf1
+})
+(L.pf1 <- logmeanexp(sapply(pf1,logLik),se=TRUE))
+```
+The log-likelihood we got from the simulated data is very low.
+Now, we want to fit stochastic volatility models to our ETC data and do the local search to estimate the parameter in the model.
+```{r cache=TRUE}
+eth_rw.sd_rp <- 0.02
+eth_rw.sd_ivp <- 0.1
+eth_cooling.fraction.50 <- 0.5
+eth_rw.sd <- rw.sd(
+  sigma_nu = eth_rw.sd_rp,
+  mu_h = eth_rw.sd_rp,
+  phi = eth_rw.sd_rp,
+  sigma_eta = eth_rw.sd_rp,
+  G_0 = ivp(eth.sd_ivp),
+  H_0 = ivp(eth.sd_ivp)
+)
+
+if1 <- bake(file=sprintf("Breto_mif1-%d.rds",run_level),{
+  if1 <- foreach(i=1:eth_Nreps_local,
+                 .packages='pomp', .combine=c) %dopar% mif2(eth.filt,
+                                                            params=params_test,
+                                                            Np=eth_Np,
+                                                            Nmif=eth_Nmif,
+                                                            cooling.fraction.50=eth_cooling.fraction.50,
+                                                            rw.sd = rw.sd(
+                                                              sigma_nu  = eth_rw.sd_rp,
+                                                              mu_h      = eth_rw.sd_rp,
+                                                              phi       = eth_rw.sd_rp,
+                                                              sigma_eta = eth_rw.sd_rp,
+                                                              G_0       = ivp(eth_rw.sd_ivp),
+                                                              H_0       = ivp(eth_rw.sd_ivp)
+                                                            ))
+  L.if1 <- foreach(i=1:eth_Nreps_local,
+                   .packages='pomp', .combine=rbind) %dopar% logmeanexp(
+                     replicate(eth_Nreps_eval, logLik(pfilter(eth.filt,
+                                                              params=coef(if1[[i]]),Np=eth_Np))), se=TRUE)
+  return(list(if1, L.if1))
+})[[1]]
+
+L.if1 <- bake(file=sprintf("Breto_mif1-%d.rds",run_level),{
+  if1 <- foreach(i=1:eth_Nreps_local,
+                 .packages='pomp', .combine=c) %dopar% mif2(eth.filt,
+                                                            params=params_test,
+                                                            Np=eth_Np,
+                                                            Nmif=eth_Nmif,
+                                                            cooling.fraction.50=eth_cooling.fraction.50,
+                                                            rw.sd = rw.sd(
+                                                              sigma_nu  = eth_rw.sd_rp,
+                                                              mu_h      = eth_rw.sd_rp,
+                                                              phi       = eth_rw.sd_rp,
+                                                              sigma_eta = eth_rw.sd_rp,
+                                                              G_0       = ivp(eth_rw.sd_ivp),
+                                                              H_0       = ivp(eth_rw.sd_ivp)
+                                                            ))
+  L.if1 <- foreach(i=1:eth_Nreps_local,
+                   .packages='pomp', .combine=rbind) %dopar% logmeanexp(
+                     replicate(eth_Nreps_eval, logLik(pfilter(eth.filt,
+                                                              params=coef(if1[[i]]),Np=eth_Np))), se=TRUE)
+  return(list(if1, L.if1))
+})[[2]]
+
+r.if1 <- data.frame(logLik=L.if1[,1],logLik_se=L.if1[,2],
+                    t(sapply(if1,coef)))
+if (run_level>1) write.table(r.if1,file="eth_params.csv",
+                             append=TRUE,col.names=FALSE,row.names=FALSE)
+summary(r.if1$logLik, digits=5)
+plot(if1)
+pairs(~logLik+sigma_nu+mu_h+phi+sigma_eta,
+      data=r.if1)
+```
+The trace plot for the MIF iteration shows the log-likelihood is not always climbing along with each iteration. In addition, the different search seems to get the different value of log-likelihood. The spread in likelihood, shown in this convergence plot suggests that maybe the numerics are not working smoothly.^[https://ionides.github.io/531w22/hw08/sol08.pdf] The log-likelihood value(28953) we get was 366 log units higher than AR-GARCH (28587) and 1586 log units higher than benchmark ARMA model, but (6022) log unit lower than Heston Model(34975). On the other hand, except for parameter $\sigma_{\nu}$ and $\phi$, other parameters did not converge to a constant number, suggesting that parameter estimates reflect uncertainty about the parameter given the data. According to the pair plot, we can notice the same result, for example, for the parameter $\mu_h$, the relationship between the parameter and log-likelihood is not clear, which is consistent with the trace plot for $\mu_h$.
+
+
+
+#### 3.3 Global Search
+The local searches result is not quite well to reflect the data, so we do the global search.
+```{r cache=TRUE}
+eth_box <- rbind(
+  sigma_nu=c(0.005,0.05),
+  mu_h =c(-20,20),
+  phi = c(0.97,0.99),
+  sigma_eta = c(0.5,600),
+  G_0 = c(-2,2),
+  H_0 = c(-3,0)
+)
+
+if.box <- bake(file=sprintf("Breto_box_eval-%d.rds",run_level),{
+  if.box <- foreach(i=1:eth_Nreps_global,
+                    .packages='pomp',.combine=c) %dopar% mif2(data = if1[[1]],
+                                                              params=apply(eth_box,1,function(x)runif(1,x)))
+  L.box <- foreach(i=1:eth_Nreps_global,
+                   .packages='pomp',.combine=rbind) %dopar% {
+                     logmeanexp(replicate(eth_Nreps_eval, logLik(pfilter(
+                       eth.filt,params=coef(if.box[[i]]),Np=eth_Np))), 
+                       se=TRUE)}
+  return(list(if.box, L.box))
+})[[1]]
+
+L.box <- bake(file=sprintf("Breto_box_eval-%d.rds",run_level),{
+  if.box <- foreach(i=1:eth_Nreps_global,
+                    .packages='pomp',.combine=c) %dopar% mif2(data = if1[[1]],
+                                                              params=apply(eth_box,1,function(x)runif(1,x)))
+  L.box <- foreach(i=1:eth_Nreps_global,
+                   .packages='pomp',.combine=rbind) %dopar% {
+                     logmeanexp(replicate(eth_Nreps_eval, logLik(pfilter(
+                       eth.filt,params=coef(if.box[[i]]),Np=eth_Np))), 
+                       se=TRUE)}
+  return(list(if.box, L.box))
+})[[2]]
+
+
+r.box <- data.frame(logLik=L.box[,1],logLik_se=L.box[,2],
+                    t(sapply(if.box,coef)))
+if(run_level>1) write.table(r.box,file="eth_params_global.csv",
+                            append=TRUE,col.names=FALSE,row.names=FALSE)
+summary(r.box$logLik,digits=5)
+
+pairs(~logLik+log(sigma_nu)+mu_h+phi+sigma_eta+H_0,
+      data=subset(r.box,logLik>max(logLik)-50))
+plot(if.box)
+```
+The convergence plot seems better than the local search: The log-likelihood is climbing along with the particle filter and the log-likelihood is 28977 which is 24 higher in log units compared to the local search but is still lower than the Heston Model(34975). The $G_0$ and parameter $\sigma_{\eta}$ converge to a number along with the replicates. 
+
+## 4. Simple Sotchastic Volatility Model
+
+In class we analyzed the data using leveraged returns, and a fairly complex model written by Breto et. al. We wanted to see if a simpler model would suffice and perhaps even perform better for Ethereum returns.
+
+Our proposed model comes from the Heston model^[https://en.wikipedia.org/wiki/Heston_model] where price and volatility are written in order as:
+$$dS_t=\mu S_t dt +\sqrt{v_t}S_t dW_t$$
+$$dv_t=\kappa(\theta-v_t)dt+\xi \sqrt{v_t}dW_t^v$$
+
+where $W$ is a Brownian motion process, $\mu$ is the drift of the stock, $\theta$ is the expected value of $\{v\}$, $\kappa$ is the rate of mean reversion of $v_t$ to the long run average price, and $\xi$ is the variance of $v_t$. This model is generally seen as a better way to model stock prices than the Black-Scholes model, because it has a non-constant variance.
+
+Our data is observations of returns every hour, and we have de-meaned the data, so following the work of Project 16, Winter '18,^[https://ionides.github.io/531w18/final_project/16/final.html] we re-write the Heston model for volatility of returns with $\mu=1$ as:
+$$ V_n=(1-\phi) \theta +\phi V_{n-1}+\sqrt{V_{n-1}}\omega_n$$
+ 
+with constraints $\omega_n\sim N(0, \sigma_\omega^2)$, $\phi \in (0,1)$, and $\theta, \sigma_\omega>0$.
+
+```{r include=FALSE, echo=FALSE, cache=TRUE}
+set.seed(16161616)
+require(pomp)
+library(dplyr)
+library(tidyr)
+crypto<-eth
+crypto$time<-crypto$PriceTime
+
+crypto$demeaned<-crypto$Return- mean(crypto$Return)
+w = (crypto$demeaned)
+```
+We build a POMP model based on the Heston model as follows. Most of the following code was adapted from a previous final project, but the key difference is that we do not carry the observed process as a random process like Project 16 did because they actually made the POMP model more challenging than necessary to implement.
+
+#### 4.1 Implementing the Heston Model
+
+Below we have defined the POMP variables, the random process, and the measurement model. Note that both are relatively simple, but because we have discretized the Stochastic Difference Equation, $V_n$ can sometimes drop below $0$, which makes calculation of $V_{n+1}$ impossible since $\sqrt{V_n}$ would be imaginary. As a result, we included the 'if' statement that automatically maps a negative $V_n$ to 0 if it is negative. We also mapped parameter transformations because of the constraints noted above.
+
+```{r echo=FALSE, cache=TRUE}
+crypto_statenames <- c("V")
+crypto_rp_names <- c("sigma_omega","phi","theta")
+crypto_ivp_names <- c("V_0")
+crypto_paramnames <- c(crypto_rp_names, crypto_ivp_names)
+crypto_covarnames<-"covaryt"
+
+crypto_rproc1 <- "
+  double omega;
+  omega = rnorm(0,sigma_omega);
+  V = theta*(1 - phi) + phi*sqrt(V) + sqrt(V)*omega;
+  if(V<0){V=0;}
+"
+
+crypto_rinit <- "V = V_0;
+"
+
+crypto_rmeasure <- "
+y=rnorm(0,sqrt(V));
+"
+
+
+crypto_dmeasure <- "
+lik=dnorm(y,0,sqrt(V),give_log);
+"
+
+
+crypto_partrans <- parameter_trans(
+  log=c("sigma_omega","theta", "V_0"),
+  logit="phi"
+)
+
+
+params_test <- c(
+  sigma_omega = 0.001,
+  phi = 0.001,
+  theta = 0.0004,
+  V_0= 0.002
+)
+```
+
+Now we create a POMP object and particle filter for the Ethereum data.
+```{r echo=FALSE, cache=TRUE}
+
+crypto.filt <- 
+    pomp(data=data.frame(
+      y=w,time=1:length(w)),
+    statenames=crypto_statenames,
+    paramnames=crypto_paramnames,
+    covarnames=crypto_covarnames,
+    times="time",
+    t0=0,
+    covar=covariate_table(
+      time=0:length(w),
+      covaryt=c(0,w),
+      times="time"),
+    rmeasure=Csnippet(crypto_rmeasure),
+    dmeasure=Csnippet(crypto_dmeasure),
+    rprocess=discrete_time(step.fun=Csnippet(crypto_rproc1),
+                           delta.t=1),
+    rinit=Csnippet(crypto_rinit),
+    params = params_test,
+    partrans=crypto_partrans
+)
+
+crypto_sim<-simulate(crypto.filt, seed=1, params=params_test)
+plot(crypto_sim, main="Simulated and Actual Volatility")
+
+
+
+sim1.filt <- pomp(crypto_sim, 
+                  covar=covariate_table(
+                    time=c(timezero(crypto_sim),time(crypto_sim)),
+                    covaryt=c(obs(crypto_sim),NA),
+                    times="time"),
+                  statenames=crypto_statenames,
+                  paramnames=crypto_paramnames,
+                  rprocess=discrete_time(
+                    step.fun=Csnippet(crypto_rproc1),delta.t=1)
+)
+
+```
+
+
+#### 4.2 Local Search
+
+After filtering and simulating, we explore the likelihood surface. We start with a Local Search, following code that Dr. Ionides wrote for the Breto model.^[https://ionides.github.io/531w22/16/notes.pdf]
+
+```{r cache=TRUE}
+run_level <- 3
+Np <-           switch(run_level, 100, 1e3, 2e3)
+Nmif <-         switch(run_level,  10, 100, 200)
+Nreps_eval <-   switch(run_level,   4,  10,  20)
+Nreps_local <-  switch(run_level,  10,  20,  20)
+Nreps_global <- switch(run_level,  10,  20, 100)
+
+library(doParallel)
+cores <-  as.numeric(Sys.getenv('SLURM_NTASKS_PER_NODE', unset=NA))
+if(is.na(cores)) cores <- detectCores()  
+registerDoParallel(cores)
+library(doRNG)
+registerDoRNG(34118892)
+stew(file=sprintf("Heston_pf1-%d.rda",run_level),{
+  t.pf1 <- system.time(
+    pf1 <- foreach(i=1:Nreps_eval,
+                   .packages='pomp') %dopar% pfilter(sim1.filt,Np=Np))
+})
+(L.pf1 <- logmeanexp(sapply(pf1,logLik),se=TRUE))
+
+
+rw_sd <- eval(substitute(rw.sd(
+  sigma_omega=rwr,
+  theta=rwr,
+  phi=rwr,
+  V_0=ivp(rwi)),
+  list(rwi=0.2,rwr=0.02)))
+crypto_rw.sd_rp <- 0.001
+crypto_rw.sd_ivp <- 0.001
+
+stew(file=sprintf("Heston_mif1-%d.rda",run_level),{
+  t.if1 <- system.time({
+    if1 <- foreach(i=1:Nreps_local,
+                   .packages='pomp', .combine=c) %dopar% 
+      mif2(crypto.filt, 
+           params=params_test,
+           Np=Np,
+           Nmif=Nmif,
+           cooling.fraction.50=.5,
+           rw.sd = rw_sd)
+    L.if1 <- foreach(i=1:Nreps_local,
+                     .packages='pomp', .combine=rbind) %dopar% logmeanexp(
+                       replicate(Nreps_eval, logLik(pfilter(crypto.filt,
+                                                                  params=coef(if1[[i]]),Np=Np))), se=TRUE)
+  })
+})
+r.if1 <- data.frame(logLik=L.if1[,1],logLik_se=L.if1[,2],
+                    t(sapply(if1,coef)))
+if (run_level>=1) write.table(r.if1,file="crypto_local_params.csv",
+                             append=TRUE,col.names=FALSE,row.names=FALSE)
+
+pairs(~logLik+sigma_omega+theta+phi, data=r.if1)
+
+plot(if1)
+
+summary(r.if1$logLik)
+```
+
+Looking at some of the diagnostic plots, after running at run-level 1, we notice that there are some problems with effective sample size, and too many particles getting killed off regularly. This might just be a problem of run-level 1 and not having much diversity in the particles in the first place. 
+
+
+#### 4.3 Global Search
+
+After exploring the local surface, we move to the global.
+
+```{r cache=TRUE}
+crypto_box <- rbind(
+  V_0=c(0,2),
+  sigma_omega=c(0,10),
+  phi= c(0,1),
+  theta=c(0,4)
+)
+
+stew(file=sprintf("Heston_box_eval-%d.rda",run_level),{
+  t.box <- system.time({
+    if.box <- foreach(i=1:Nreps_global,
+                      .packages='pomp',.combine=c) %dopar% mif2(if1[[1]],
+                                                                params=apply(crypto_box,1,function(x)runif(1,x)))
+    L.box <- foreach(i=1:Nreps_global,
+                     .packages='pomp',.combine=rbind) %dopar% {
+                       logmeanexp(replicate(Nreps_eval, logLik(pfilter(
+                         crypto.filt,params=coef(if.box[[i]]),Np=Np))), 
+                         se=TRUE)}
+  })
+})
+r.box <- data.frame(logLik=L.box[,1],logLik_se=L.box[,2],
+                    t(sapply(if.box,coef)))
+if(run_level>=1) write.table(r.box,file="Heston_crypto_global_params.csv",
+                            append=TRUE,col.names=FALSE,row.names=FALSE)
+summary(r.box$logLik,digits=5)
+
+## pairs(~logLik+log(sigma_nu)+mu_h+phi+sigma_eta+H_0,
+##   data=subset(r.box,logLik>max(logLik)-10))
+
+pairs(~logLik+sigma_omega+theta+phi, data=r.box)
+
+plot(if.box)
+```
+
+The diagnostic plots and convergence diagrams of the parameters indicate that parameters are converging fairly well. However, there are a lot of iterations where we are losing particles, and effective sample size is dropping below 5. This may indicate that the data have some strange behviors at certain points in time where the model cannot explain the data. We noted earlier that there seemed to be some outlier with Russian hackers stealing Bitcoin in the Ethereum data; future analysis should take this into account, and attempt to find a better fit, or at least provide some type of hacking term or human behavior term in the model.
+
+
+## 5. Conclusion and Comparsion Between Benchmark and POMP models
+
+The log-likelihood for the ARIMA-GARCH model is 28587.42 on 7 parameters.
+The log-likelihood for the Heston model is roughly 34975.32 for 6 parameters.
+The log-likelihood for the Breto model is 28977 for 6 parameters.
+
+We see that the Heston model is likely the best model for understanding the dynamics of crypto volatility. It also has the benefit of the interpretability of parameters. Diagnostically, it also performs a little bit better, with more parameters converging than the Breto model.
+
+
+## 6. Reference

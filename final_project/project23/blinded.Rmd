@@ -1,0 +1,778 @@
+---
+title: "STATS 531 Final Project"
+date: "4/19/2022"
+output:
+  html_document:
+    code_folding: hide
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, include=FALSE}
+library(tidyverse)
+library(pomp)
+library(foreach)
+library(doParallel)
+registerDoParallel()
+library(doRNG)
+registerDoRNG(625904618)
+```
+
+# Introduction
+
+What started as a few reported cases back in December 2019, the Coronavirus disease 2019 (COVID-19) rapidly turned into a pandemic that affected millions of people all across the world. Since COVID-19 was first declared a pandemic in March 2020, many countries have been implementing their own safety guidelines and regulations in hopes of decreasing the number of positive cases. As of 2022, there have been several variants of the Coronavirus disease discovered (i.e. Delta, Omicron), each with different transmission rates and reported symptoms. Although there has been a considerable amount of improvement in preventing the spread of COVID-19 through the development of vaccines and implementation of health guidelines since the start of the virus, COVID-19 remains a widely researched, yet difficult topic given its uncertainty and variability. 
+
+In our project, we focus on the COVID-19 cases in New York, which has one of the highest number of covid cases in the United States. More specifically, we focus on the number of COVID-19 cases in New York City, which has a population size of roughly 18 million[1], the highest number in the state of New York. Our objective is to gain understanding of the trend and spread of COVID-19 cases in a highly affected area. In our analysis, we fit the Susceptible-Infectious-Recovered (SIR) compartmental model, as well as other variations, which includes the Susceptible-Exposed-Infection-Recovered (SEIR) model and the Susceptible-Exposed-Infection-Quarantined-Recovered (SEIQR) models. Through the comparison of their log-likelihoods, we see which components of the model are most significant in explaining the behavior of COVID-19 in New York City.
+
+# Data 
+
+The dataset we used comes from the website of New York government[2], which we filtered to only the data from New York City. The data contains the number of positive cases in New York city and ranges from March 1, 2020 to April 14, 2022. 
+
+# Exploratory Analysis
+
+From the time series plot of COVID-19 cases in New York City, we see primarily three regions with peaks in the number of positive cases. We see a small peak around April 2020, soon after COVID-19 was declared a pandemic, and a small peak around January 2021, right before vaccines became readily available for everyone. The largest peak occured around January 2022, and this could have been due to several different factors, such as the presence of new variants, surge in the number of tourists and amount of travel, less strict regulations, and more.   
+
+```{r, echo=FALSE}
+data = read.csv("New_York_State_Statewide_COVID-19_Testing.csv") %>%
+  filter(County == "New York City") %>%
+  select(-Geography,-County,-Cumulative.Number.of.Tests.Performed,-Cumulative.Number.of.Positives)
+data = rename(data,date=Test.Date,pos=New.Positives,total=Total.Number.of.Tests.Performed,ratio=Test...Positive)
+data$date=as.Date(data$date,format='%m/%d/%Y')
+data = data %>% arrange(date)
+
+data %>%
+  ggplot(aes(x = date, y = pos,group=1)) +
+  geom_line() +
+  xlab("Time") + 
+  ylab("Number of Positive Cases")+
+  ggtitle("Number of Positive Cases in New York City from Mar 2020 to Apr 2022")
+```
+
+For our project, we found it difficult to model and account for several peaks in the data. Therefore, we focus on only modeling the Omicron variant, which is present in the highest peak in the data from December 4, 2021 to February 1, 2022.
+
+```{r, echo=FALSE}
+df = data.frame(data) %>%
+  filter(date < as.Date("2022-02-01") & date>as.Date("2021-12-04")) %>%
+  mutate(time = 1:n())
+
+df %>%
+  ggplot(aes(x = date, y = pos,group=1)) +
+  geom_line() +
+  xlab("Time") + 
+  ylab("Number of Positive Cases")+
+  ggtitle("Number of Positive Cases in New York City from Dec 2021 to Feb 2022")
+```
+
+# SIR Model
+
+We first consider the SIR model, as it is a basic model and we want to see whether it can do a good job in fitting the data. The SIR model is consist of three stages:
+
+S: susceptible (all individuals)
+
+I: infected (symptomatic)
+
+R: removed (recovered or deceased)
+
+```{r fig1, out.width = '100%', echo=F}
+knitr::include_graphics("SIR.png")
+```
+
+And the model is given by following expression:
+
+\[\begin{eqnarray}
+\frac{dS(t)}{dt} &=& \frac{-\beta I(t) S(t)}{N}, \\
+\frac{dI(t)}{dt} &=& \frac{\beta I(t) S(t)}{N} - \gamma I(t),\\
+\frac{dR(t)}{dt} &=& \gamma I(t),\\
+S(t) + &I(t)& + R(t) = N, \ \ \forall t
+\end{eqnarray}\]
+
+The `S(t)` represent the susceptible population at time t, `I(t)` represents the infected population at time t, `R(t)` represents the recovered population at time t, and `N` represents the total population in this area. The transmission rate is $\beta$, the recovery rate is $\mu_{IR}$.
+
+Also, the initial value of `I` will be the active population on the first day, due to the lack of relevant data. Considering that Omicron is highly infectious, but have milder symptoms and therefore may not be reported, we assume it to be 5000. This active population represents the confirmed cases that have not been resolved, which also means infectious population.The population of New York City, or `N`, is 1886700[3]. For the initial value of `S`, as we do not know the true value, we will use the fraction of total population, which is represented by $\eta$, to predict the `S(0)`. There is an accumulator variable `H`, which is not shown in the expression above, that is used to tally only the daily confirmed cases, such that $\text{reports}_t \sim \text{Binomial}(H(t), \rho)$, where $\rho$ is the reporting rate, and it will be reset to zero at the beginning of each day.[5] 
+
+Because the population of New York city changes relatively slowly[3], we will not consider the death rate and how the population of recovered individuals will be affected in this project.
+
+## Initial SIR Model
+
+After many attempts on different parameters, we choose $\beta=0.48$, $\mu_{IR}=0.1$, $\rho=0.74$, $\eta=0.95$ as our initial parameters. We found that a larger value of $\eta$ fits the data better, which may be because most of the population had no resistance to Omicron in its early stage[4].
+
+```{r, warning=FALSE, message=FALSE}
+sir_step <- Csnippet("
+double dN_SI = rbinom(S,1-exp(-Beta*I/N*dt)); 
+double dN_IR = rbinom(I,1-exp(-mu_IR*dt));
+S -= dN_SI;
+I += dN_SI - dN_IR;
+R += dN_IR;
+H += dN_IR;
+")
+
+sir_init <- Csnippet("
+S = nearbyint(eta*N);
+I = 5000;
+R = nearbyint((1-eta)*N);
+H = 0;
+")
+
+dmeas <- Csnippet("
+      double ll = dbinom(pos,H,rho,give_log);
+      lik =  (!isfinite(ll) ? -1000 : ll );
+")
+
+rmeas <- Csnippet("
+pos = rbinom(H,rho);
+")
+
+# SIR Model
+covidSIR = df %>%
+  pomp(
+    times="time",t0=0,
+    rprocess=euler(sir_step,delta.t=1),
+    rinit=sir_init,
+    rmeasure=rmeas,
+    dmeasure=dmeas,
+    accumvars="H",
+    partrans=parameter_trans(
+      log=c("Beta","mu_IR"),
+      logit=c("rho","eta")
+    ),
+    statenames=c("S","I","R","H"),
+    paramnames=c("Beta","mu_IR","eta","rho","N")
+  )
+
+set.seed(20220419)
+
+# Population size
+pop = 1886700 
+
+# Initial guesses of the parameters for SIR model
+sir_params=c(Beta=0.48,mu_IR=0.27,rho=0.74,eta=0.95,N=pop)
+
+# Simulation
+covidSIR %>%
+  simulate(params=sir_params, nsim=20,format="data.frame", include.data=TRUE) %>%
+  ggplot(aes(x=time,y=pos,group=.id,color=.id=="data"))+
+  geom_line()+
+  xlab("Time") + 
+  ylab("Number of Positive Cases")+
+  scale_color_hue("",breaks=c("FALSE","TRUE"),labels=c("estimated","observed"))
+```
+
+The likelihood estimate of the initial guess is -76015.4391 with a Monte Carlo standard error of 201.8824.
+
+```{r, warning=FALSE, message=FALSE, comment=NA}
+registerDoRNG(123294940)
+
+# Calculate the likelihood of the initial guess
+foreach(i=1:10,.combine=c) %dopar% {
+  library(pomp)
+  covidSIR %>% pfilter(params=sir_params,Np=5000)
+} -> sir_pf
+
+sir_pf %>% logLik() %>% logmeanexp(se=TRUE) -> sir_L_pf
+
+sir_pf[[1]] %>% 
+  coef() %>% 
+  bind_rows() %>% 
+  bind_cols(loglik=sir_L_pf[1],loglik.se=sir_L_pf[2]) %>%
+  write_csv("sir_lik.csv")
+
+sir_L_pf
+```
+
+The simulations based on the starting values are able to capture general trend of the data, but they seem a little too smooth and do not model the peaks well. Next, we will use iterative filtering to search for the maximum likelihood estimates (MLE).
+
+## SIR Local Search
+
+We first run a local search that starts from our initial guess using iterated filtering with 50 iterations. From the trace plot we can see that the likelihood is increasing for some of the runs, while others are stuck in the local maxima and have trouble climbing up the likelihood surface. 
+
+```{r, warning=FALSE, message=FALSE, results='hide'}
+registerDoRNG(20220419)
+
+bake(file="local_search_sir.rds",{
+  foreach(i=1:20,.combine=c) %dopar% { # 20 calculation in total
+    library(pomp) # make sure the library is loaded
+    library(tidyverse)
+    covidSIR %>%
+      mif2( #iterated filtering in pomp
+        params=sir_params,
+        Np=2000, Nmif=50, # use 2000 particles in filter, perform 50 iterations
+        cooling.fraction.50=0.5,
+        rw.sd=rw.sd(Beta=0.02,rho=0.02, eta=ivp(0.02), mu_IR=0.02) # random walk standard deviation; ivp: indicate value parameter
+      )
+  } -> sir_local
+  sir_local
+}) -> sir_local
+
+sir_local %>%
+  traces() %>%
+  reshape2::melt() %>%
+  ggplot(aes(x=iteration,y=value,group=L1,color=factor(L1)))+
+  geom_line()+
+  facet_wrap(~variable,scales="free_y")
+```
+
+### Results {.tabset}
+
+The search result table displays six groups of estimates with the maximum likelihood values. The estimated parameters and likelihood are both stable, and the maximum likelihood estimate (MLE) obtained a log likelihood of -50126.19 and a standard error of 9.831, which is an improvement from our initial guess.
+
+#### Likelihood Surface
+
+```{r, warning=FALSE, message=FALSE, results='hide'}
+bake(file="local_search_lik_sir.rds",{
+  foreach(mf=sir_local,.combine=rbind) %dopar% {
+    library(pomp)
+    library(tidyverse)
+    evals <- replicate(10, logLik(pfilter(mf,Np=20000))) # for each 20 parameter estimates, run 10 pfilter with 20,000 particles
+    ll <- logmeanexp(evals,se=TRUE)
+    mf %>% coef() %>% bind_rows() %>%
+      bind_cols(loglik=ll[1],loglik.se=ll[2])
+  } %>% filter(is.finite(loglik))  -> sir_lik_local
+  sir_lik_local
+}) -> sir_lik_local
+
+read_csv("sir_lik.csv") %>%
+  bind_rows(sir_lik_local) %>%
+  arrange(-loglik) %>%
+  filter(is.finite(loglik)) %>%
+  write_csv("sir_lik.csv")
+
+pairs(~loglik+Beta+mu_IR+eta+rho,data=sir_lik_local,pch=16)
+```
+
+#### Log-Likelihood
+
+```{r}
+sir_lik_local %>% arrange(-loglik) %>% head %>% 
+  knitr::kable(digits = 3, caption = "SIR Local Search Results")
+```
+
+## SIR Global Search
+
+Next, we will perform a global search from multiple starting points, using multiple stages of iterated filtering process with longer iterations and a gradually decreasing magnitude of perturbations. We randomly draw 100 sets of starting values from a multivariate uniform distribution where $\beta\in[1,10]$, $\mu_{IR}\in[0,7]$, $\rho\in[0,0.4]$, $\eta\in[0.4,0.6]$. 
+The final MLE results are shown in the table below.
+
+### Results {.tabset}
+
+From the simulations, we see that the fitting result we get is not as good as the initial value, therefore suggesting the need for further exploration. Perhaps adding another component in the model will improve the fit.
+
+#### Log-Likelihood
+
+```{r}
+set.seed(2062379496)
+
+runif_design(
+  lower=c(Beta=1,mu_IR=0, rho=0,eta=0.4),
+  upper=c(Beta=10,mu_IR=7, rho=0.4,eta=0.6),
+  nseq=100
+) -> guesses
+
+mf1 <- sir_local[[1]]
+
+fixed_params <- c(N=1886700)
+
+bake(file="global_search_sir.rds",{
+  registerDoRNG(1270401374)
+  foreach(guess=iter(guesses,"row"), .combine=rbind) %do% {
+    mf1 %>%
+      mif2(params=c(unlist(guess),fixed_params)) %>%
+      mif2(Nmif=50) -> mf
+    replicate(
+      10,
+      mf %>% pfilter(Np=20000) %>% logLik()
+    ) %>%
+      logmeanexp(se=TRUE) -> ll
+    mf %>% coef() %>% bind_rows() %>%
+      bind_cols(loglik=ll[1],loglik.se=ll[2])
+  } -> results
+  results
+}) %>%
+  filter(is.finite(loglik)) -> results
+
+results %>% arrange(-loglik) %>% head %>% 
+  knitr::kable(digits = 3, caption = "SIR Global Search Results")
+```
+
+#### Simulations with the MLE
+
+```{r, warning=FALSE, message=FALSE}
+# MLE result of the parameters for SIR model
+opt_sir_params=results %>% arrange(-loglik) %>% slice(1) %>% select(-starts_with("loglik")) %>% unlist()
+
+# Simulation
+covidSIR %>% 
+  simulate(params=opt_sir_params, nsim=20,format="data.frame", include.data=TRUE) %>%
+  ggplot(aes(x=time,y=pos,group=.id,color=.id=="data"))+
+  geom_line()+
+  xlab("Time") + 
+  ylab("Number of Positive Cases")+
+  scale_color_hue("",breaks=c("FALSE","TRUE"),labels=c("estimated","observed"))
+```
+
+# SEIR Model
+
+Compared to the SIR model, the SEIR model adds a stage “E” which means infected individuals must pass a period of latency before becoming infectious[6][7]. In practice, SEIR model is more adaptable than SIR model.
+ 
+```{r fig2, out.width = '100%', echo=F}
+knitr::include_graphics("SEIR.png")
+```
+
+The basic model assumptions and settings are consistent with the SIR model. In addition, we set the initial value of E as 10000[8].
+
+## Initial SEIR Model
+
+We set $\beta=2.1$, $\mu_{EI}=0.088$, $\mu_{IR}=0.25$, $\rho=0.8$, $\eta=0.87$ as our initial values for the model. However, we see from the simulations that the curve is still too smooth to fully capture the peaks of the data.
+
+```{r, warning=FALSE, message=FALSE}
+seir_step <- Csnippet("
+  double dN_SE = rbinom(S,1-exp(-Beta*I/N*dt));
+  double dN_EI = rbinom(E,1-exp(-mu_EI*dt));
+  double dN_IR = rbinom(I,1-exp(-mu_IR*dt));
+
+  S -= dN_SE;
+  E += dN_SE - dN_EI;
+  I += dN_EI - dN_IR;
+  R += dN_IR;
+  H += dN_IR;
+")
+
+seir_init <- Csnippet("
+  S = nearbyint(eta*N);
+  E = 10000;
+  I = 7000;
+  R = nearbyint((1-eta)*N);
+  H = 0;
+")
+
+dmeas <- Csnippet("
+  double ll = dbinom(pos,H,rho,give_log);
+  lik =  (!isfinite(ll) ? -1000 : ll );
+")
+
+rmeas <- Csnippet("
+  pos = rbinom(H,rho);
+")
+
+# SEIR Model
+covidSEIR = df %>%
+  pomp(
+    times="time",t0=0,
+    rprocess=euler(seir_step,delta.t=7),
+    rinit=seir_init,
+    rmeasure=rmeas,
+    dmeasure=dmeas,
+    accumvars="H",
+    partrans=parameter_trans(
+      log=c("Beta","mu_EI", "mu_IR"),
+      logit=c("rho","eta")
+    ),
+    statenames=c("S","E","I","R","H"),
+    paramnames=c("Beta","mu_EI","mu_IR","eta","rho","N")
+  )
+
+set.seed(5312021)
+
+# Initial guesses of the parameters for SEIR model
+seir_params=c(Beta=2.1,mu_EI=0.088,mu_IR=0.25,rho=0.8,eta=0.87,N=pop)
+
+# Simulation
+covidSEIR %>%
+  simulate(params=seir_params, nsim=20,format="data.frame", include.data=TRUE) %>%
+  ggplot(aes(x=time,y=pos,group=.id,color=.id=="data"))+
+  geom_line()+
+  xlab("Time") + 
+  ylab("Number of Positive Cases")+
+  scale_color_hue("",breaks=c("FALSE","TRUE"),labels=c("estimated","observed"))
+```
+
+The likelihood estimate of the initial guess is -164056.1595 with a Monte Carlo standard error of 231.5666. Next, we will use iterative filtering to search for the MLE.
+
+```{r, warning=FALSE, message=FALSE, comment=NA}
+registerDoRNG(123294940)
+
+# Calculate the likelihood of the initial guess
+foreach(i=1:10,.combine=c) %dopar% {
+  covidSEIR %>% pfilter(params=seir_params,Np=5000)
+} -> seir_pf
+
+seir_pf %>% logLik() %>% logmeanexp(se=TRUE) -> seir_L_pf
+
+seir_pf[[1]] %>% 
+  coef() %>% 
+  bind_rows() %>% 
+  bind_cols(loglik=seir_L_pf[1],loglik.se=seir_L_pf[2]) %>%
+  write_csv("seir_lik.csv")
+
+seir_L_pf
+```
+
+## SEIR Local Search
+
+We conduct a local search that starts from our initial guess using iterated filtering with 20 iterations. From the trace plot we can see that the likelihood is increasing for most of the runs, $\mu_{IR}$ decreases and converges, but other parameters cannot be determined.
+
+```{r, warning=FALSE, message=FALSE}
+registerDoRNG(482947940)
+
+bake(file="local_search_seir.rds",{
+  foreach(i=1:20,.combine=c) %dopar% {
+    covidSEIR %>%
+      mif2(
+        params = seir_params,
+        Np=5000, Nmif=20,
+        cooling.fraction.50=0.5,
+        rw.sd=rw.sd(Beta=0.02, rho=0.02, mu_EI=0.02, mu_IR=0.02, eta=ivp(0.02)),
+        partrans=parameter_trans(log=c("Beta", "mu_EI"),logit=c("rho","eta")),
+        paramnames=c("Beta","mu_EI", "rho","eta")
+      )
+  } -> seir_local
+  seir_local
+}) -> seir_local
+
+
+seir_local %>%
+  traces() %>%
+  reshape2::melt() %>%
+  ggplot(aes(x=iteration,y=value,group=L1,color=factor(L1)))+
+  geom_line()+
+  guides(color=FALSE)+
+  facet_wrap(~variable,scales="free_y")
+```
+
+### Results {.tabset}
+
+The maximum likelihood estimate is -85890.82, which is higher than that of our initial guess. However, it is smaller than the MLE of the SIR model.
+
+#### Likelihood Surface
+
+```{r, warning=FALSE, message=FALSE}
+registerDoRNG(900242057)
+
+bake(file="local_search_lik_seir.rds",{
+  foreach(mf=seir_local,.combine=rbind) %do% {
+    evals <- replicate(10, logLik(pfilter(mf,Np=20000)))
+    ll <- logmeanexp(evals,se=TRUE)
+    mf %>% coef() %>% bind_rows() %>%
+      bind_cols(loglik=ll[1],loglik.se=ll[2])
+  } %>% filter(is.finite(loglik))  -> seir_lik_local
+  seir_lik_local
+}) -> seir_lik_local
+
+pairs(~loglik+Beta+mu_IR+eta+rho,data=sir_lik_local,pch=16)
+```
+
+#### Log-Likelihood
+
+```{r}
+seir_lik_local %>% arrange(-loglik) %>% head %>% 
+  knitr::kable(digits = 3, caption = "SEIR Local Search Results")
+```
+
+## Global Search
+
+Again, we will perform a global search from multiple starting points, using multiple stages of iterated filtering process with longer iterations and gradually decreasing the magnitude of perturbations[9]. We randomly draw 100 sets of starting values from a multivariate uniform distribution where $\beta\in[2,10]$, $\mu_{EI}\in[0.1,0.35]$, $\mu_{IR}\in[0,0.5]$, $\rho\in[0.65,0.85]$, $\eta\in[0.85,0.89]$. The final MLE results are shown in the table below.
+
+### Results {.tabset}
+
+The likelihood estimate of global search is -85130.68, which is a little higher than that of the local search. However, it is still less than the MLE of the SIR model global search. It semes that the fitting of the simulations using the global estimates is also not as good as that of the simulations using our initial values. 
+
+#### Log-Likelihood
+
+```{r, warning=FALSE, message=FALSE}
+set.seed(2062379496)
+
+runif_design(
+  lower=c(Beta=2,mu_EI=0.1,mu_IR=0,rho=0.65,eta=0.85),
+  upper=c(Beta=10,mu_EI=0.35,mu_IR=0.5,rho=0.85,eta=0.89),
+  nseq=100
+) -> guesses
+
+mf1 <- seir_local[[1]]
+
+fixed_params <- c(N=1886700)
+
+bake(file="global_search_seir.rds",{
+  registerDoRNG(1270401374)
+  foreach(guess=iter(guesses,"row"), .combine=rbind) %do% {
+    mf1 %>%
+      mif2(params=c(unlist(guess),fixed_params)) %>%
+      mif2(Nmif=20) -> mf
+    replicate(
+      10,
+      mf %>% pfilter(Np=20000) %>% logLik()
+    ) %>%
+      logmeanexp(se=TRUE) -> ll
+    mf %>% coef() %>% bind_rows() %>%
+      bind_cols(loglik=ll[1],loglik.se=ll[2])
+  } -> results
+  results
+}) %>%
+  filter(is.finite(loglik)) -> results
+
+results %>% arrange(-loglik) %>% head %>% 
+  knitr::kable(digits = 3, caption = "SEIR Global Search Results")
+```
+
+#### Simulations with the MLE
+
+```{r, warning=FALSE, message=FALSE}
+# MLE result of the parameters for SEIR model
+opt_seir_params=results %>% arrange(-loglik) %>% slice(1) %>% select(-starts_with("loglik")) %>% unlist()
+
+# Simulation
+covidSEIR %>%
+  simulate(params=opt_seir_params, nsim=20,format="data.frame", include.data=TRUE) %>%
+  ggplot(aes(x=time,y=pos,group=.id,color=.id=="data"))+
+  geom_line()+
+  xlab("Time") + 
+  ylab("Number of Positive Cases")+
+  scale_color_hue("",breaks=c("FALSE","TRUE"),labels=c("estimated","observed"))
+```
+
+# SEIQR Model
+
+The Susceptible-Exposed-Infectious-Quarantine-Removed and/or Recovered (SEIQR) model builds off of the SEIR model by including a "Q" term. Considering that isolation is mandatory when exposed to or infected with COVID-19 during the epidemic, we added this factor to the model to explore its effect. SEIQR is defined in a similar as the above models, with slight adjustments to the "E" stage, which now refers to the state where individuals are infected but not infectious, and the "Q" stage, which refers to the quarantine state[10]. 
+
+```{r fig3, out.width = '100%', echo=F}
+knitr::include_graphics("SEIQR.png")
+```
+
+While the isolation/quarantine policy in New York is enforced, we do not expect everyone to abide by this rule. Considering this fact, we set the initial value of Q to be 200.
+
+## Initial SEIQR Model
+
+We set our initial values to be $\beta=2$, $\mu_I=0.07$, $\mu_{R1}=0.08$, $\rho=0.4$, $\mu_{R2}=0.1$, $\eta=0.05$, $N=1886700$. From the overall trend, the model roughly describes the actual curve, and there is no excessive smoothness. However, it is evident that there is still room for improvement in the selecting the right parameters.
+
+```{r, warning=FALSE, message=FALSE}
+seiqr_step <- Csnippet("
+  double t1 = rbinom(S,1-exp(-Beta*I*dt));
+  double t2 = rbinom(E,1-exp(-dt*mu_I));
+  double t3 = rbinom(I,1-exp(-dt*mu_R1));
+  double t4 = rbinom(Q,1-exp(-dt*mu_R2));
+  S -= t1;
+  E += t1 - t2;
+  I += t2 - t3;
+  Q += t3 - t4;
+  R += t4;
+"
+)
+
+seiqr_dmea <- Csnippet("
+  double ll = dnorm(pos,Q,rho*Q+1e-10,give_log);
+  lik = (!isfinite(ll) ? -1000 : ll );
+"
+)
+
+seiqr_rmea <- Csnippet("
+  pos= rnorm(Q,rho*Q+1e-10);
+"
+)
+
+seiqr_rinit <- Csnippet("
+  S=nearbyint(eta*N);
+  E=10000;
+  I=7000;
+  Q=200;
+  R=nearbyint((1-eta)*N);
+"
+)
+
+covid_statenames <- c("S","E","I","Q","R")
+covid_paramnames <- c("Beta","rho","mu_I","mu_R1","mu_R2","eta","N")
+fixed <- c(N=1886700)
+covidSEIQR <- pomp(
+  data=df,
+  times="time",
+  t0=0,
+  rprocess=euler(
+    step.fun=seiqr_step,
+    delta.t=1),
+  rmeasure=seiqr_rmea,
+  dmeasure=seiqr_dmea,
+  partrans=parameter_trans(
+    log=c("Beta","mu_I","mu_R1","mu_R2","eta","rho")),
+  statenames=covid_statenames,
+  paramnames=covid_paramnames,
+  rinit=seiqr_rinit
+)
+
+seiqr_params = c(Beta=2,mu_I=0.07,mu_R1=0.08,rho=0.4,mu_R2=0.1,eta=0.05,N=1886700)
+sims <- simulate(covidSEIQR,params=seiqr_params,
+                 nsim=5,format="data.frame",include=TRUE,seed = 20220419)
+
+ggplot(sims,mapping=aes(x=time,y=pos,group=.id,color=.id=="data"))+
+  geom_line()+scale_color_hue("",breaks=c("FALSE","TRUE"),labels=c("estimated","observed"))+labs(x="Time",y="Number of Positive Cases")
+```
+
+The likelihood estimate of the initial guess is -6.088247e+02 with a Monte Carlo standard error of 5.111665e-03, which is much better than the estimates of the two previous models. Next, we will use iterative filtering to search for the MLE.
+
+```{r, warning=FALSE, message=FALSE, comment=NA}
+registerDoRNG(123294940)
+
+# Calculate the likelihood of the initial guess
+foreach(i=1:10,.combine=c) %dopar% {
+  covidSEIQR %>% pfilter(params=seiqr_params,Np=5000)
+} -> seiqr_pf
+
+seiqr_pf %>% logLik() %>% logmeanexp(se=TRUE) -> seiqr_L_pf
+
+seiqr_pf[[1]] %>% 
+  coef() %>% 
+  bind_rows() %>% 
+  bind_cols(loglik=seiqr_L_pf[1],loglik.se=seiqr_L_pf[2]) %>%
+  write_csv("seiqr_lik.csv")
+
+print(seiqr_L_pf)
+```
+
+## SEIQR Local Search
+
+The plot of the log likelihood seems to fluctuate around a mean value, with no apparent convergence. Other parameters also fluctuate to a certain extent, with some showing more of a convergence than others. These results may be due to an inappropriate model specification, given that the log likelihood does not seem to converge well[11].
+
+```{r, warning=FALSE, message=FALSE}
+registerDoRNG(482947940)
+
+bake(file="local_search_seiqr.rds",{
+  foreach(i=1:20,.combine=c) %dopar% {
+    covidSEIQR %>%
+      mif2(
+        params = seiqr_params,
+        Np=5000, Nmif=20,
+        cooling.fraction.50=0.5,
+        rw.sd=rw.sd(Beta=0.02, rho=0.02, mu_I=0.02, mu_R1=0.02, mu_R2=0.02, eta=ivp(0.02)),
+        partrans=parameter_trans(log=c("Beta", "mu_I", "mu_R1", "mu_R2"),logit=c("rho","eta")),
+        paramnames=c("Beta","mu_I", "mu_R1", "mu_R2", "rho","eta")
+      )
+  } -> seiqr_local
+  seiqr_local
+}) -> seiqr_local
+
+seiqr_local %>%
+  traces() %>%
+  melt() %>%
+  ggplot(aes(x=iteration,y=value,group=L1,color=factor(L1)))+
+  geom_line()+
+  xlab("Time") + 
+  ylab("Number of Positive Cases")+
+  guides(color=FALSE)+
+  facet_wrap(~variable,scales="free_y")
+```
+
+### Results {.tabset}
+
+The likelihood estimate is -602.140, higher than that of the initial guess and much higher than that of the previous two models. We also see that the standard error is very small, with a value of 0.001.
+
+#### Likelihood Surface
+
+```{r, warning=FALSE, message=FALSE}
+registerDoRNG(900242057)
+bake(file="local_search_lik_seiqr.rds",{
+  foreach(mf=seiqr_local,.combine=rbind) %do% {
+    evals <- replicate(10, logLik(pfilter(mf,Np=20000)))
+    ll <- logmeanexp(evals,se=TRUE)
+    mf %>% coef() %>% bind_rows() %>%
+      bind_cols(loglik=ll[1],loglik.se=ll[2])
+  } %>% filter(is.finite(loglik))  -> seiqr_lik_local
+  seiqr_lik_local
+}) -> seiqr_lik_local
+
+read_csv("seiqr_lik.csv") %>%
+  bind_rows(seiqr_lik_local) %>%
+  arrange(-loglik) %>%
+  filter(is.finite(loglik)) %>%
+  write_csv("seiqr_lik.csv")
+
+pairs(~loglik+Beta+mu_I+mu_R1+mu_R2+eta+rho,data=seiqr_lik_local,pch=16)
+```
+
+#### Log-Likelihood
+
+```{r}
+seiqr_lik_local %>% arrange(-loglik) %>% head %>% 
+  knitr::kable(digits = 3, caption = "SEIQR Local Search Results")
+```
+
+## SEIQR Global Search
+
+We now perform a global search from multiple starting points using iterative filtering. We randomly draw 100 sets of starting values from a multivariate uniform distribution where $\beta\in[1,5]$, $\mu_I\in[0.05,0.09]$, $\mu_{R1}\in[0.08,0.12]$, $\mu_{R2}\in[0.09,0.12]$, $\rho\in[0.4,0.6]$, $\eta\in[0.04,0.0525]$. The final MLE results are shown in the table below.
+
+### Results {.tabset}
+
+The results obtained by global search and local search are similar. There is little difference between the simulations using the parameters selected through global search and the simulations using our initial values. In general, they are able to detect the trend, but evidently they are still different from the actual data.
+
+#### Log-Likelihood
+
+```{r, warning=FALSE, message=FALSE}
+set.seed(2062379496)
+
+runif_design(
+  lower=c(Beta=1,mu_I=0.05,mu_R1=0.08,mu_R2=0.09,rho=0.4,eta=0.04),
+  upper=c(Beta=5,mu_I=0.09,mu_R1=0.12,mu_R2=0.12,rho=0.6,eta=0.0525),
+  nseq=100
+) -> guesses
+
+mf1 <- seiqr_local[[1]]
+
+fixed_params <- c(N=1886700)
+
+bake(file="global_search_seiqr.rds",{
+  registerDoRNG(1270401374)
+  foreach(guess=iter(guesses,"row"), .combine=rbind) %do% {
+    mf1 %>%
+      mif2(params=c(unlist(guess),fixed_params)) %>%
+      mif2(Nmif=20) -> mf
+    replicate(
+      10,
+      mf %>% pfilter(Np=20000) %>% logLik()
+    ) %>%
+      logmeanexp(se=TRUE) -> ll
+    mf %>% coef() %>% bind_rows() %>%
+      bind_cols(loglik=ll[1],loglik.se=ll[2])
+  } -> results
+  results
+}) %>%
+  filter(is.finite(loglik)) -> results
+
+results %>% arrange(-loglik) %>% head %>% 
+  knitr::kable(digits = 3, caption = "SEIQR Global Search Results")
+```
+
+#### Simulations with the MLE
+
+```{r, warning=FALSE, message=FALSE}
+# MLE result of the parameters for SEIR model
+opt_seiqr_params=results %>% arrange(-loglik) %>% slice(1) %>% select(-starts_with("loglik")) %>% unlist()
+
+# Simulation
+covidSEIQR %>%
+  simulate(params=opt_seiqr_params, nsim=5,format="data.frame", include.data=TRUE) %>%
+  ggplot(aes(x=time,y=pos,group=.id,color=.id=="data"))+
+  geom_line()+
+  xlab("Time") + 
+  ylab("Number of Positive Cases")+
+  scale_color_hue("",breaks=c("FALSE","TRUE"),labels=c("estimated","observed"))
+```
+
+# Conclusion
+
+From our analysis, we see that the three POMP models are able to describe the actual curve of the data to a certain extent. With the SIR and SEIR models, we were able to find initial values that better fit the data; however, the fitting effect of the MLE estimation obtained through global search is worse. This is a result worthy of further study. The log likelihood value of the SEIQR model is the lowest, and the fitting effect of the MLE estimation is the best among the three models. From a statistical perspective, we would conclude this as the best fitting model for the data. However, it is noteworthy that the log likelihood for this model has strong fluctuations instead of a clear convergence.
+
+In terms of the parameters between the three models, we see that the biggest difference is in $\eta$, the initial susceptible fraction. The $\eta$ values obtained by the SIR and SEIR models are very large, but the $\eta$ values obtained by the SEIQR model are very small. Intuitively speaking, because the overall vaccination rate in New York is very high, most people should have a certain resistance to Omicron. Therefore, having a lower $\eta$ would make more sense, which the SEIQR model was able to capture.
+
+From both a statistical and intuitive standpoint, we conclude that the SEIQR model best models the number of positive COVID-19 cases in New York City from December 4, 2021 to February 1, 2022. This suggests the importance of considering "exposed" and "quarantine" stages to best understand the trend of the number of cases. While our analysis results indicate room for improvement in terms of model fitting and estimation, overall, they are able to depict the rise and fall of COVID-19 case numbers during the impact of the Omnicron variant. 
+
+# Reference
+[1]JHU COVID-19 Dashboard,https://gisanddata.maps.arcgis.com/apps/dashboards/index.html#/bda7594740fd40299423467b48e9ecf6 <br>
+[2]https://coronavirus.health.ny.gov/positive-tests-over-time-region-and-county <br>
+[3]https://www.macrotrends.net/cities/23083/new-york-city/population#:~:text=The%20metro%20area%20population%20of,a%200.07%25%20decline%20from%202018 <br>
+[4]https://statsandr.com/blog/covid-19-in-belgium/ <br>
+[5]https://ionides.github.io/531w21/final_project/project03/blinded.html <br>
+[6]https://ionides.github.io/531w21/final_project/project15/blinded.html <br>
+[7]https://kingaa.github.io/sbied/stochsim/notes.pdf <br>
+[8]https://julia.quantecon.org/continuous_time/seir_model.html <br>
+[9]https://kingaa.github.io/sbied/pfilter/notes.pdf <br>
+[10]https://www.ncbi.nlm.nih.gov/pmc/articles/PMC8053363/ <br>
+[11]https://www.pnas.org/doi/10.1073/pnas.2006520117 <br>

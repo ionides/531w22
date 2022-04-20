@@ -1,0 +1,586 @@
+---
+title: "STATS531 Final Project"
+output: html_document
+---
+
+```{r setup, include=FALSE, message = FALSE}
+knitr::opts_chunk$set(comment=NA)
+options(width = 70)
+
+library(tseries)
+library(fGarch) 
+library(forecast)
+library(doParallel)
+library(foreach)
+library(doRNG)
+library(plyr)
+library(ggplot2)
+library(dplyr)
+library(tidyverse)
+library(pomp)
+```
+
+<b><font size=5>1. Introduction</font></b>  
+Crude oil, is a naturally occurring, yellowish-black liquid found in geological formations, and is commonly refined into various fuels and chemicals that benefit people's life$^{1}$. The price of oil influences the costs of other production and manufacturing around the world. For example, there is a direct correlation between the cost of gasoline or airplane fuel to the price of transporting goods and people$^{2}$.  
+  
+Crude oil has always been one of the most widely used fuel sources around the world that is crucial to many industries. Crude oil is appreciated due to its scarcity and its global trade in markets. Since it is so widely welcomed and paid attention to, this project hopes to analyze the crude oil price with the following research question:
+**Can we use time series analysis to analyze crude oil prices?** 
+  
+This project downloads data from *ourworldindata*, which offers us the crude oil price over a range of timeframes from 1861 annually$^{3}$. 
+
+<b><font size=5>2. Exploratory Data Analysis</font></b>  
+<font size=5>2.1 Basic Analysis and Data Split</font>  
+As we can see from the following data structure, we find that there is a large value range for crude oil prices from 1861 to 2020. Among them, the maximum crude oil price is nearly two hundred times the minimum crude oil price. Since there is a large difference between crude oil prices in latest years and crude oil prices in years before 1980 and limited computation resources. We decide to split the data and focus on analyzing the crude oil price from 1980, which will be more useful for people to refer to for investment or industry development. Crude oil prices are influenced by many factors, e.g. quantity, speculation, temporary price fluctuations, invesment$^{4}$. In brief, the economy status may influence the crude oil price. As a result, our analysis will focus on years prior to 2020 since the economy is strongly impacted by COVID-19.  
+```{r, echo=FALSE, out.width="50%"}
+oil = read.csv("crude-oil-prices.csv")[,3:4]
+colnames(oil) <- c('Year','USD')
+plot(oil$Year, oil$USD,type="l",xlab = "Year", ylab = "USD", main = "Annual Crude Oil Price from 1861 to 2020")
+
+# Get and plot the forty years' data
+selected_oil = oil[120:160,]
+plot(selected_oil$Year, selected_oil$USD,type="l",xlab = "Year", ylab = "USD", main = "Annual Crude Oil Price from 1980 to 2020")
+```
+
+```{r,echo=FALSE}
+summary(oil$USD)
+summary(selected_oil$USD)
+```
+
+<font size=5>2.2 Autocorrelation and Data Preprocessing</font>  
+With the ACF figure below, we can see that there is substantial autocorrelation between crude oil price and its previous data, which suggests that it is not a stationary model, therefore driving us to take the log difference of crude oil price for further analysis.
+
+```{r, echo=FALSE, fig.align = 'center'}
+acf(selected_oil$USD,main = "Annual Crude Oil Price (USD)")
+```
+Since it is common to analyze the log returns of financial products rather than the raw difference in prices, it remains unsure whether log difference analysis could be used for crude oil prices. With plots below, we see that the annual crude oil price log difference appears stationary with no trend, with a mean around 0 and an unclear variance trend. Therefore, taking the log difference of crude oil prices may be an appropriate approach for further analysis. The acf plot for the log difference of crude oil price also suggests that there is no significant autocorrelation when lag is greater than 0, which can lead to an assumption that the data are independent.
+
+```{r, echo=FALSE, fig.align = 'center'}
+log_data = log(selected_oil$USD)
+ log_diff = c()
+ for (i in 1:(nrow(selected_oil)-1)){
+   log_diff[i] =  log_data[i+1] - log_data[i]
+ }
+
+ # The ultimate data for analysis
+ log_diff_data = data.frame(selected_oil$Year[1:nrow(selected_oil)-1], log_diff)
+ colnames(log_diff_data) <- c('Year','USD')
+ plot(log_diff_data$Year, log_diff_data$USD, type='l', xlab="Year", ylab="Log Difference", main="Annual Crude Oil Price Log Difference")
+ acf(log_diff_data$USD,main = "Annual Crude Oil Price Log Difference (USD)")
+```
+
+<b><font size=5>3. GARCH Model Analysis</font></b>  
+
+The ARCH(p) model is the model of an p autogressive conditional heteroskedasticity model, which has the form $Y_n = \epsilon_n \sqrt V_n$ where $\epsilon_{1:N}$ is white noise and $V_n = \alpha_0 + \sum_{j=1}^{p} \alpha_j Y^2_{n-j}$$^{5}$.  
+The generalized ARCH model, also known as GARCH(p, q), has the form: $Y_n=\epsilon_n \sqrt{V_n}$, where $V_n=\alpha_0 + \sum_{j=1}^{p} \alpha_j Y^2_{n-j} + \sum_{k=1}^{q} \beta_k V_{n-k}$ and $\epsilon_{1:N}$ is white noise$^{5}$.   
+
+<font size=5>3.1 GARCH Model Fitting</font>  
+```{r, echo=FALSE}
+library(fGarch) 
+Table_For_GARCH_AIC <- function(data,P,Q){
+  table <- matrix(NA,(P),(Q))
+  for(p in 1:P) {
+    for(q in 1:Q) {
+      temp.fit = garch(x = data, order = c(p,q), grad = "numerical", trace = FALSE)
+      table[p,q] <- 2*length(temp.fit$coef) - 2*as.numeric(logLik(temp.fit))
+    }
+  }
+  dimnames(table) <- list(paste("<b> p",1:P, "</b>", sep=""),paste("q",1:Q,sep=""))
+  table
+}
+aic_table <- Table_For_GARCH_AIC(log_diff_data[,2],5,5)
+require(knitr)
+# kable(aic_table,digits=2)
+```
+![](garch.jpg)
+From the table above, we can see that GARCH(1,1) model is most ideal due to its lowest AIC value, which is also a popular choice (Cowpertwait and Metcalfe, 2009)$^{5,6}$.
+
+
+<font size=5>3.2 GARCH Model Diagnostics</font>  
+Our GARCH(1,1) model has a log-likelihood of -3.331448, which will be used as a baseline for further comparison with our POMP model$^{6}$.
+```{r, echo=FALSE,include=FALSE}
+
+options (warn = -1)
+fit.garch <- garchFit(~garch(1,1), log_diff_data[,2], trace = F)
+summary(fit.garch)
+# fit.garch <- garch(log_diff_data[,2],grad = "numerical",trace = FALSE)
+# L.garch <- tseries:::logLik.garch(fit.garch)
+# fit.garch
+# L.garch
+```
+```{r, echo=FALSE, out.width="50%"}
+res = residuals(fit.garch)
+qqnorm(res, pch = 1, frame = FALSE, ylab="Residuals", main="QQ-plot for Residuals of GARCH(1, 1) model")
+qqline(res, col = "steelblue", lwd = 2)
+acf_plot = acf(res, main="ACF of Residuals of GARCH(1, 1) model")
+```
+As shown in the figures above, the residuals of GARCH(1, 1) model are heavy-tailed and there is no significant autocorrelation when lag is greater than 0.
+
+
+<b><font size=5>4. ARMA Model Analysis</font></b> 
+
+Since we don't observe any obvious periodical pattern in our data, so we will just consider ARMA($p$, $q$) here instead of the one with period and seasonality involved.
+
+ARMA($p$, $q$) model is given by $Y_n$ = $\phi_1Y_{n-1} + \phi_2Y_{n-2} + ... + \phi_pY_{n-p} + \epsilon_n + \psi_1\epsilon_{n-1}+...+\psi_q\epsilon_{n-q}$, where {$\epsilon_n$} is a white noise process with mean 0 and variance $\sigma^2$; $\phi_1 ...\phi_p$ is the coefficients of AR components, and $\psi_1 ...\psi_q$ is the coefficients of MA component. Furthermore, based on what we discussed in the class, using the backshift operator $B$, we can rewrite it more succinctly as : $^{5}$
+
+$\phi(B)(Y_n - \mu) = \psi(B)\epsilon_n$.
+
+We use the Akaike information criterion (AIC) as the criterion for  model selection among different choices of $p$ and $q$ for ARMA($p$, $q$) models. AIC is defined by $-2 \times \ell(\theta^*) + 2D$, where $\theta^*$ is the maximum value of the likelihood function for the model, and $D$ represents the number of estimated parameters in the model. Models with lower AIC values are usually preferred. Although based on what have discussed in class, AIC may have weak statistical properties when being viewed as a hypothesis test, it is still useful for narrowing down models choices with reasonable predictive performances. 
+
+```{r, echo=FALSE,message=FALSE}
+
+aic_table1 = function(data, P, Q){
+  table = matrix(NA, (P + 1), (Q + 1) )
+  for(p in 0:P){
+    for(q in 0:Q){
+      table[p+1, q+1] = Arima(data,
+                              order = c(p, 0, q),method = "ML"
+      )$aic
+    }
+  }
+  dimnames(table) = list(paste("AR", 0:P),
+                         paste("MA", 0:Q) )
+  table
+}
+knitr::kable(aic_table1(log_diff_data$USD, 4, 5)) 
+```
+From the table above, the recommended model is ARMA(0,0), which has the lowest AIC value. It's worth noticing that ARMA(0,0) is essentially a white noise model which is represented by $Y_n = \mu+\epsilon_n$, where {$\epsilon_n$} ~i.i.d. $N(0,\sigma^2)$. This means the model contains neither autoregressive nor moving average terms, which implies that the errors are uncorrelated across time. Thus, this white noise model won't give us too much information about the oil price and the model fitting goodness, and the lowest AIC of it may be due to the limited size of our data. Based on this, for the analysis purpose, we would like to consider the model with second lowest AIC value, which is ARMA(0,1). On the other hand, since higher AIC value might imply that there are some dependence relationships involved for the oil price between two successive years in this context, thus, we also pick ARMA(4,5) for the further comparison.
+
+To choose the model between ARMA(0,1) and ARMA(4,5), we use Wilk's approximation as the likelihood ratio test for hypothesis test, with the null hypothesis of choosing model ARMA(0,1) and alternative hypothesis of choosing model ARMA(4,5).
+
+According to the definition, the approximation under the null hypothesis is:
+
+$l_1 - l_0 \approx (1/2)\chi^2_{D_1-D_0}$,
+
+where $l_1$ and $l_0$ are the log likelihood maximization over $H_1$ and $H_0$, respectively; $D_1$ and $D_0$ are the number of parameters (dimension) under each hypothesis; $\chi^2_d$ is a chi-squared random variable on $d$ degrees of freedom; and $\approx$ means "is approximately distributed as".
+
+With this approximation, we can calculate the test statistics and when $l_1 - l_0$ is greater than the $(1/2)\chi^2_8$, we will reject $H_0$ (Since the reject region should be ($(1/2)\chi^2_8$, $\infty$) ). Computing by R, the value of $l_1 - l_0$ is 4.221351, which is less than $(1/2)\chi^2_8$ = 7.753657 at alpha = 0.05. Thus, we don't reject $H_0$ at $\alpha = 0.05$, and conclude that we should select ARMA(0,1) based on the Wilk's approximation.
+
+
+```{r, echo=FALSE}
+oil_arma01 <- arima(log_diff_data$USD,order = c(0,0,1))
+oil_arma45 <- arima(log_diff_data$USD,order = c(4,0,5))
+```
+
+```{r, echo=FALSE,include=FALSE}
+l1_l0 <- oil_arma45$loglik - oil_arma01$loglik
+l1_l0
+half_chi_squared <- (1/2) * qchisq(0.95, 8)
+half_chi_squared
+```
+
+#### Diagnostic plots for the ARMA model
+
+Now, we are going to check the basic assumptions for the ARMA model.
+
+##### Causality and Invertibility
+```{r, echo=FALSE}
+plot(oil_arma01, type = "both")
+```
+
+By looking at the plot for roots of the AR and MA polynomials, we can see since the $p$ component for AR is 0 in our case, and there is only one root for the MA component, where the inverse of it is within the unit circle. That is, the absolute values of MA roots are greater than 1, which means the fitted model is invertible.
+
+##### Normality 
+
+
+```{r, echo=FALSE}
+qqnorm(oil_arma01$residuals, main = "QQ-Plot: Residuals")
+qqline(oil_arma01$residuals)
+```
+
+From the QQ plot, we can see that although the majority of points are falling on the line, there is still a little bit right-skewed regarding the distribution of the residuals.
+
+
+
+<b><font size=5>5. POMP Model Analysis</font></b> 
+
+<font size=5>5.1 Build the POMP model</font> 
+
+We utilized the POMP model proposed in the lecture to analyze the volatility of SSE Composite Index. The equation and notations that we build for this POMP model are adopted from Breto (2014). Denote $H_n=log(\sigma^2_n)=2log(\sigma_n)$ and the model as follows:
+
+\begin{align}
+  Y_n &= exp(H_n/2) \epsilon_n \\
+  H_n &= \mu_h (1-\phi) + \phi H_{n-1} + \beta_{n-1} R_n exp(-H_{n-1}/2) + \omega_n \\
+  G_n &= G_{n-1}+\nu_n \\
+\end{align}
+
+where,
+\begin{align}
+  \beta_n &= Y_n \sigma_{\eta} \sqrt{1-\phi^2} \\
+  \sigma_{\omega} &= \sigma_{\eta} \sqrt{1-\phi^2} \sqrt{1-R_n^2} \\
+  \epsilon_n &\overset{i.i.d}{\sim} N(0, 1) \\
+  \nu_n &\overset{i.i.d}{\sim} N(0, \sigma_{\nu}^2) \\
+  \omega_n &\overset{i.i.d}{\sim} N(0, \sigma_{\omega}^2) \\
+  Rn &= \frac{exp(2G_n)-1}{exp(2G_n)+1}
+\end{align}
+
+
+```{r,echo=FALSE}
+oilprice_statenames <- c("H","G","Y_state")
+oilprice_rp_names <- c("sigma_nu","mu_h","phi","sigma_eta")
+oilprice_ivp_names <- c("G_0","H_0")
+oilprice_paramnames <- c(oilprice_rp_names,oilprice_ivp_names)
+```
+
+Here, we perform a series of steps to build POMP Model. First, two different POMP objects are built: one is for filtering and the other one is for simulation. After that, parameter transformations are conducted to do optimization procedures such as iterated filtering.$^{7}$ The pomp object, which is suitable for filtering is also built and then the model is simulated, and the parameters are initialized randomly as well.$^{7}$
+```{r,echo=FALSE}
+rproc1 <- "
+  double beta,omega,nu;
+  omega = rnorm(0,sigma_eta * sqrt( 1- phi*phi ) * 
+    sqrt(1-tanh(G)*tanh(G)));
+  nu = rnorm(0, sigma_nu);
+  G += nu;
+  beta = Y_state * sigma_eta * sqrt( 1- phi*phi );
+  H = mu_h*(1 - phi) + phi*H + beta * tanh( G ) 
+    * exp(-H/2) + omega;
+"
+rproc2.sim <- "
+  Y_state = rnorm( 0,exp(H/2) );
+ "
+
+rproc2.filt <- "
+  Y_state = covaryt;
+ "
+oilprice_rproc.sim <- paste(rproc1,rproc2.sim)
+oilprice_rproc.filt <- paste(rproc1,rproc2.filt)
+
+oilprice_rinit <- "
+  G = G_0;
+  H = H_0;
+  Y_state = rnorm( 0,exp(H/2) );
+"
+
+oilprice_rmeasure <- "
+   y=Y_state;
+"
+
+oilprice_dmeasure <- "
+   lik=dnorm(y,0,exp(H/2),give_log);
+"
+```
+
+
+
+
+```{r,echo=FALSE}
+oilprice_partrans <- parameter_trans(
+  log=c("sigma_eta","sigma_nu"),
+  logit="phi"
+)
+```
+
+
+```{r,echo=FALSE}
+oilprice.filt <- pomp(data=data.frame(
+    y=log_diff_data[,2],time=1:length(log_diff_data[,2])),
+  statenames=oilprice_statenames,
+  paramnames=oilprice_paramnames,
+  times="time",
+  t0=0,
+  covar=covariate_table(
+    time=0:length(log_diff_data[,2]),
+    covaryt=c(0,log_diff_data[,2]),
+    times="time"),
+  rmeasure=Csnippet(oilprice_rmeasure),
+  dmeasure=Csnippet(oilprice_dmeasure),
+  rprocess=discrete_time(step.fun=Csnippet(oilprice_rproc.filt),
+    delta.t=1),
+  rinit=Csnippet(oilprice_rinit),
+  partrans=oilprice_partrans
+)
+```
+
+
+```{r,echo=FALSE}
+params_test <- c(
+  sigma_nu = exp(-4.5),  
+  mu_h = -0.25,  	 
+  phi = expit(4),	 
+  sigma_eta = exp(-0.07),
+  G_0 = 0,
+  H_0=0
+)
+  
+sim1.sim <- pomp(oilprice.filt, 
+  statenames=oilprice_statenames,
+  paramnames=oilprice_paramnames,
+  rprocess=discrete_time(
+    step.fun=Csnippet(oilprice_rproc.sim),delta.t=1)
+)
+
+sim1.sim <- simulate(sim1.sim,seed=1,params=params_test)
+```
+
+
+
+```{r,echo=FALSE}
+sim1.filt <- pomp(sim1.sim, 
+  covar=covariate_table(
+    time=c(timezero(sim1.sim),time(sim1.sim)),
+    covaryt=c(obs(sim1.sim),NA),
+    times="time"),
+  statenames=oilprice_statenames,
+  paramnames=oilprice_paramnames,
+  rprocess=discrete_time(
+    step.fun=Csnippet(oilprice_rproc.filt),delta.t=1)
+)
+```
+
+
+<font size=5>5.2 Filtering on simulated data</font> 
+```{r echo=FALSE, cache=TRUE, warning=FALSE}
+set.seed(2050320976)
+run_level <- 3
+oilprice_Np <- switch(run_level, 100, 1e3, 2e3)
+oilprice_Nmif <- switch(run_level, 10, 100, 200)
+oilprice_Nreps_eval <- switch(run_level, 4, 10, 20)
+oilprice_Nreps_local <- switch(run_level, 10, 20, 20)
+oilprice_Nreps_global <- switch(run_level, 10, 20, 100)
+
+
+registerDoParallel()
+
+registerDoRNG(34118892)
+
+
+stew(file=sprintf("pf1-%d.rda",run_level),{
+  t.pf1 <- system.time(
+    pf1 <- foreach(i=1:oilprice_Nreps_eval, 
+                   .packages='pomp') %dopar%
+      pfilter(sim1.filt,oilprice_Np))
+})
+(L.pf1 <- logmeanexp(sapply(pf1,logLik),se=TRUE))
+```
+
+
+We obtain a log likelihood estimate of -65.07335642 with a Monte Carlo standard error of 0.01206845.
+
+
+
+<font size=5>5.3 MLE from local search</font>
+
+The iterated filtering algorithm, also known as IF2, of lonides was used here. This procedure theoretically converges toward the region of parameter space where maximizing the maximum likelihood.$^{8}$
+
+```{r echo=FALSE, cache=TRUE}
+set.seed(2050320976)
+oilprice_rw.sd_rp <- 0.02
+oilprice_rw.sd_ivp <- 0.1
+oilprice_cooling.fraction.50 <- 0.5
+bake(file=sprintf("mif1-%d.rds",run_level),{
+  t.if1 <- system.time({
+  if1 <- foreach(i=1:oilprice_Nreps_local,
+    .packages='pomp', .combine=c) %dopar% mif2(oilprice.filt,
+      params=params_test,
+      Np=oilprice_Np,
+      Nmif=oilprice_Nmif,
+      cooling.fraction.50=oilprice_cooling.fraction.50,
+      rw.sd = rw.sd(
+  sigma_nu  = oilprice_rw.sd_rp,
+  mu_h      = oilprice_rw.sd_rp,
+  phi       = oilprice_rw.sd_rp,
+  sigma_eta = oilprice_rw.sd_rp,
+  G_0       = ivp(oilprice_rw.sd_ivp),
+  H_0       = ivp(oilprice_rw.sd_ivp)
+))
+  L.if1 <- foreach(i=1:oilprice_Nreps_local,
+    .packages='pomp', .combine=rbind) %dopar% logmeanexp(
+      replicate(oilprice_Nreps_eval, logLik(pfilter(oilprice.filt,
+        params=coef(if1[[i]]),Np=oilprice_Np))), se=TRUE)
+  })
+})
+
+r.if1 <- data.frame(logLik=L.if1[,1],logLik_se=L.if1[,2],
+  t(sapply(if1,coef)))
+if (run_level>1) write.table(r.if1,file="oilprice_params.csv",
+  append=TRUE,col.names=TRUE,row.names=FALSE)
+```
+
+
+```{r summary1, echo=F}
+cat("Resulting log likelihood values:")
+summary(r.if1$logLik,digits=5)
+r.if1c <- r.if1 %>% arrange(desc(logLik))
+cat("Point estimates of log likelihood and parameters:")
+r.if1c <- t(r.if1c[1,])
+colnames(r.if1c) <- ""
+r.if1c
+cat("Best AIC: ", 2*6-2*max(r.if1$logLik)) # There are 6 parameters
+```
+
+
+The best AIC is around 17.81789. The maximum likelihood is -2.909. We also check the diagnostic plots to see whether we could improve the model further. 
+
+
+#### Diagnostic plots for the maximization procedure
+```{r, echo = FALSE}
+plot(if1)
+```
+
+The convergence plots show that some parameters could not converge very well.
+
+The plausible range for each parameter can be seen by plotting the pairs plot for log-likelihood and parameters:
+
+```{r, echo = FALSE}
+pairs(~logLik+sigma_nu+mu_h+phi+sigma_eta,
+  data=subset(r.if1,logLik>max(logLik)-20))
+```
+
+
+We find that $\sigma_{\nu}$ has the range in 0.005 to 0.020; $\mu_{h}$ has the range in -1.5 to 0; $\phi$ is focus on 0.99; and $\sigma_{\eta}$ has the range from 0.08 to 0.12.
+
+
+
+<font size=5>5.4 MLE from global search</font> 
+
+From the graph above, a large box of parameters can be tried to reach global maximization:
+
+$$\sigma_\nu \in (0.005,0.020) \\
+\mu_h \in (-1.5,0)\\
+\phi \in (0.98,0.99)\\
+\sigma_{\eta} \in (0.08,0.12)\\
+G_0 \in (-2,2)\\
+H_0 \in (-1,1)$$
+
+
+```{r echo = FALSE, cache=TRUE}
+oilprice_box <- rbind(
+  sigma_nu = c(0.005,0.015),
+  mu_h = c(-1.5,0),
+  phi = c(0.98, 0.99),
+  sigma_eta = c(0.08,0.12),
+  G_0 = c(-2,2),
+  H_0 = c(-1,1)
+)
+
+stew(file=sprintf("box_eval-%d.rds",run_level),{
+  t.box <- system.time({
+    if.box <- foreach(i=1:oilprice_Nreps_global,
+      .packages='pomp',.combine=c) %dopar% mif2(if1[[1]],
+        params=apply(oilprice_box,1,function(x)runif(1,x)))
+    L.box <- foreach(i=1:oilprice_Nreps_global,
+      .packages='pomp',.combine=rbind) %dopar% {
+         logmeanexp(replicate(oilprice_Nreps_eval, logLik(pfilter(
+	   oilprice.filt,params=coef(if.box[[i]]),Np=oilprice_Np))), 
+           se=TRUE)}
+  })
+})
+r.box <- data.frame(logLik=L.box[,1],logLik_se=L.box[,2],
+  t(sapply(if.box,coef)))
+if(run_level>1) write.table(r.box,file="oilprice_params.csv",
+  append=TRUE,col.names=FALSE,row.names=FALSE)
+```
+
+```{r summary2, echo=F}
+cat("Resulting log likelihood values:")
+summary(r.box$logLik,digits=5)
+r.boxc <- r.box %>% arrange(desc(logLik))
+cat("Point estimates of log likelihood and parameters:")
+r.boxc <- t(r.boxc[1,])
+colnames(r.boxc) <- ""
+r.boxc
+cat("Best AIC: ", 2*6-2*max(r.box$logLik)) # There are 6 parameters
+```
+
+
+The new maximum log-likelihood using global search is  -2.225 , which is better than the result using local parameter search. The best AIC is around 16.44958, which is the lowest among all models considered. 
+
+
+#### Diagnostic plots for the maximization procedure
+
+```{r, echo = FALSE}
+plot(if.box)
+```
+
+```{r pairs, echo=F}
+pairs(~logLik+sigma_nu+mu_h+phi+sigma_eta+G_0+H_0,
+data=subset(r.if1,logLik>max(logLik)-30))
+```
+
+
+From diagnostics plots above, we see that: $\sigma_nu$, $\mu_h$, $G_0$ and $H_0$ are convergent within around 50-100 iterations. log-likelihood converges to a larger value. $\phi$ and $\sigma_\eta$ seems to converge to a certain range. Their converging rate seems to be slower than the other parameters.
+
+
+<font size=5>5.5 profile likelihood over $\phi$</font> 
+
+The profile likelihood of $\phi$ was investigated to see whether $\phi$ lies in the range of (0.95, 0.99) as suggested in local search. Another reason for checking the profile likelihood of $\phi$ is that it seems a strong positive relationship between $\phi$ and log-likelihood. That is, as $\phi$ increasing and getting close to 1, the log-likelihood also increases.
+
+```{r echo = FALSE, cache=TRUE, include=FALSE}
+set.seed(1196696958)
+read.table("oilprice_params.csv", header=TRUE) %>%
+  filter(logLik>max(logLik)-20,logLik_se<2) %>%
+  sapply(range) -> box
+guesses <- profile_design(  
+  phi=exp(seq(log(0.80000),log(0.99999),length.out=50)),
+  lower=box[1,c("sigma_nu","mu_h","sigma_eta","G_0","H_0")],
+  upper=box[2,c("sigma_nu","mu_h","sigma_eta","G_0","H_0")],
+  nprof=2, type="runif"
+)
+bake(file=sprintf("profile_phi-%d.rds",run_level),{
+  t_pro <- system.time({
+      prof.llh<- foreach(i=1:100,.packages=c('pomp','tidyverse'), .combine=rbind) %dopar%{
+        mif2(
+          if1[[1]],
+          start=c(unlist(guesses[i,]),params_test),
+          Np=1000,Nmif=50,
+          rw.sd=rw.sd(sigma_nu  = oilprice_rw.sd_rp,
+                      mu_h      = oilprice_rw.sd_rp,
+                      sigma_eta = oilprice_rw.sd_rp,
+                      G_0       = ivp(oilprice_rw.sd_ivp),
+                      H_0       = ivp(oilprice_rw.sd_ivp)
+          )
+        )->phi_pro
+        evals = replicate(oilprice_Nreps_eval, logLik(pfilter(phi_pro,Np=1000)))
+        ll=logmeanexp(evals, se=TRUE)        
+        phi_pro %>% coef() %>% bind_rows() %>% bind_cols(logLik=ll[1],logLik_se=ll[2])
+      }
+  })
+})
+
+if(run_level>1) write.table(prof.llh,file="oilprice_params.csv",
+  append=TRUE,col.names=FALSE,row.names=FALSE)
+```
+
+```{r echo = FALSE, cache=TRUE}
+
+read.table("oilprice_params.csv", header=TRUE) -> results
+results %>%
+  filter(logLik>max(logLik)-25,logLik_se<1) %>%
+  group_by(round(phi,5)) %>%
+  filter(rank(-logLik)<3) %>%
+  ungroup() %>%
+  ggplot(aes(x=phi,y=logLik))+
+  geom_point()+
+  geom_hline(
+    color="red", 
+    yintercept=max(results$logLik)-0.5*qchisq(df=1,p=0.95)
+  )
+```
+
+
+When $\phi$ is smaller than 0, stack of points lay above the threshold of the 95% confidence interval. However we need to be cautious of the points lay under the threshold line when phi is between  0.5 and 1.
+
+
+
+<b><font size=5>6. Conclusion</font></b>  
+
+As a commonly used fuel source, Crude oil plays an important role all over the world and in the industrial fields. Our project is analyzing the annual Crude oil price, with a specific focus on the period of 1980 to 2020. We mainly focus on the three models for analysis, Garch, ARMA, as well as POMP. Starting with the Exploratory Data Analysis, there is no obvious trend or period observed in our data. With the fitting of GARCH models, we finally decide that GARCH(1,1) is the most ideal one among the choices based on the AIC criterion. After using Wilk's approximation as the likelihood ratio test, as well as the AIC values as a reference, we decide ARMA(0,1) is the most recommended one in the ARMA model part. In the POMP model part, we find that our parameters converge to the maximization of the maximum likelihood. Additionally, the maximum log-likelihood using global search is greater than using the local parameter search in our case with the lowest AIC value of 16.4. 
+
+After these analyses, we find that these models are appropriate for the time series analysis for the Crude oil price data set. Although due to  time and computing resource limitations, shrinking data samples by selecting parts of the original data set as our analysis target may affect on the performance of the models (For instance, in the ARMA model analysis, it may result in the ARMA(0,0) corresponding to the lowest AIC value), we still obtain the reasonable analysis results from the data. In the future work, we may try to increase the size of the data set to see if there is any further interesting finding.
+
+
+<b><font size=5>7. References</font></b>  
+[1] Wikipedia: Crude oil. URL:https://en.wikipedia.org/wiki/Petroleum#Uses. access at 04/09/2022.  
+[2] Investopedia: How Oil Prices Impact the U.S. Economy. URL:https://www.investopedia.com/articles/investing/032515/how-oil-prices-impact-us-economy.asp#:~:text=The%20price%20of%20oil%20influences,costs%20and%20cheaper%20airline%20tickets. access at 04/09/2022. 
+
+[3] “Crude Oil Prices.” Our World in Data, https://ourworldindata.org/grapher/crude-oil-prices?time=earliest..latest. access at 04/09/2022. 
+
+[4] Forbes. URL: https://www.forbes.com/sites/forbesbooksauthors/2021/01/25/factors-that-influence-pricing-of-oil-and-gas/?sh=525908b9338d. access at 04/09/2022. 
+
+[5] Lecture Notes, Chapter 4: "Linear time series models and the algebra of ARMA models". URL: https://ionides.github.io/531w22/04/notes.pdf. access at 04/10/2022. 
+
+[6] Lecture Notes, Chapter 16: A case study of financial volatility and a POMP model with observations driving latent dynamics". URL: https://ionides.github.io/531w22/16/notes.pdf. access at 04/11/2022. 
+
+[7] Final Project 2021: Volatility analysis on the Shanghai Composite Index. URL: https://github.com/ionides/531w21/blob/main/final_project/project16/blinded.Rmd. access at 04/12/2022. 
+
+[8] Lecture Notes, Chapter 12: "Simulation of stochastic dynamic models". URL: https://ionides.github.io/531w20/12/notes12.pdf. access at 04/14/2022. 
+
+[9] Lecture Notes, Chapter 14: "Likelihood maximization for POMP models". URL: https://ionides.github.io/531w20/14/notes14.pdf. access at 04/14/2022. 

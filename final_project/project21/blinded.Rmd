@@ -1,0 +1,1014 @@
+---
+title: "ARMA and POMP Analysis on COVID-19 Variants in the US"
+date: "19/04/2022"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 4
+    code_folding: hide
+    theme: lumen
+    highlight: monochrome
+---
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+options(warn=-1)
+options(show.error.messages = FALSE)
+```
+## Introduction
+As countries start to see the light at the end of the tunnel in the battle against the COVID-19 pandemic, we wanted to study the daily cases and, using a series of POMP models, each one being adjusted based on the information we now have present about the ground situation during each "segment" of time, attempt to model the number of cases.
+Our data comes from Our World in Data[1] and contains daily numbers for the count of new cases for the US from 2020-01-23 to 2022-04-01.
+After running some initial exploratory data analysis on the data set, we were able to divide the time series into 3 distinct groups, which can be characterised by the variant that was the main driver of cases at the time.
+We therefore had a pre-Delta variant domain, a Delta variant domain and an Omicron variant domain.
+The graphs, alongside the full view of the entire dataset is presented below.
+
+### Explore Data Analysis
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+library(tidyverse)
+data = read.csv(file = 'daily_case_us.csv')
+colnames(data) = c('time', 'cases', 'avg_7')
+
+start.Date <- as.Date("2020-1-23")
+end.Date <- as.Date("2022-4-1")
+date.range <- seq.Date(start.Date, end.Date, by = "day")
+data$date = date.range
+data$time = NULL
+head(data)
+
+summary(data)
+
+library(ggplot2)
+data %>% 
+  ggplot()+geom_point(aes(x=date, y=cases), size=1, color='darkgrey')+
+  geom_line(aes(x=date, y=avg_7), color='blue', size=1)+
+  ggtitle('Daily cases of covid-19 in US')+
+  ylab('Number of cases')
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+previous = subset(data, date < '2021-5-1', select=c(date, cases, avg_7))
+summary(previous)
+previous %>% 
+  ggplot()+geom_point(aes(x=date, y=cases), size=1, color='darkgrey')+
+  geom_line(aes(x=date, y=avg_7), color='blue', size=1)+
+  ggtitle('Daily cases of covid-19 in US before DELTA')+
+  ylab('Number of cases')
+
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+delta = subset(data, date >= '2021-5-1'& date < '2021-12-1', select=c(date, cases, avg_7))
+summary(delta)
+delta %>% 
+  ggplot()+geom_point(aes(x=date, y=cases), size=1, color='darkgrey')+
+  geom_line(aes(x=date, y=avg_7), color='blue', size=1)+
+  ggtitle('Daily cases of covid-19 in US during DELTA domain')+
+  ylab('Number of cases')
+
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+omicron = subset(data, date >= '2021-12-1', select=c(date, cases, avg_7))
+summary(omicron)
+omicron %>% 
+  ggplot()+geom_point(aes(x=date, y=cases), size=1, color='darkgrey')+
+  geom_line(aes(x=date, y=avg_7), color='blue', size=1)+
+  ggtitle('Daily cases of covid-19 in US during OMICRON domain')+
+  ylab('Number of cases')
+
+```
+
+## ARMA Modeling
+
+We start our analysis by fitting a benchmark ARMA model.
+We produce an AIC table to determine the best model see that the best fit is the ARMA(4,4).
+
+```{r}
+aic_table <- function(data,P,Q){
+  table <- matrix(NA,(P+1),(Q+1))
+  for(p in 0:P) {
+    for(q in 0:Q) {
+      table[p+1,q+1] <- arima(data,order=c(p,0,q), method="ML")$aic
+    }
+  }
+  dimnames(table) <- list(paste("AR",0:P, sep=""),paste("MA",0:Q,sep=""))
+  table
+}
+cnt_aic_table <- aic_table(data$cases,4,4)
+knitr::kable(cnt_aic_table,digits=2)
+arima44 <- arima(x = data$cases, order = c(4, 0, 4))
+arima44
+```
+
+```{r, include = TRUE}
+par(mfrow=c(1,2))
+acf(arima44$residuals)
+qqnorm(arima44$residuals)
+qqline(arima44$residuals)
+```
+
+From the ACF and QQ-plot, we can tell that the residuals do not appear to be IID and normaly distributed. We then turn to POMP modeling analysis on the COVID-19 data.
+
+## POMP Modelling
+
+### Pre-Delta Domain
+
+The pre-Delta data was defined as being within the timeframe of 2020-01-23 to April 30th 2021.
+Before the Delta variant, vaccinations had not yet been widely introduced to the US public and so therefore, we decided to implement an SEIR model, which studies the transitions from susceptible, to exposed, infected and then finally to the recovered patients.
+We found that the SEIR model was more appropriate than the SIR model due to the presence of this exposed state, as it is a situation we observe in many diseases.
+More specifically, the concept of "being exposed" to COVID-19 was specifically addressed by local, state and federal governments.
+The way that people were expected to behave changed depending on whether they had been exposed or not and so we believed this was an important section in our modelling process.
+The combination of parameter we settled on for this model was inspired by a previous project[2].
+The parameters in the SEIR models are summarised as:
+
+-   $S_t$: the number of susceptible people at time t\
+-   $E_t$: the number of exposed people at time t\
+-   $I_t$: the number of infectious people at time t\
+-   $R_t$: the number of recovered people at time t
+
+And the model's differential equations are given by following expressions:
+
+$\frac{dS_t}{dt} = -\beta/N S_t I_t$
+
+$\frac{dE_t}{dt} = \beta/N S_t I_t -\mu_{EI} E_t$
+
+$\frac{dI_t}{dt} = \mu_{EI} E_t -\mu_{IR} I_t$
+
+$\frac{dR_t}{dt} = \mu_{IR} I_t$
+
+```{r, message=FALSE}
+library(pomp)
+library(doParallel)
+library(doRNG)
+library(iterators)
+registerDoParallel()
+registerDoRNG(5312022)
+
+seir_step <- Csnippet("
+  double dN_SE = rbinom(S,1-exp(-Beta*I/N*dt));
+  double dN_EI = rbinom(E,1-exp(-mu_EI*dt));
+  double dN_IR = rbinom(I,1-exp(-mu_IR*dt));
+  S -= dN_SE;
+  E += dN_SE - dN_EI;
+  I += dN_EI - dN_IR;
+  R += dN_IR;
+  H += dN_IR;
+")
+
+seir_rinit <- Csnippet("
+  S = nearbyint(eta*N);
+  E = 0;
+  I = 1;
+  R = nearbyint((1-eta)*N);
+  H = 0;
+  ")
+
+dmeas <- Csnippet("
+double tol = 1.0e-25;
+double mean_cases = rho*H;
+double sd_cases = sqrt(mean_cases*mean_cases);
+
+if(reports > 0.0){
+lik = pnorm(reports,mean_cases,sd_cases,1,0)- pnorm(reports-0.5,mean_cases,sd_cases,1,0)
++ tol;
+} else{
+lik = pnorm(reports+0.5,mean_cases,sd_cases,1,0) +tol;
+}
+if (give_log) lik = log(lik);
+
+")
+
+rmeas <- Csnippet("
+
+reports = rnorm(rho*H, sqrt(rho*H ) );
+if (reports > 0.0) {
+reports = nearbyint(reports);
+} else {
+reports = 0.0;
+}
+")
+
+previous %>% mutate(days = c(1:464), reports=avg_7) -> df1
+
+covid1 = df1 %>%
+  pomp(
+    times="days",t0=0,
+    rprocess=euler(seir_step,delta.t=1),
+    rinit=seir_rinit,
+    rmeasure=rmeas,
+    dmeasure=dmeas,
+    accumvars="H",
+    partrans=parameter_trans(
+      log=c("Beta","tau","mu_EI","mu_IR"),
+      logit=c("rho","eta")
+    ),
+    paramnames=c("N","Beta","mu_EI","mu_IR","rho","eta","tau"),
+    statenames=c("S","E","I","R","H")
+  )
+```
+
+We first do the simulation with our initially guessing parameters. Beta=12.9,mu_IR=1.15,mu_EI=0.08,rho=0.8,tau=1,eta=0.1,N=3e8
+
+```{r}
+set.seed(531)
+params <- c(Beta=12.9,mu_IR=1.15,mu_EI=0.08,rho=0.8,tau=1,eta=0.1,N=3e8)
+
+covid1 %>%
+  simulate(
+    params=params,
+    nsim=10,format="data.frame",include.data=TRUE
+  ) -> sims
+sims %>%
+  ggplot(aes(x=days,y=reports,group=.id,color=.id=="data"))+
+  geom_line()+
+  guides(color="none")+labs(title="Simulation for data")
+```
+
+```{r}
+params <- c(Beta=12.9,mu_IR=1.15,mu_EI=0.08,rho=0.8,tau=1,eta=0.1,N=3e8)
+
+foreach(i=1:10,.combine=c) %dopar% {
+  library(pomp)
+  library(tidyverse)
+  covid1 %>% pfilter(params=params,Np=100)
+} -> pf
+pf %>% logLik() %>% logmeanexp(se=TRUE) -> L_pf
+L_pf
+```
+
+Though the initial simulation seems to fit the data well, we can find that the log-likelihood behaves not good for the initial guessing parameters, we then do the local searching.
+
+#### Local Search
+
+```{r message=FALSE, warning=FALSE}
+library(doParallel)
+registerDoParallel()
+registerDoRNG(5312022)
+
+# set the random walk parameters
+covid_cooling.fraction.50 <- 0.5
+covid_rw.sd <- rw.sd(
+    Beta=0.002, rho=0.002,eta=ivp(0.002)
+)
+
+params <- c(Beta=12.9,mu_IR=1.15,mu_EI=0.08,rho=0.8,tau=1,eta=0.1,N=3e8)
+
+bake(file="lik_local_1.rds",{
+  foreach(i=1:20,.combine=c) %dopar% {
+    library(pomp)
+    library(tidyverse)
+    mif2(covid1,
+         params = params,
+         Np=2000,
+         Nmif=50,
+         cooling.fraction.50=covid_cooling.fraction.50,
+         rw.sd=covid_rw.sd) 
+  } -> mifs_local 
+  mifs_local
+}) -> mifs_local
+```
+
+```{r echo=F, warning=FALSE}
+mifs_local %>%
+  traces() %>%
+  melt() %>%
+  ggplot(aes(x=iteration,y=value,group=L1,color=factor(L1)))+
+  geom_line()+
+  guides(color="none")+
+  facet_wrap(~variable,scales="free_y")
+```
+
+```{r message=FALSE, warning=FALSE}
+coefs_local <- coef(mifs_local)
+max_coefs_local <- coefs_local[,which.max(logLik(mifs_local))]
+
+bake(file="local_results_1.rds",{
+  foreach(mf=mifs_local, .combine=rbind) %dopar% {
+    library(pomp)
+    library(tidyverse)
+    evals <- replicate(10,logLik(pfilter(mf,Np=20000)))
+    ll <- logmeanexp(evals,se=TRUE)
+    mf %>% coef() %>% bind_rows() %>%
+      bind_cols(loglik=ll[1],loglik.se=ll[2])
+  } -> local_results
+  
+  local_results
+}) -> local_results
+```
+
+The top five best local searches:
+
+```{r}
+bind_rows(local_results) %>%
+  filter(is.finite(loglik)) %>%
+  filter(loglik.se < 8) %>%
+  arrange(-loglik) -> best_local_searches
+head(best_local_searches,5)
+```
+
+```{r}
+bind_rows(local_results) %>%
+  filter(is.finite(loglik)) %>%
+  filter(loglik.se < 8) %>%
+  filter(loglik>max(loglik)-10000) -> tmp1
+
+pairs(~loglik+Beta+eta+rho,data=tmp1,pch=16)
+```
+
+We here do simulation for the best local searched parameters:
+
+```{r}
+covid1 %>%
+  simulate(
+    params=unlist(best_local_searches[1,]),
+    nsim=10,format="data.frame",include.data=TRUE
+  ) -> sims
+sims %>%
+  ggplot(aes(x=days,y=reports,group=.id,color=.id=="data"))+
+  geom_line()+
+  guides(color="none")+labs(title="Simulation for data with local parameters searching")
+
+```
+
+There is certain trend for the loglik value on parameters like Beta, but the loglik plots look so sparse that it does not give us a clear picture or hint of the ridge in likelihood surface. Thus, we move on to do global search.
+
+We here use the best 5 value for local search as well as the initial parameters guessing to consider the parameter box for global searching[3].
+
+#### Global search
+
+```{r}
+covid_box1 <- rbind(
+  Beta=c(10,20),
+  mu_EI=c(0.07,0.09),
+  rho=c(0.7,1),
+  eta=c(0,0.09),
+  N=c(3e8,3e8),
+  mu_IR=c(1, 1.25),
+  tau=c(0.85,1.1)
+)
+
+bake(file="mifs_global_1.rds",{
+    foreach(i=1:10,.combine=c) %dopar% {
+        library(pomp)
+        library(tidyverse)
+        mif2(covid1,
+             params = c(apply(covid_box1,1,function(x)runif(1,x[1],x[2]))),
+             Np=2500,
+             Nmif=250,
+             cooling.fraction.50=covid_cooling.fraction.50,
+             rw.sd=covid_rw.sd) 
+    } -> mifs_global 
+    mifs_global
+}) -> mifs_global
+
+bake(file="global_search_1.rds",{
+    foreach(mf=mifs_global, .combine=rbind) %dopar% {
+        library(pomp)
+        library(tidyverse)
+        evals <- replicate(10,logLik(pfilter(mf,Np=50000)))
+        ll <- logmeanexp(evals,se=TRUE)
+        mf %>% coef() %>% bind_rows() %>%
+            bind_cols(loglik=ll[1],loglik.se=ll[2])
+    } -> global_results
+    
+    global_results
+}) -> global_results1
+
+```
+
+```{r}
+bind_rows(global_results1) %>%
+  filter(loglik.se < 10 ) %>%
+  arrange(-loglik) -> best_global_results1
+head(as.data.frame(best_global_results1),5)
+```
+
+The best global search has a likelihood of -14148, which is significantly better than the log-likelihood from the local search. The pairs plot for the global search is as below.
+
+```{r}
+bind_rows(global_results1) %>% 
+bind_rows(local_results) %>%
+  filter(is.finite(loglik)) %>%
+  filter(loglik.se < 10) -> tmp
+pairs(~loglik+Beta+rho+mu_IR+mu_EI+rho+eta+tau,data=tmp,pch=16, col="red")
+
+```
+
+```{r}
+set.seed(531)
+covid1 %>%
+  simulate(
+    params=unlist(best_global_results1[1,]),
+    nsim=10,format="data.frame",include.data=TRUE
+  ) -> sims
+sims %>%
+  ggplot(aes(x=days,y=reports,group=.id,color=.id=="data"))+
+  geom_line()+
+  guides(color="none")+labs(title="Simulation for data with global parameters searching")
+```
+
+We observe reasonable, but not ideal fits for our data in both the global and local searches.
+In particular, they both appear to miss the peak of cases, in timing and extent, which appears to occur roughly on day 355 at 250,000 cases.
+The local search overestimates the peak, whilst the global search underestimates it.
+
+### Delta
+
+Vaccinations were a few months into their rollout and the effects were just beginning to become observable by the time the Delta variant started spreading in the US.
+The dates that we have defined to study the Delta variant is 2021-05-01 to 2021-11-30.
+For this second segment of our data, we define a SEIRV[4] model, the additional term V included to account for those that have been fully vaccinated.
+
+-   $S_t$: the number of susceptible people at time t\
+-   $E_t$: the number of exposed people at time t\
+-   $I_t$: the number of infectious people at time t\
+-   $R_t$: the number of recovered people at time t\
+-   $V_t$: the number of people vaccinated at time t
+
+And the model's differential equations are given by following expressions:
+
+$\frac{dS_t}{dt} = -\beta/N S_t I_t -\alpha/N S_t$
+
+$\frac{dE_t}{dt} = \beta/N S_t I_t -\mu_{EI} E_t$
+
+$\frac{dI_t}{dt} = \mu_{EI} E_t -\mu_{IR} I_t$
+
+$\frac{dV_t}{dt} = \alpha/N S_t$
+
+$\frac{dR_t}{dt} = \mu_{IR} I_t$
+
+To justify the parameter setting, H was initialised to the reported cases on 2021-5-1 and the exposed parameter was initialised to the reported cases on 2021-5-2.
+We set our infected parameter to double the reported cases on the date 2021-5-1.
+As a point of reference for modelling the vaccinated parameter, the percentage of those vaccinated in the US at the beginning of this time series (on 2021-3-30) was 30.54% and then on 2021-5-1 was 31.15%[1].
+
+```{r}
+seirv_step <- Csnippet("
+  double dN_SE = rbinom(S,1-exp(-Beta*I/N*dt));
+  double dN_EI = rbinom(E,1-exp(-mu_EI*dt));
+  double dN_IR = rbinom(I,1-exp(-mu_IR*dt));
+  double dN_SV = rbinom(S, 1-exp(-alpha/N*dt));
+  S -= dN_SE + dN_SV;
+  E += dN_SE - dN_EI;
+  I += dN_EI - dN_IR;
+  R += dN_IR;
+  V += dN_SV;
+  H += dN_IR;
+")
+
+seirv_rinit <- Csnippet("
+  S = nearbyint(eta*N);
+  E = 49087;
+  I = 2*49743;
+  R = nearbyint(N*(1-eta)-(49087+2*49743 + round(N*0.3*0.01) + 49743));
+  V = nearbyint(N*0.3*0.01);
+  H = 49743;
+  ")
+
+dmeas <- Csnippet("
+double tol = 1.0e-25;
+double mean_cases = rho*H;
+double sd_cases = sqrt(mean_cases*mean_cases);
+
+if(reports > 0.0){
+lik = pnorm(reports,mean_cases,sd_cases,1,0)- pnorm(reports-0.5,mean_cases,sd_cases,1,0)
++ tol;
+} else{
+lik = pnorm(reports+0.5,mean_cases,sd_cases,1,0) +tol;
+}
+if (give_log) lik = log(lik);
+
+")
+rmeas <- Csnippet("
+
+reports = rnorm(rho*H, sqrt(rho*H ) );
+if (reports > 0.0) {
+reports = nearbyint(reports);
+} else {
+reports = 0.0;
+}
+
+")
+
+delta %>% mutate(days = c(1:214), reports=avg_7) -> df2
+
+covid2 = df2 %>%
+  pomp(
+    times="days",t0=0,
+    rprocess=euler(seirv_step,delta.t=1),
+    rinit=seirv_rinit,
+    rmeasure=rmeas,
+    dmeasure=dmeas,
+    accumvars="H",
+    partrans=parameter_trans(
+      log=c("Beta","alpha", "tau","mu_EI","mu_IR"),
+      logit=c("rho","eta")
+    ),
+    paramnames=c("N","Beta","alpha","mu_EI","mu_IR","rho","eta","tau"),
+    statenames=c("S","E","I","R","V", "H")
+  )
+```
+
+```{r}
+set.seed(531)
+params <- c(Beta=13,alpha = 0.05,mu_IR=1.8,mu_EI=0.09,rho=0.8,tau=1,eta=0.1,N=3e8)
+
+covid2 %>%
+  simulate(
+    params=params,
+    nsim=10,format="data.frame",include.data=TRUE
+  ) -> sims
+sims %>%
+  ggplot(aes(x=days,y=reports,group=.id,color=.id=="data"))+
+  geom_line()+
+  guides(color="none")+labs(title="Simulation for data")
+```
+
+```{r}
+library(doParallel)
+library(doRNG)
+library(iterators)
+registerDoParallel()
+registerDoRNG(5312022)
+
+params <- c(Beta=13,alpha = 0.05,mu_IR=1.8,mu_EI=0.09,rho=0.8,tau=1,eta=0.1,N=3e8)
+
+foreach(i=1:10,.combine=c) %dopar% {
+  library(pomp)
+  library(tidyverse)
+  covid2 %>% pfilter(params=params,Np=100)
+} -> pf
+pf %>% logLik() %>% logmeanexp(se=TRUE) -> L_pf
+L_pf
+```
+
+#### Local Search
+
+```{r}
+library(doParallel)
+library(doRNG)
+registerDoParallel()
+registerDoRNG(5312022)
+
+# set the random walk parameters
+covid_cooling.fraction.50 <- 0.5
+covid_rw.sd <- rw.sd(
+    Beta=0.02, alpha =0.01, rho=0.02,mu_IR=0.01,mu_EI=0.01,eta=ivp(0.002)
+)
+
+params <- c(Beta=13,alpha = 0.05,mu_IR=1.8,mu_EI=0.09,rho=0.8,tau=1,eta=0.1,N=3e8)
+
+
+bake(file="lik_local_2.rds",{
+  foreach(i=1:20,.combine=c) %dopar% {
+    library(pomp)
+    library(tidyverse)
+    mif2(covid2,
+         params = params,
+         Np=2000,
+         Nmif=50,
+         cooling.fraction.50=covid_cooling.fraction.50,
+         rw.sd=covid_rw.sd) 
+  } -> mifs_local 
+  mifs_local
+}) -> mifs_local
+```
+
+```{r, echo=F}
+mifs_local %>%
+  traces() %>%
+  melt() %>%
+  ggplot(aes(x=iteration,y=value,group=L1,color=factor(L1)))+
+  geom_line()+
+  guides(color="none")+
+  facet_wrap(~variable,scales="free_y")
+```
+
+```{r}
+coefs_local <- coef(mifs_local)
+max_coefs_local <- coefs_local[,which.max(logLik(mifs_local))]
+
+bake(file="local_results_2.rds",{
+  foreach(mf=mifs_local, .combine=rbind) %dopar% {
+    library(pomp)
+    library(tidyverse)
+    evals <- replicate(5,logLik(pfilter(mf,Np=2000)))
+    ll <- logmeanexp(evals,se=TRUE)
+    mf %>% coef() %>% bind_rows() %>%
+      bind_cols(loglik=ll[1],loglik.se=ll[2])
+  } -> local_results
+  
+  local_results
+}) -> local_results
+
+```
+
+```{r}
+bind_rows(local_results) %>%
+  filter(is.finite(loglik)) %>%
+  filter(loglik.se < 10) %>%
+  arrange(-loglik) -> best_local_searches
+head(best_local_searches,5)
+
+```
+
+```{r}
+set.seed(531)
+covid2 %>%
+  simulate(
+    params=unlist(best_local_searches[1,]),
+    nsim=10,format="data.frame",include.data=TRUE
+  ) -> sims
+sims %>%
+  ggplot(aes(x=days,y=reports,group=.id,color=.id=="data"))+
+  geom_line()+
+  guides(color="none")+labs(title="Simulation for data with local parameters searching")
+
+```
+
+#### Global Search
+
+```{r}
+covid_box2 <- rbind(
+  Beta=c(7,15),
+  mu_EI=c(0.07,0.09),
+  alpha=c(0,0.2),
+  rho=c(0.5,1),
+  eta=c(0,0.5),
+  N=c(3e8,3e8),
+  mu_IR=c(0.7, 1.5),
+  tau=c(0,2)
+)
+
+bake(file="mifs_global_2.rds",{
+    foreach(i=1:20,.combine=c) %dopar% {
+        library(pomp)
+        library(tidyverse)
+        mif2(covid2,
+             params = c(apply(covid_box2,1,function(x)runif(1,x[1],x[2]))),
+             Np=3000,
+             Nmif=250,
+             cooling.fraction.50=covid_cooling.fraction.50,
+             rw.sd=covid_rw.sd) 
+    } -> mifs_global2
+    mifs_global2
+}) -> mifs_global2
+
+bake(file="global_search_2.rds",{
+    foreach(mf=mifs_global2, .combine=rbind) %dopar% {
+        library(pomp)
+        library(tidyverse)
+        evals <- replicate(10,logLik(pfilter(mf,Np=50000)))
+        ll <- logmeanexp(evals,se=TRUE)
+        mf %>% coef() %>% bind_rows() %>%
+            bind_cols(loglik=ll[1],loglik.se=ll[2])
+    } -> global_results2
+    
+    global_results2
+}) -> global_results2
+```
+
+The best global search had the following coefficients and log likelihood and simulated results:
+
+```{r}
+bind_rows(global_results2) %>%
+  filter(is.finite(loglik)) %>%
+  filter(loglik.se < 5 ) %>%
+  arrange(-loglik) -> best_global_results2
+head(as.data.frame(best_global_results2),5)
+```
+
+The best global search has a likelihood of -2707 and 0.00076 se, which is significantly better than the log-likelihood from the local search. The pairs plot and simulation plot for the global search are as below.
+
+```{r}
+bind_rows(global_results2) %>% 
+bind_rows(local_results) %>%
+  filter(is.finite(loglik)) %>%
+  filter(loglik.se < 5)  -> temp
+pairs(~loglik+Beta+rho+mu_IR+mu_EI+alpha,data=temp,pch=16, col="red")
+```
+
+```{r}
+covid2 %>%
+  simulate(
+    params=unlist(best_global_results2[1,]),
+    nsim=10,format="data.frame",include.data=TRUE
+  ) -> sims
+
+sims %>%
+  ggplot(aes(x=days,y=reports,group=.id,color=.id=="data"))+
+  geom_line()+
+  guides(color="none")+labs(title="Simulation for data with global parameters searching")
+```
+
+Our global and local search return distinct simulation curves, with the local search providing a more accurate estimate.
+Both simulations appear to not align well with the data in terms of estimating the extent of the peak, whilst the global search attempts to model the timing (day 125) more accurately.
+
+### Omicron
+
+We continue to use a SEIRV[4] model to fit the Omicron data, which is defined as the daily cases between the dates 2021-12-01 and 2022-04-01.
+Situationally, there was little change in the US that could be translated into our parameters, other than a change in the vaccination rate. We here consider people get fully vaccinated can also be infected by the virus.
+
+-   $S_t$: the number of susceptible people at time t\
+-   $E_t$: the number of exposed people at time t\
+-   $I_t$: the number of infectious people at time t\
+-   $R_t$: the number of recovered people at time t\
+-   $V_t$: the number of people vaccinated at time t
+
+And the model's differential equations are given by following expressions:
+
+$\frac{dS_t}{dt} = -\beta/N S_t I_t -\alpha/N S_t$
+
+$\frac{dE_t}{dt} = \beta/N S_t I_t -\mu_{EI} E_t + \sigma \beta/N V_t I_t$
+
+$\frac{dI_t}{dt} = \mu_{EI} E_t -\mu_{IR} I_t$
+
+$\frac{dV_t}{dt} = \alpha/N S_t -\sigma \beta/N V_t I_t$
+
+$\frac{dR_t}{dt} = \mu_{IR} I_t$
+
+Parameters were initialised using the same principles as with the Delta variant.
+The reported cases on 2021-12-1 was set as the initial value of H and the reported cases on 2021-12-2 was set as the initial value of E.
+We set our infected parameter to double the reported cases on the date 2021-12-01.
+We also observed that the percentage of the vaccinated population stood at 59.35% on 2021-11-30 and 59.45% on 2021-12-1.
+
+```{r}
+seirv2_step <- Csnippet("
+  double dN_SE = rbinom(S,1-exp(-Beta*I/N*dt));
+  double dN_EI = rbinom(E,1-exp(-mu_EI*dt));
+  double dN_IR = rbinom(I,1-exp(-mu_IR*dt));
+  double dN_SV = rbinom(S, 1-exp(-alpha/N*dt));
+  double dN_VE = rbinom(V, 1-exp(-sigma*Beta*I/N*dt));
+  S -= dN_SE + dN_SV;
+  E += dN_SE + dN_VE - dN_EI;
+  I += dN_EI - dN_IR;
+  R += dN_IR;
+  V += dN_SV - dN_VE;
+  H += dN_IR;
+")
+
+seirv2_rinit <- Csnippet("
+    S = round(N*eta);
+    E = 97550;
+    I = 2*80513;
+    R = round(N*(1-eta)-(97550+2*80513 + round(N*(0.5945-0.5935)) + 87248)); 
+    V = round(N*(0.5945-0.5935));
+    H = 87248;
+  ")
+
+dmeas <- Csnippet("
+double tol = 1.0e-25;
+double mean_cases = rho*H;
+double sd_cases = sqrt(mean_cases*mean_cases);
+
+if(reports > 0.0){
+lik = pnorm(reports,mean_cases,sd_cases,1,0)- pnorm(reports-0.5,mean_cases,sd_cases,1,0)
++ tol;
+} else{
+lik = pnorm(reports+0.5,mean_cases,sd_cases,1,0) +tol;
+}
+if (give_log) lik = log(lik);
+
+")
+rmeas <- Csnippet("
+
+reports = rnorm(rho*H, sqrt(rho*H ) );
+if (reports > 0.0) {
+reports = nearbyint(reports);
+} else {
+reports = 0.0;
+}
+
+")
+
+omicron %>% mutate(days = c(1:122), reports=avg_7) -> df3
+
+covid3 = df3 %>%
+  pomp(
+    times="days",t0=0,
+    rprocess=euler(seirv2_step,delta.t=1),
+    rinit=seirv2_rinit,
+    rmeasure=rmeas,
+    dmeasure=dmeas,
+    accumvars="H",
+    partrans=parameter_trans(
+      log=c("Beta","alpha", "sigma","tau","mu_EI","mu_IR"),
+      logit=c("rho","eta")
+    ),
+    paramnames=c("N","Beta","alpha","sigma","mu_EI","mu_IR","rho","eta","tau"),
+    statenames=c("S","E","I","R","V", "H")
+  )
+
+```
+
+```{r}
+set.seed(531)
+params <- c(Beta=30,alpha =0.05,sigma=0.02,mu_IR=1.5,mu_EI=0.1,rho=0.8,tau=1,eta=0.1,N=3e8)
+
+covid3 %>%
+  simulate(
+    params=params,
+    nsim=10,format="data.frame",include.data=TRUE
+  ) -> sims
+sims %>%
+  ggplot(aes(x=days,y=reports,group=.id,color=.id=="data"))+
+  geom_line()+
+  guides(color="none")+labs(title="Simulation for data")
+```
+
+```{r}
+library(doParallel)
+library(doRNG)
+library(iterators)
+registerDoParallel()
+registerDoRNG(5312022)
+
+params <- c(Beta=30,alpha =0.05,sigma=0.02,mu_IR=1.5,mu_EI=0.1,rho=0.8,tau=1,eta=0.1,N=3e8)
+
+foreach(i=1:10,.combine=c) %dopar% {
+  library(pomp)
+  library(tidyverse)
+  covid3 %>% pfilter(params=params,Np=100)
+} -> pf
+pf %>% logLik() %>% logmeanexp(se=TRUE) -> L_pf
+L_pf
+```
+
+#### Local Search
+
+```{r}
+library(doParallel)
+registerDoParallel()
+registerDoRNG(5312022)
+
+# set the random walk parameters
+covid_cooling.fraction.50 <- 0.5
+covid_rw.sd <- rw.sd(
+    Beta=0.002, alpha =0.001,sigma =0.002, rho=0.002,mu_IR=0.01,mu_EI=0.01,eta=ivp(0.002)
+)
+
+params <- c(Beta=30,alpha =0.05,sigma=0.02,mu_IR=1.5,mu_EI=0.1,rho=0.8,tau=1,eta=0.1,N=3e8)
+
+
+bake(file="lik_local_3.rds",{
+  foreach(i=1:20,.combine=c) %dopar% {
+    library(pomp)
+    library(tidyverse)
+    mif2(covid3,
+         params = params,
+         Np=2000,
+         Nmif=50,
+         cooling.fraction.50=covid_cooling.fraction.50,
+         rw.sd=covid_rw.sd) 
+  } -> mifs_local 
+  mifs_local
+}) -> mifs_local
+
+```
+
+```{r, echo=F}
+mifs_local %>%
+  traces() %>%
+  melt() %>%
+  ggplot(aes(x=iteration,y=value,group=L1,color=factor(L1)))+
+  geom_line()+
+  guides(color="none")+
+  facet_wrap(~variable,scales="free_y")
+```
+
+```{r}
+coefs_local <- coef(mifs_local)
+max_coefs_local <- coefs_local[,which.max(logLik(mifs_local))]
+
+bake(file="local_results_3.rds",{
+  foreach(mf=mifs_local, .combine=rbind) %dopar% {
+    library(pomp)
+    library(tidyverse)
+    evals <- replicate(5,logLik(pfilter(mf,Np=2000)))
+    ll <- logmeanexp(evals,se=TRUE)
+    mf %>% coef() %>% bind_rows() %>%
+      bind_cols(loglik=ll[1],loglik.se=ll[2])
+  } -> local_results
+  
+  local_results
+}) -> local_results
+
+```
+
+```{r}
+bind_rows(local_results) %>%
+  filter(is.finite(loglik)) %>%
+  filter(loglik.se < 0.5) %>%
+  arrange(-loglik) -> best_local_searches
+head(best_local_searches,5)
+
+```
+
+```{r}
+covid3 %>%
+  simulate(
+    params=unlist(best_local_searches[1,]),
+    nsim=10,format="data.frame",include.data=TRUE
+  ) -> sims
+sims %>%
+  ggplot(aes(x=days,y=reports,group=.id,color=.id=="data"))+
+  geom_line()+
+  guides(color="none")+labs(title="Simulation for data with local parameters searching")
+```
+
+#### Global Search
+
+```{r}
+covid_box <- rbind(
+  Beta=c(25,35),
+  mu_EI=c(0,0.5),
+  alpha=c(0,0.1),
+  rho=c(0,1),
+  eta=c(0,0.5),
+  N=c(3e8,3e8),
+  mu_IR=c(0, 5),
+  tau=c(0,2),
+  sigma=c(0,0.5)
+)
+#Beta=30,alpha =0.05,sigma=0.02,mu_IR=1.5,mu_EI=0.1,rho=0.8,tau=1,eta=0.1,N=3e8
+
+bake(file="mifs_global3.rds",{
+    foreach(i=1:20,.combine=c) %dopar% {
+        library(pomp)
+        library(tidyverse)
+        mif2(covid3,
+             params = c(apply(covid_box,1,function(x)runif(1,x[1],x[2]))),
+             Np=20000,
+             Nmif=250,
+             cooling.fraction.50=covid_cooling.fraction.50,
+             rw.sd=covid_rw.sd) 
+    } -> mifs_global 
+    mifs_global
+}) -> mifs_global
+
+bake(file="global_search3.rds",{
+    foreach(mf=mifs_global, .combine=rbind) %dopar% {
+        library(pomp)
+        library(tidyverse)
+        evals <- replicate(10,logLik(pfilter(mf,Np=50000)))
+        ll <- logmeanexp(evals,se=TRUE)
+        mf %>% coef() %>% bind_rows() %>%
+            bind_cols(loglik=ll[1],loglik.se=ll[2])
+    } -> global_results
+    
+    global_results
+}) -> global_results3
+```
+
+```{r}
+bind_rows(global_results3) %>%
+  filter(is.finite(loglik)) %>%
+  filter(loglik.se < .5 ) %>%
+  arrange(-loglik) -> best_global_results3
+head(as.data.frame(best_global_results3),5)
+```
+
+```{r}
+bind_rows(global_results3) %>% 
+bind_rows(local_results) %>%
+  filter(is.finite(loglik)) %>%
+  filter(loglik.se < .5)-> temp
+pairs(~loglik+Beta+rho+mu_IR+mu_EI+alpha,data=temp,pch=16, col="red")
+```
+
+```{r}
+set.seed(531)
+covid3 %>%
+  simulate(
+    params=unlist(best_global_results3[1,]),
+    nsim=10,format="data.frame",include.data=TRUE
+  ) -> sims
+sims %>%
+  ggplot(aes(x=days,y=reports,group=.id,color=.id=="data"))+
+  geom_line()+
+  guides(color="none")+labs(title="Simulation for data with global parameters searching")
+```
+
+## Conclusion
+
+Our most accurate simulations were for the SEIR model on our pre-Delta variant data.
+We tried a variety of parameters and iterations, but our simulations on our Delta and Omicron data did not return accurate fits.
+There are a few reasons as to why we might expect this to occur.
+
+1. Our pre-Delta data is, relatively speaking, an easier dataset to model.
+We don't have to incorporate any vaccination data since we are in the early stages of the disease spread and with this, we don't need to worry about the rate of change of vaccination rates. The government response in the US was minimal other than encouraging people to stay at home and limit contact, but this proved to be useless given the contagiousness of the disease.
+
+2. The US as a whole is a difficult country to model. State government mandates essentially ensured that each state operated as its own "mini-country" and attempting to model these as one, single entity might not make the most logical sense. The laws implemented to counteract COVID in states such as New York for example, were vastly different and far stricter than those implemented in Texas.
+
+3. Vaccination rates aren't uniform. At the beginning of the vaccine rollout the US did run into the issue of supply restrictions across the country.
+Differing attitudes towards the vaccine in different states also contributes towards varying rates across the country.
+
+## References
+
+[1] <https://ourworldindata.org/coronavirus>
+
+[2] <https://ionides.github.io/531w21/final_project/project02/blinded.html>
+
+[3] <https://ionides.github.io/531w21/final_project/project13/blinded.html>
+
+[4] <https://ionides.github.io/531w21/final_project/project03/blinded.html>
+
+## Scholarship Acknowledgement
+The most analysis methods on COVID-19 dataset in US with POMP model are referenced from previous final projects in 2021, where we combined the advantages from different projects and also add our novel contributions based on our own data. As mentioned in above text, we inspired by [2] to use dataset from reported infectious number in US but with more time size (from 2020-1-23 to 2022-04-01), and use more smoothed data "7 days averagely report" to do the analysis, which may mitigate the backward of noise. After the EDA and ARMA modeling, we separate the date rather than simply the time but more according to different variants domain period to estimate different parameters for different models. For SEIRV model, we refer to [4] but separate Delta domain and Omicron domain by whether the fully vaccinated people can be infected. For local and global search's format, we refer to [3].

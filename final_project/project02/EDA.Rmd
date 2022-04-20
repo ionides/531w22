@@ -1,0 +1,67 @@
+---
+title: "EDA"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 2
+    theme: flatly
+    mathjax: "https://mathjax.rstudio.com/latest/MathJax.js?config=TeX-MML-AM_CHTML"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = FALSE,
+  warning = FALSE,
+	message = FALSE,
+	include = TRUE,
+  comment = '',
+  fig.align = "center"
+)
+library(tidyverse)
+```
+
+# Introduction 
+According to the CDC, Ebola Virus Disease (EVD) is caused by the probably animal-borne Ebola virus, which causes outbreaks primarily on the African continent. The virus spreads by inducing bleeding in infected persons, so that when susceptible people come into contact with the blood or other bodily fluids (breast milk, saliva, sweat, etc.) of symptomatic people they become infected as well. Transmission may happen with direct contact with a person or touching clothing or other objects contaminated with bodily fluids within several days of deposition. Other research has pointed out a variety of factors that contribute to epidemics, defined by the World Health Organization as periods of increasing transmission at a regional level. According to Rugarabamu, et. al. (2020), socioeconomic and cultural factors, such as large urban populations and livelihood practices play a role in outbreaks, many of which occurring in a regional area such as West Africa constitute an epidemic. Additionally, demographic factors affect knowledge of EVD, and people with the least knowledge generally are at higher risk of infection. The perfect storm of all these factors is illustrated by a claim made by WHO that about 60% of Ebola cases in Guinea during the 2014-2015 outbreaks can be attributed to traditional burial practices. This is supported by independent research by Park (2020) that funeral practices such as washing one's hands in a common bowl after touching the face of the deceased drives funeral infections.
+
+Therefore, because burial practices are hypothesized to be the largest driver of transmission, we consider a modified SEIR model that includes D for death (SEIRD). As explored by Weitz and Dushoff (2015), adding a D state leads to unidentifiability between R0 and the exponential growth rate. However, simulated models that did not add D seriously underestimated the basic reproduction number R0 value and thus a major compononent of epidemic modeling. Therefore, we decided on a SEIRD approach where there is a larger contribution to the number of people exposed from funeral related risk than non-funeral risk. 
+
+To conduct this study we relied on data collected by the World Health Organization (WHO) for the Ebola outbreaks in West Africa from 2014-2016. The data was republished on [Kaggle](kaggle.com/datasets/imdevskp/ebola-outbreak-20142016-complete-dataset), which is where we retrieved it, as it was not properly archive on WHO. We narrowed our data to confirmed cases of Ebola infection by polymerase chain reaction (PCR) testing and those presenting with symptoms. 
+
+Because the demographic factors would differ across West Africa by country, we decided to focus on the data from Guinea and Sierra Leone because the literature stated that Liberia implemented government control measures that in turn decreased transmission in all three countries. Our goal is to model the transmission dynamics of Ebola in these two countries to determine what are the parameters of a POMP model that we will propose. To inform our approach, we rely on the literature discussed above and the EDA taken below.
+
+We performed exploratory data analysis (EDA) and found cases per day were high in both countries for the first 50 days, and decreased after that point, although still remained elevated for the first 125 days. Cases peaked around day 25, which may be reflective of latent variables that lag cases that we seek model (deaths).
+
+```{r}
+sl <- read.csv('SL.csv')
+gu <- read.csv('Gu.csv')
+
+```
+
+```{r, fig.height = 4.5, fig.width = 8}
+rbind(data.frame(sl, Country = 'Sierra Leone'), data.frame(gu, Country = 'Guinea')) %>% 
+  group_by(Date) %>%
+  ggplot() +
+    facet_wrap(~Country, nrow = 2, scales = "free_y") +
+    theme_bw() +
+    geom_line(aes(Date, New_Report, color = Country), size = .6) +
+    scale_color_manual(
+      name = "ConfirmedCases by Date", values = c("#69b3a2", "#a55b6c")
+    ) +
+    guides(color = FALSE)
+```
+
+Based on our literature review and EDA, we propose the model below:
+
+![](diagram.png)
+
+# References
+
+Centers for Disease Control and Prevention. (2021, April 27). What is ebola virus disease? Centers for Disease Control and Prevention. Retrieved April 19, 2022, from https://www.cdc.gov/vhf/ebola/about.html 
+
+Weitz, J. S., & Dushoff, J. (2015). Modeling post-death transmission of Ebola: challenges for inference and opportunities for control. Scientific reports, 5, 8751. https://doi.org/10.1038/srep08751
+
+Rugarabamu, S., Mboera, L., Rweyemamu, M., Mwanyika, G., Lutwama, J., Paweska, J., &amp; Misinzo, G. (2020, March 1). Forty-two years of responding to ebola virus outbreaks in Sub-Saharan africa: A Review. BMJ Global Health. Retrieved April 19, 2022, from https://gh.bmj.com/content/5/3/e001955 
+
+PARK, C. (n.d.). Traditional funeral and burial rituals and ebola outbreaks. Journal of Health and Social Sciences. Retrieved April 19, 2022, from https://journalhss.com/wp-content/uploads/jhss_51_073-090.pdf 
+
+Stats 531 Winter 2021 project. https://ionides.github.io/531w21/final_project/project15/blinded.html
