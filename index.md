@@ -137,11 +137,7 @@ Please read the [grading policy in the syllabus](syllabus.html) before submittin
 
 * [Final review report instructions](final_project/final_review.html)
 
-<!--
-
-* [2021 final projects](final_project/index.html)
-
--->
+* [2022 final projects](final_project/index.html)
 
 * You're welcome to browse previous final projects  from [2016](http://ionides.github.io/531w16/final_project/), [2018](http://ionides.github.io/531w18/final_project/), [2020](http://ionides.github.io/531w20/final_project/) and [2021](http://ionides.github.io/531w21/final_project/).
 
