@@ -733,7 +733,7 @@ stew(file=sprintf("box_eval-%d.rda",run_level),{
   t.box <- system.time({
     if.box <- foreach(i=1:sp500_Nreps_global,
       .packages='pomp',.combine=c) %dopar% mif2(if1[[1]],
-        params=apply(sp500_box,1,function(x)runif(1,x)))
+        params=apply(sp500_box,1,function(x)runif(1,x[1],x[2])))
     L.box <- foreach(i=1:sp500_Nreps_global,
       .packages='pomp',.combine=rbind) %dopar% {
          logmeanexp(replicate(sp500_Nreps_eval, logLik(pfilter(
